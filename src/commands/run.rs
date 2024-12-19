@@ -58,20 +58,20 @@ fn enable_plugins(
             continue;
         };
         for service in services {
-            let plugin_dir = plugins_dir.join(service.plugin.clone());
+            let current_plugin_dir = plugins_dir.join(service.plugin.clone());
 
-            if !plugin_dir.exists() {
+            if !current_plugin_dir.exists() {
                 bail!(
                     "directory {} does not exist, run \"cargo build\" inside plugin directory",
-                    plugin_dir.display()
+                    current_plugin_dir.display()
                 );
             }
             plugins.entry(service.plugin.clone()).or_insert_with(|| {
-                let mut versions: Vec<_> = fs::read_dir(plugin_dir)
+                let mut versions: Vec<_> = fs::read_dir(current_plugin_dir)
                     .unwrap()
                     .map(|r| r.unwrap())
                     .collect();
-                versions.sort_by_key(|dir| dir.path());
+                versions.sort_by_key(std::fs::DirEntry::path);
                 versions
                     .last()
                     .unwrap()
@@ -85,8 +85,7 @@ fn enable_plugins(
 
     let mut queries: Vec<String> = Vec::new();
     // Queries to set migration variables, order of commands is not important
-    push_migration_envs_queries(&mut queries, topology, &plugins)
-        .context("failed to push migration variables")?;
+    push_migration_envs_queries(&mut queries, topology, &plugins);
 
     for (plugin, version) in &plugins {
         queries.push(format!(r#"CREATE PLUGIN "{plugin}" {version};"#));
@@ -134,10 +133,10 @@ fn push_migration_envs_queries(
     queries: &mut Vec<String>,
     topology: &Topology,
     plugins: &HashMap<String, String>,
-) -> Result<()> {
+) {
     info!("setting migration variables");
 
-    for (_, tier) in &topology.tiers {
+    for tier in topology.tiers.values() {
         let Some(migration_envs) = &tier.migration_envs else {
             continue;
         };
@@ -150,8 +149,6 @@ fn push_migration_envs_queries(
             }
         }
     }
-
-    Ok(())
 }
 
 fn kill_picodata_instances() -> Result<()> {
@@ -169,9 +166,9 @@ pub fn cmd(
     topology_path: &PathBuf,
     data_dir: &Path,
     disable_plugin_install: bool,
-    base_http_port: &i32,
+    base_http_port: i32,
     picodata_path: &PathBuf,
-    base_pg_port: &i32,
+    base_pg_port: i32,
     use_release: bool,
 ) -> Result<()> {
     fs::create_dir_all(data_dir).unwrap();
@@ -213,7 +210,7 @@ pub fn cmd(
             let bin_port = 3000 + instance_id;
             let http_port = base_http_port + instance_id;
             let pg_port = base_pg_port + instance_id;
-            let instance_data_dir = data_dir.join("cluster").join(format!("i_{}", instance_id));
+            let instance_data_dir = data_dir.join("cluster").join(format!("i_{instance_id}"));
 
             // TODO: make it as child processes with catch output and redirect it to main
             // output
@@ -227,34 +224,31 @@ pub fn cmd(
                     "--plugin-dir",
                     plugins_dir,
                     "--listen",
-                    &format!("127.0.0.1:{}", bin_port),
+                    &format!("127.0.0.1:{bin_port}"),
                     "--peer",
-                    &format!("127.0.0.1:{}", first_instance_bin_port),
+                    &format!("127.0.0.1:{first_instance_bin_port}"),
                     "--init-replication-factor",
                     &tier.replication_factor.to_string(),
                     "--http-listen",
-                    &format!("127.0.0.1:{}", http_port),
+                    &format!("127.0.0.1:{http_port}"),
                     "--pg-listen",
-                    &format!("127.0.0.1:{}", pg_port),
+                    &format!("127.0.0.1:{pg_port}"),
                     "--tier",
                     tier_name,
                 ])
                 .spawn()
-                .context(format!(
-                    "failed to start picodata instance: {}",
-                    instance_id
-                ))?;
+                .context(format!("failed to start picodata instance: {instance_id}"))?;
             thread::sleep(Duration::from_secs(5));
 
             // Save pid of picodata process to kill it after
             let pid = process.id();
             let pid_location = instance_data_dir.join("pid");
             let mut file = File::create(pid_location)?;
-            writeln!(file, "{}", pid)?;
+            writeln!(file, "{pid}")?;
 
             let processes_lock = Arc::clone(&get_picodata_processes());
             let mut processes = processes_lock.lock().unwrap();
-            processes.push(process)
+            processes.push(process);
         }
     }
 

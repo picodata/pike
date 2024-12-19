@@ -1,5 +1,6 @@
 mod helpers;
-use helpers::helpers::run_cluster;
+
+use helpers::run_cluster;
 use std::time::Duration;
 
 const TOTAL_INSTANCES: i32 = 4;
