@@ -34,3 +34,6 @@ log = "0.4.22"
 [[bin]]
 name = "cargo-pike"
 path = "src/main.rs"
+
+[dev-dependencies]
+constcat = "0.5.1"
