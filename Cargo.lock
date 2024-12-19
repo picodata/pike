@@ -179,6 +179,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "constcat"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4938185353434999ef52c81753c8cca8955ed38042fc29913db3751916f3b7ab"
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -594,6 +600,7 @@ dependencies = [
  "anyhow",
  "clap",
  "colog",
+ "constcat",
  "ctrlc",
  "flate2",
  "include_dir",

@@ -13,12 +13,12 @@ fn apply_service_config(
     plugin_name: &str,
     plugin_version: &str,
     service_name: &str,
-    config: HashMap<String, Value>,
+    config: &HashMap<String, Value>,
     admin_socket: &Path,
 ) -> Result<()> {
     let mut queries: Vec<String> = Vec::new();
 
-    for (key, value) in &config {
+    for (key, value) in config {
         let value = serde_json::to_string(&value)
             .context(format!("failed to serialize the string with key {key}"))?;
         queries.push(format!(
@@ -83,12 +83,12 @@ pub fn cmd(config_path: &Path, data_dir: &Path) -> Result<()> {
             &cargo_manifest.package.name,
             &cargo_manifest.package.version,
             &service_name,
-            service_config,
+            &service_config,
             &admin_socket,
         )
         .context(format!(
             "failed to apply service config for service {service_name}"
-        ))?
+        ))?;
     }
 
     Ok(())
