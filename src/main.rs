@@ -129,21 +129,21 @@ fn main() -> Result<()> {
             &topology,
             &data_dir,
             disable_plugin_install,
-            &base_http_port,
+            base_http_port,
             &picodata_path,
-            &base_pg_port,
+            base_pg_port,
             release,
         )
         .context("failed to execute Run command")?,
         Command::Stop { data_dir } => {
-            commands::stop::cmd(&data_dir).context("failed to execute \"stop\" command")?
+            commands::stop::cmd(&data_dir).context("failed to execute \"stop\" command")?;
         }
         Command::Clean { data_dir } => {
-            commands::clean::cmd(&data_dir).context("failed to execute \"clean\" command")?
+            commands::clean::cmd(&data_dir).context("failed to execute \"clean\" command")?;
         }
         Command::Plugin { command } => match command {
             Plugin::Pack { debug } => {
-                commands::plugin::pack::cmd(debug).context("failed to execute \"pack\" command")?
+                commands::plugin::pack::cmd(debug).context("failed to execute \"pack\" command")?;
             }
             Plugin::New {
                 path,

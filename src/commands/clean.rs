@@ -9,7 +9,7 @@ pub fn cmd(data_dir: &Path) -> Result<()> {
             .context(format!("failed to remove directory {}", data_dir.display()))?;
         info!("Successfully removed : {}", data_dir.to_string_lossy());
     } else {
-        warn!("Data directory does not exist")
+        warn!("Data directory does not exist");
     }
 
     Ok(())

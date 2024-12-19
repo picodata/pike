@@ -43,7 +43,7 @@ jobs:
       - name: Clippy
         uses: clechasseur/rs-clippy-check@v3
         with:
-          args: --all-features --bins --examples --tests --benches -- -D warnings
+          args: --all-features --bins --examples --tests --benches -- -W clippy::all -W clippy::pedantic -D warnings
 
   tests:
     needs: pre_job
