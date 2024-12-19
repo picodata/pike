@@ -65,7 +65,7 @@ pub fn cmd(pack_debug: bool) -> Result<()> {
     )
     .context("failed to parse Cargo.toml")?;
 
-    let normalized_package_name = cargo_manifest.package.name.replace("-", "_");
+    let normalized_package_name = cargo_manifest.package.name.replace('-', "_");
 
     let compressed_file = File::create(format!(
         "target/{}-{}.tar.gz",
@@ -77,7 +77,7 @@ pub fn cmd(pack_debug: bool) -> Result<()> {
 
     let lib_name = format!("lib{normalized_package_name}.{LIB_EXT}");
     let mut lib_file =
-        File::open(build_dir.join(&lib_name)).context(format!("failed to open {}", lib_name))?;
+        File::open(build_dir.join(&lib_name)).context(format!("failed to open {lib_name}"))?;
 
     let mut manifest_file =
         File::open(build_dir.join("manifest.yaml")).context("failed to open file manifest.yaml")?;

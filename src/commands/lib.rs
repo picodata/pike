@@ -6,6 +6,7 @@ pub enum BuildType {
     Debug,
 }
 
+#[allow(clippy::needless_pass_by_value)]
 pub fn cargo_build(build_type: BuildType) -> Result<()> {
     let output = match build_type {
         BuildType::Release => Command::new("cargo")

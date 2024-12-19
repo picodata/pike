@@ -4,7 +4,7 @@ use std::{
     ffi::OsStr,
     fs::{self, File},
     io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     process::Command,
 };
 
@@ -71,14 +71,14 @@ where
     Ok(())
 }
 
-fn workspace_init(root_path: &PathBuf, project_name: &str) -> Result<()> {
+fn workspace_init(root_path: &Path, project_name: &str) -> Result<()> {
     let cargo_toml_path = root_path.join("Cargo.toml");
 
     let mut cargo_toml =
         File::create(cargo_toml_path).context("failed to create Cargo.toml for workspace")?;
 
     cargo_toml
-        .write_all(format!("[workspace]\nmembers = [\n  \"{}\",\n]", project_name).as_bytes())?;
+        .write_all(format!("[workspace]\nmembers = [\n  \"{project_name}\",\n]").as_bytes())?;
 
     fs::copy(
         root_path.join(project_name).join("topology.toml"),
@@ -114,7 +114,7 @@ pub fn cmd(path: Option<&Path>, without_git: bool, init_workspace: bool) -> Resu
     let plugin_path = if init_workspace {
         path.join(project_name)
     } else {
-        path.to_path_buf()
+        path.clone()
     };
 
     std::fs::create_dir_all(&plugin_path)
