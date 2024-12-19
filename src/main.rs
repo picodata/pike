@@ -23,16 +23,16 @@ enum Command {
     Run {
         #[arg(short, long, value_name = "TOPOLOGY", default_value = "topology.toml")]
         topology: PathBuf,
-        #[arg(short, long, value_name = "DATA_DIR", default_value = "./tmp")]
+        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
         /// Disable the automatic installation of plugins
         #[arg(long)]
         disable_install_plugins: bool,
         /// Base http port for picodata instances
-        #[arg(short, long, default_value = "8000")]
+        #[arg(long, default_value = "8000")]
         base_http_port: i32,
         /// Port for Pgproto server
-        #[arg(short, long, default_value = "5432")]
+        #[arg(long, default_value = "5432")]
         base_pg_port: i32,
         /// Specify path to picodata binary
         #[arg(long, value_name = "BINARY_PATH", default_value = "picodata")]
@@ -44,12 +44,12 @@ enum Command {
     },
     /// Stop Picodata cluster
     Stop {
-        #[arg(short, long, value_name = "DATA_DIR", default_value = "./tmp")]
+        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
     },
     /// Remove all data files of previous cluster run
     Clean {
-        #[arg(short, long, value_name = "DATA_DIR", default_value = "./tmp")]
+        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
     },
     /// Helpers for work with plugins
@@ -80,7 +80,7 @@ enum Plugin {
         #[arg(long)]
         without_git: bool,
         /// Initiate plugin as a subcrate of workspace
-        #[arg(long, short)]
+        #[arg(long)]
         workspace: bool,
     },
     /// Create a new Picodata plugin in an existing directory
@@ -89,7 +89,7 @@ enum Plugin {
         #[arg(long)]
         without_git: bool,
         /// Initiate plugin as a subcrate of workspace
-        #[arg(long, short)]
+        #[arg(long)]
         workspace: bool,
     },
 }
@@ -107,7 +107,7 @@ enum Config {
         )]
         config_path: PathBuf,
         /// Path to data directory of the cluster
-        #[arg(short, long, value_name = "DATA_DIR", default_value = "./tmp")]
+        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
     },
 }
