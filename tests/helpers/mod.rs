@@ -1,3 +1,4 @@
+use constcat::concat;
 use log::info;
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Write};
@@ -10,8 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub const PLUGIN_DIR: &str = "./tests/test_plugin/";
-pub const TESTS_DIR: &str = "./tests";
+pub const TESTS_DIR: &str = "./tests/tmp/";
+pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, "test_plugin/");
 
 pub struct Cluster {}
 
@@ -164,7 +165,7 @@ pub fn await_picodata_admin(timeout: Duration) -> Result<Child, std::io::Error> 
 
         let picodata_admin = Command::new("picodata")
             .arg("admin")
-            .arg("./tests/test_plugin/tmp/cluster/i_1/admin.sock")
+            .arg(PLUGIN_DIR.to_string() + "tmp/cluster/i_1/admin.sock")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn();

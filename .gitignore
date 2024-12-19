@@ -1,3 +1,4 @@
 /target
-tmp
-local
+/local
+/tests/tmp/*
+!/tests/tmp/.keep
