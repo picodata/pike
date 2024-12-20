@@ -31,6 +31,10 @@ anyhow = "1.0"
 colog = "1.3.0"
 log = "0.4.22"
 
+[lib]
+name = "pike"
+path = "src/lib.rs"
+
 [[bin]]
 name = "cargo-pike"
 path = "src/main.rs"
