@@ -170,6 +170,7 @@ pub fn cmd(
     picodata_path: &PathBuf,
     base_pg_port: i32,
     use_release: bool,
+    target_dir: &Path,
 ) -> Result<()> {
     fs::create_dir_all(data_dir).unwrap();
 
@@ -196,10 +197,10 @@ pub fn cmd(
 
     let plugins_dir = if use_release {
         cargo_build(lib::BuildType::Release)?;
-        "target/release"
+        target_dir.join("release")
     } else {
         cargo_build(lib::BuildType::Debug)?;
-        "target/debug"
+        target_dir.join("debug")
     };
 
     let first_instance_bin_port = 3001;
@@ -222,7 +223,7 @@ pub fn cmd(
                         .to_str()
                         .context("Invalid data dir path")?,
                     "--plugin-dir",
-                    plugins_dir,
+                    plugins_dir.to_str().unwrap_or("target"),
                     "--listen",
                     &format!("127.0.0.1:{bin_port}"),
                     "--peer",
@@ -253,7 +254,7 @@ pub fn cmd(
     }
 
     if !disable_plugin_install {
-        enable_plugins(topology, data_dir, picodata_path, Path::new(plugins_dir))
+        enable_plugins(topology, data_dir, picodata_path, &plugins_dir)
             .inspect_err(|_| {
                 kill_picodata_instances().unwrap_or_else(|e| {
                     error!("failed to kill picodata instances: {:#}", e);
