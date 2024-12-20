@@ -5,8 +5,13 @@ edition = "2021"
 publish = false
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
 picodata-plugin = "24.6.1"
+serde = { version = "1", features = ["derive"] }
+log = "0.4"
+
+[dev-dependencies]
+picodata-pike = { path = "/home/lowit/_work/picodata/cargo-pike" } # TODO: change after publish
+reqwest = { version = "0.12", features = ["blocking"] }
 
 [build-dependencies]
 liquid = "0.26"

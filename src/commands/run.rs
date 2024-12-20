@@ -162,7 +162,8 @@ fn kill_picodata_instances() -> Result<()> {
     Ok(())
 }
 
-pub fn cmd(
+#[allow(clippy::too_many_arguments)]
+pub fn cluster(
     topology_path: &PathBuf,
     data_dir: &Path,
     disable_plugin_install: bool,
@@ -170,21 +171,8 @@ pub fn cmd(
     picodata_path: &PathBuf,
     base_pg_port: i32,
     use_release: bool,
+    target_dir: &Path,
 ) -> Result<()> {
-    fs::create_dir_all(data_dir).unwrap();
-
-    {
-        ctrlc::set_handler(move || {
-            info!("{}", "received Ctrl+C. Shutting down ...");
-
-            kill_picodata_instances()
-                .unwrap_or_else(|e| error!("failed to kill picodata instances: {:#}", e));
-
-            exit(0);
-        })
-        .context("failed to set Ctrl+c handler")?;
-    }
-
     let topology: &Topology = &toml::from_str(
         &fs::read_to_string(topology_path)
             .context(format!("failed to read {}", topology_path.display()))?,
@@ -196,10 +184,10 @@ pub fn cmd(
 
     let plugins_dir = if use_release {
         cargo_build(lib::BuildType::Release)?;
-        "target/release"
+        target_dir.join("release")
     } else {
         cargo_build(lib::BuildType::Debug)?;
-        "target/debug"
+        target_dir.join("debug")
     };
 
     let first_instance_bin_port = 3001;
@@ -222,7 +210,7 @@ pub fn cmd(
                         .to_str()
                         .context("Invalid data dir path")?,
                     "--plugin-dir",
-                    plugins_dir,
+                    plugins_dir.to_str().unwrap_or("target"),
                     "--listen",
                     &format!("127.0.0.1:{bin_port}"),
                     "--peer",
@@ -253,14 +241,53 @@ pub fn cmd(
     }
 
     if !disable_plugin_install {
-        enable_plugins(topology, data_dir, picodata_path, Path::new(plugins_dir))
+        enable_plugins(topology, data_dir, picodata_path, &plugins_dir)
             .inspect_err(|_| {
                 kill_picodata_instances().unwrap_or_else(|e| {
                     error!("failed to kill picodata instances: {:#}", e);
                 });
             })
             .context("failed to enable plugins")?;
+    };
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn cmd(
+    topology_path: &PathBuf,
+    data_dir: &Path,
+    disable_plugin_install: bool,
+    base_http_port: i32,
+    picodata_path: &PathBuf,
+    base_pg_port: i32,
+    use_release: bool,
+    target_dir: &Path,
+) -> Result<()> {
+    fs::create_dir_all(data_dir).unwrap();
+
+    {
+        ctrlc::set_handler(move || {
+            info!("{}", "received Ctrl+C. Shutting down ...");
+
+            kill_picodata_instances()
+                .unwrap_or_else(|e| error!("failed to kill picodata instances: {:#}", e));
+
+            exit(0);
+        })
+        .context("failed to set Ctrl+c handler")?;
     }
+
+    cluster(
+        topology_path,
+        data_dir,
+        disable_plugin_install,
+        base_http_port,
+        picodata_path,
+        base_pg_port,
+        use_release,
+        target_dir,
+    )?;
 
     // Run in the loop until the child processes are killed
     // with cargo stop or Ctrl+C signal is recieved

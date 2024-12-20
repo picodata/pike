@@ -40,6 +40,9 @@ enum Command {
         /// Run release version of plugin
         #[arg(long)]
         release: bool,
+        /// Change target folder
+        #[arg(long, value_name = "TARGET_DIR", default_value = "target")]
+        target_dir: PathBuf,
         // TODO: add demon flag, if true then set output logs to file and release stdin
     },
     /// Stop Picodata cluster
@@ -71,6 +74,9 @@ enum Plugin {
         /// Pack the archive with debug version of plugin
         #[arg(long)]
         debug: bool,
+        /// Change target folder
+        #[arg(long, value_name = "TARGET_DIR", default_value = "target")]
+        target_dir: PathBuf,
     },
     /// Create a new Picodata plugin
     New {
@@ -125,6 +131,7 @@ fn main() -> Result<()> {
             picodata_path,
             base_pg_port,
             release,
+            target_dir,
         } => commands::run::cmd(
             &topology,
             &data_dir,
@@ -133,6 +140,7 @@ fn main() -> Result<()> {
             &picodata_path,
             base_pg_port,
             release,
+            &target_dir,
         )
         .context("failed to execute Run command")?,
         Command::Stop { data_dir } => {
@@ -142,8 +150,9 @@ fn main() -> Result<()> {
             commands::clean::cmd(&data_dir).context("failed to execute \"clean\" command")?;
         }
         Command::Plugin { command } => match command {
-            Plugin::Pack { debug } => {
-                commands::plugin::pack::cmd(debug).context("failed to execute \"pack\" command")?;
+            Plugin::Pack { debug, target_dir } => {
+                commands::plugin::pack::cmd(debug, &target_dir)
+                    .context("failed to execute \"pack\" command")?;
             }
             Plugin::New {
                 path,

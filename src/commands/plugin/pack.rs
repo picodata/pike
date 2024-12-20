@@ -28,7 +28,7 @@ const LIB_EXT: &str = "so";
 #[cfg(target_os = "macos")]
 const LIB_EXT: &str = "dylib";
 
-pub fn cmd(pack_debug: bool) -> Result<()> {
+pub fn cmd(pack_debug: bool, target_dir: &Path) -> Result<()> {
     let root_dir = env::current_dir()?;
     let plugin_name = &root_dir
         .file_name()
@@ -38,10 +38,10 @@ pub fn cmd(pack_debug: bool) -> Result<()> {
 
     let build_dir = if pack_debug {
         cargo_build(BuildType::Debug).context("building release version of plugin")?;
-        Path::new(&root_dir).join("target").join("release")
+        Path::new(&root_dir).join(target_dir).join("release")
     } else {
         cargo_build(BuildType::Release).context("building debug version of plugin")?;
-        Path::new(&root_dir).join("target").join("debug")
+        Path::new(&root_dir).join(target_dir).join("debug")
     };
 
     let mut manifest_dir = root_dir.clone();
