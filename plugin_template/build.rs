@@ -56,17 +56,19 @@ fn main() {
         .expect("invalid manifest template");
 
     let migrations_dir = crate_dir.join("migrations");
-    let migrations: Vec<String> = fs::read_dir(&migrations_dir)
-        .unwrap()
-        .map(|path| {
-            path.unwrap()
-                .path()
-                .strip_prefix(crate_dir)
-                .unwrap()
-                .to_string_lossy()
-                .into()
-        })
-        .collect();
+    let migrations: Vec<String> = match fs::read_dir(&migrations_dir) {
+        Ok(dir) => dir
+            .map(|path| {
+                path.unwrap()
+                    .path()
+                    .strip_prefix(crate_dir)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into()
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    };
 
     let pkg_version = env::var("CARGO_PKG_VERSION").unwrap();
 
@@ -79,9 +81,11 @@ fn main() {
     let out_manifest_path = Path::new(&out_dir).join("manifest.yaml");
     fs::write(&out_manifest_path, template.render(&template_ctx).unwrap()).unwrap();
 
-    let mut cp_opts = CopyOptions::new();
-    cp_opts.overwrite = true;
-    dir::copy(migrations_dir, &out_dir, &cp_opts).unwrap();
+    if !migrations.is_empty() {
+        let mut cp_opts = CopyOptions::new();
+        cp_opts.overwrite = true;
+        dir::copy(migrations_dir, &out_dir, &cp_opts).unwrap();
+    }
 
     // create symbolic link
     let pkg_name = env::var("CARGO_PKG_NAME").unwrap();
@@ -91,10 +95,14 @@ fn main() {
     std::os::unix::fs::symlink(out_manifest_path, plugin_path.join("manifest.yaml")).unwrap();
     let lib_name = format!("lib{}.{}", pkg_name, LIB_EXT);
     std::os::unix::fs::symlink(out_dir.join(&lib_name), plugin_path.join(lib_name)).unwrap();
-    std::os::unix::fs::symlink(out_dir.join("migrations"), plugin_path.join("migrations")).unwrap();
 
-    for m in &migrations {
-        println!("cargo::rerun-if-changed={m}");
+    if !migrations.is_empty() {
+        std::os::unix::fs::symlink(out_dir.join("migrations"), plugin_path.join("migrations"))
+            .unwrap();
+
+        for m in &migrations {
+            println!("cargo::rerun-if-changed={m}");
+        }
     }
 
     println!("cargo::rerun-if-changed={MANIFEST_TEMPLATE_NAME}");
