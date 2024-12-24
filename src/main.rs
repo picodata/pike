@@ -78,6 +78,11 @@ enum Plugin {
         #[arg(long, value_name = "TARGET_DIR", default_value = "target")]
         target_dir: PathBuf,
     },
+    /// Alias for cargo build command
+    Build {
+        #[arg(long, short)]
+        release: bool,
+    },
     /// Create a new Picodata plugin
     New {
         #[arg(value_name = "path")]
@@ -153,6 +158,10 @@ fn main() -> Result<()> {
             Plugin::Pack { debug, target_dir } => {
                 commands::plugin::pack::cmd(debug, &target_dir)
                     .context("failed to execute \"pack\" command")?;
+            }
+            Plugin::Build { release } => {
+                commands::plugin::build::cmd(release)
+                    .context("failed to execute \"build\" command")?;
             }
             Plugin::New {
                 path,

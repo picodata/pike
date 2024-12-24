@@ -190,6 +190,18 @@ cargo pike plugin pack
 - `--debug` - Сборка и упаковка debug-версии плагина
 - `--target-dir <TARGET_DIR>` - Директория собранных бинарных файлов. Значение по умолчанию: `target`
 
+### `plugin build`
+
+Альяс для команды `cargo build`.
+
+```bash
+cargo pike plugin build
+```
+
+#### Доступные опции
+
+- `--release` - Сборка release-версии плагина
+
 ### `config apply`
 
 Применение конфигурации сервисов плагина к запущенному командой `run` кластеру пикодаты.
