@@ -10,7 +10,7 @@ serde = { version = "1", features = ["derive"] }
 log = "0.4"
 
 [dev-dependencies]
-picodata-pike = { path = "/home/lowit/_work/picodata/cargo-pike" } # TODO: change after publish
+picodata-pike = { git = "https://github.com/picodata/pike.git", branch = "template_tests" } # TODO: change after publish on crates.io
 reqwest = { version = "0.12", features = ["blocking"] }
 
 [build-dependencies]
