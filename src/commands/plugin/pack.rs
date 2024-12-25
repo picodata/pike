@@ -38,10 +38,10 @@ pub fn cmd(pack_debug: bool, target_dir: &Path) -> Result<()> {
 
     let build_dir = if pack_debug {
         cargo_build(BuildType::Debug).context("building release version of plugin")?;
-        Path::new(&root_dir).join(target_dir).join("release")
+        Path::new(&root_dir).join(target_dir).join("debug")
     } else {
         cargo_build(BuildType::Release).context("building debug version of plugin")?;
-        Path::new(&root_dir).join(target_dir).join("debug")
+        Path::new(&root_dir).join(target_dir).join("release")
     };
 
     let mut manifest_dir = root_dir.clone();
