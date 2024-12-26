@@ -30,6 +30,7 @@ ctrlc = "3.2"
 anyhow = "1.0"
 colog = "1.3.0"
 log = "0.4.22"
+fs_extra = "1"
 
 [lib]
 name = "pike"
