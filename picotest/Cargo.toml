@@ -1,0 +1,2 @@
+[workspace]
+members = ["picotest", "picotest_macros", "picotest_helpers"]

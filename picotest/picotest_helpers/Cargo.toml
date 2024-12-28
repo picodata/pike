@@ -1,0 +1,8 @@
+[package]
+name = "picotest_helpers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+constcat = "0.5.1"
+log = "0.4.22"

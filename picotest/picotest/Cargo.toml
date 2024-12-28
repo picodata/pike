@@ -1,0 +1,10 @@
+[package]
+name = "picotest"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+picotest_macros = { path = "../picotest_macros" }
+picotest_helpers = { path = "../picotest_helpers" }
+rstest = "0.23.0"
+constcat = "0.5.1"
