@@ -6,7 +6,7 @@ fn recurse_use_item<'a>(use_tree: &'a UseTree, tokens: &mut VecDeque<&str>) -> O
     match use_tree {
         UseTree::Path(use_stmt_third) => {
             if use_stmt_third.ident == curr_ident {
-                recurse_use_item(&*use_stmt_third.tree, tokens)
+                recurse_use_item(&use_stmt_third.tree, tokens)
             } else {
                 None
             }

@@ -6,5 +6,9 @@ edition = "2021"
 [dependencies]
 picotest_macros = { path = "../picotest_macros" }
 picotest_helpers = { path = "../picotest_helpers" }
+
+
+[dev-dependencies]
+uuid = { version = "1.11.1", features = ["v4"] }
 rstest = "0.23.0"
 constcat = "0.5.1"

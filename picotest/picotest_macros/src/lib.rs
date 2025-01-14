@@ -1,18 +1,48 @@
 mod utils;
 
-use crate::utils::traverse_use_item;
+use darling::ast::NestedMeta;
+use darling::{Error, FromMeta};
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, parse_quote, Attribute, Item, Stmt};
+use utils::traverse_use_item;
+
+fn plugin_path_default() -> String {
+    ".".to_string()
+}
+#[derive(Debug, FromMeta)]
+struct PluginCfg {
+    #[darling(default = "plugin_path_default")]
+    path: String,
+}
 
 #[proc_macro_attribute]
-pub fn picotest(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn picotest(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as Item);
+
+    let attr = match NestedMeta::parse_meta_list(attr.into()) {
+        Ok(v) => v,
+        Err(e) => {
+            return TokenStream::from(Error::from(e).write_errors());
+        }
+    };
+
+    let cfg = match PluginCfg::from_list(&attr) {
+        Ok(v) => v,
+        Err(e) => {
+            return TokenStream::from(e.write_errors());
+        }
+    };
+
+    let path = cfg.path;
+
     let rstest_macro: Attribute = parse_quote! { #[rstest] };
     let input = match input {
         Item::Fn(mut func) => {
             let run_cluster: Stmt = parse_quote! {
-                let mut cluster = picotest_helpers::run_cluster().unwrap();
+                let mut cluster = picotest_helpers::run_cluster(
+                    #path,
+                ).unwrap();
             };
 
             func.attrs.push(rstest_macro.clone());
@@ -26,7 +56,7 @@ pub fn picotest(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             let run_cluster: Stmt = parse_quote! {
                 let mut cluster = CLUSTER.get_or_init(|| {
-                    picotest_helpers::run_cluster().unwrap()
+                    picotest_helpers::run_cluster(#path).unwrap()
                 });
             };
 
@@ -146,7 +176,6 @@ pub fn picotest(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
             m.content = Some((brace, use_content));
             Item::Mod(m)
-            // TokenStream::from(quote! (#input))
         }
         _ => {
             panic!("The picotest macro attribute is only valid when called on a function.");
