@@ -1,2 +1,10 @@
 [workspace]
-members = ["picotest", "picotest_macros", "picotest_helpers"]
+members = [
+    "picotest", 
+    "picotest_macros", 
+    "picotest_helpers", 
+]
+
+exclude = [
+    "tmp/test_plugin"
+]

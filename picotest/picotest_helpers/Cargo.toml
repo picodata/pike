@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 constcat = "0.5.1"
 log = "0.4.22"
+rand = "0.8.5"
+uuid = { version = "1.11.1", features = ["v4"] }
