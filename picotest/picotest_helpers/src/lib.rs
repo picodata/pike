@@ -20,6 +20,7 @@ pub struct Cluster {
     pub uuid: Uuid,
     pub path: String,
     pub data_dir: String,
+    pub timeout: u8,
 }
 
 impl Drop for Cluster {
@@ -29,11 +30,12 @@ impl Drop for Cluster {
 }
 
 impl Cluster {
-    pub fn new(path: String, data_dir: String) -> Self {
+    pub fn new(path: String, data_dir: String, timeout: u8) -> Self {
         Self {
             uuid: Uuid::new_v4(),
             path,
             data_dir,
+            timeout,
         }
     }
 
@@ -95,10 +97,11 @@ impl Cluster {
 
             picodata_admin.kill().unwrap();
             if can_connect && plugin_ready {
+                thread::sleep(Duration::from_secs(self.timeout.into()));
                 return Ok(self);
             }
 
-            thread::sleep(Duration::from_secs(5));
+            thread::sleep(Duration::from_secs(10));
         }
     }
 
@@ -166,9 +169,9 @@ impl Cluster {
     }
 }
 
-pub fn run_cluster(path: &str) -> Result<Cluster, Error> {
+pub fn run_cluster(path: &str, timeout: u8) -> Result<Cluster, Error> {
     let data_dir = tmp_dir();
-    let cluster = Cluster::new(path.to_owned(), data_dir.to_owned());
+    let cluster = Cluster::new(path.to_owned(), data_dir.to_owned(), timeout);
     cluster.run()
 }
 

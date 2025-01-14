@@ -10,10 +10,15 @@ use utils::traverse_use_item;
 fn plugin_path_default() -> String {
     ".".to_string()
 }
+fn plugin_timeout_default() -> u8 {
+    5
+}
 #[derive(Debug, FromMeta)]
 struct PluginCfg {
     #[darling(default = "plugin_path_default")]
     path: String,
+    #[darling(default = "plugin_timeout_default")]
+    timeout: u8,
 }
 
 #[proc_macro_attribute]
@@ -35,6 +40,7 @@ pub fn picotest(attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     let path = cfg.path;
+    let timeout = cfg.timeout;
 
     let rstest_macro: Attribute = parse_quote! { #[rstest] };
     let input = match input {
@@ -42,6 +48,7 @@ pub fn picotest(attr: TokenStream, item: TokenStream) -> TokenStream {
             let run_cluster: Stmt = parse_quote! {
                 let mut cluster = picotest_helpers::run_cluster(
                     #path,
+                    #timeout,
                 ).unwrap();
             };
 
@@ -56,7 +63,7 @@ pub fn picotest(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             let run_cluster: Stmt = parse_quote! {
                 let mut cluster = CLUSTER.get_or_init(|| {
-                    picotest_helpers::run_cluster(#path).unwrap()
+                    picotest_helpers::run_cluster(#path, #timeout).unwrap()
                 });
             };
 
