@@ -46,7 +46,7 @@ pub fn picotest(attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = match input {
         Item::Fn(mut func) => {
             let run_cluster: Stmt = parse_quote! {
-                let mut cluster = picotest_helpers::run_cluster(
+                let mut cluster = picotest::run_cluster(
                     #path,
                     #timeout,
                 ).unwrap();
@@ -63,7 +63,7 @@ pub fn picotest(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             let run_cluster: Stmt = parse_quote! {
                 let mut cluster = CLUSTER.get_or_init(|| {
-                    picotest_helpers::run_cluster(#path, #timeout).unwrap()
+                    picotest::run_cluster(#path, #timeout).unwrap()
                 });
             };
 
@@ -144,7 +144,7 @@ pub fn picotest(attr: TokenStream, item: TokenStream) -> TokenStream {
 
             let mut use_content = vec![
                 parse_quote!(
-                    use picotest_helpers::Cluster;
+                    use picotest::Cluster;
                 ),
                 parse_quote!(
                     use rstest::*;
