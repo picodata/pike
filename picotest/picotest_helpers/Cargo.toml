@@ -1,0 +1,9 @@
+[package]
+name = "picotest_helpers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+log = "0.4.22"
+rand = "0.8.5"
+uuid = { version = "1.11.1", features = ["v4"] }
