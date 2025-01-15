@@ -94,3 +94,70 @@ mod test_mod {
 
 * path - путь до дирректории плагина
 * timeout - выждать timeout прежде чем запустить тест 
+
+
+## Пользовательские хуки
+
+Picotest поддерживает работу с хуками `before_all` и `after_all`
+Для использования добавьте в свой `Cargo.toml` файл:
+```toml
+[dev-dependencies]
+test-env-helpers = "0.2.2"
+```
+
+Пример:
+```rust
+use picotest::picotest;
+use test_env_helpers::{after_all, before_all};
+
+#[picotest]
+#[before_all]
+#[after_all]
+mod test_mod {
+
+    fn before_all() {
+        todo!()
+    }
+
+    fn after_all() {
+        todo!()
+    }
+
+    #[fixture]
+    fn foo() -> String {
+        "foo".to_string()
+    }
+
+    #[fixture]
+    fn bar() -> String {
+        "bar".to_string()
+    }
+
+    fn test_foo(foo: String) {
+        assert_eq!(foo, "foo".to_string());
+    }
+
+    fn test_bar(bar: String) {
+        assert_eq!(bar, "bar".to_string());
+    }
+
+    fn test_foo_bar(foo: String, bar: String) {
+        assert_ne!(foo, bar);
+    }
+}
+```
+
+## Использование без макроса
+
+Picotest позволяет создавать / удалять кластер без использования макроса `#[picotest]`
+
+```rust
+use rstest::rstest;
+
+#[rstest]
+fn test_without_picotest_macro() {
+    let cluster = picotest::run_cluster(".", 0);
+    assert!(cluster.is_ok());
+    assert!(cluster.is_ok_and(|cluster| cluster.path == "."))
+}
+```
