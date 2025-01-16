@@ -5,6 +5,7 @@ use std::{
     collections::HashMap,
     fs,
     io::Write,
+    os::unix::process::CommandExt,
     path::Path,
     process::{Command, Stdio},
 };
@@ -36,6 +37,7 @@ fn apply_service_config(
             )
             .stdout(Stdio::null())
             .stdin(Stdio::piped())
+            .process_group(0)
             .spawn()
             .context("failed to run picodata admin")?;
 

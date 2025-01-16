@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use std::io::{BufRead, BufReader, Read};
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 
 pub enum BuildType {
@@ -17,6 +18,7 @@ pub fn cargo_build(build_type: BuildType) -> Result<()> {
     let mut child = Command::new("cargo")
         .args(args)
         .stdout(Stdio::piped())
+        .process_group(0)
         .spawn()
         .context("running cargo build")?;
 

@@ -2,6 +2,7 @@ use constcat::concat;
 use log::info;
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::process::CommandExt;
 use std::thread;
 use std::{
     fs::{self},
@@ -131,6 +132,7 @@ where
         .arg("pike")
         .args(args)
         .current_dir(current_dir)
+        .process_group(0)
         .spawn()
 }
 
@@ -168,6 +170,7 @@ pub fn await_picodata_admin(timeout: Duration) -> Result<Child, std::io::Error> 
             .arg(PLUGIN_DIR.to_string() + "tmp/cluster/i_1/admin.sock")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .process_group(0)
             .spawn();
 
         match picodata_admin {

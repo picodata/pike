@@ -4,6 +4,7 @@ use log::{error, info};
 use serde::Deserialize;
 use std::fs::File;
 use std::io::Write;
+use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{exit, Child, Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -114,6 +115,7 @@ fn enable_plugins(
             .arg("admin")
             .arg(admin_soket.to_str().unwrap())
             .stdin(Stdio::piped())
+            .process_group(0)
             .spawn()
             .context("failed to spawn child proccess of picodata admin")?;
 
@@ -149,17 +151,6 @@ fn push_migration_envs_queries(
             }
         }
     }
-}
-
-fn kill_picodata_instances() -> Result<()> {
-    let processes_lock = Arc::clone(&get_picodata_processes());
-    let mut processes = processes_lock.lock().unwrap();
-
-    for mut process in processes.drain(..) {
-        process.kill()?;
-    }
-
-    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -224,6 +215,7 @@ pub fn cluster(
                     "--tier",
                     tier_name,
                 ])
+                .process_group(0)
                 .spawn()
                 .context(format!("failed to start picodata instance: {instance_id}"))?;
             thread::sleep(Duration::from_secs(5));
@@ -242,11 +234,6 @@ pub fn cluster(
 
     if !disable_plugin_install {
         enable_plugins(topology, data_dir, picodata_path, &plugins_dir)
-            .inspect_err(|_| {
-                kill_picodata_instances().unwrap_or_else(|e| {
-                    error!("failed to kill picodata instances: {:#}", e);
-                });
-            })
             .context("failed to enable plugins")?;
     };
 
@@ -269,9 +256,6 @@ pub fn cmd(
     {
         ctrlc::set_handler(move || {
             info!("{}", "received Ctrl+C. Shutting down ...");
-
-            kill_picodata_instances()
-                .unwrap_or_else(|e| error!("failed to kill picodata instances: {:#}", e));
 
             exit(0);
         })
