@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use std::{env, path::PathBuf};
+use nix::unistd::{fork, ForkResult};
+use std::{env, path::PathBuf, process, thread, time::Duration};
 
 mod commands;
+
+const CK_CHECK_PARRENT_INTERVAL_SEC: u64 = 3;
 
 /// A helper utility to work with Picodata plugins.
 #[derive(Parser)]
@@ -123,7 +126,42 @@ enum Config {
     },
 }
 
+/// Separated supervisor process to kill child processes if the parent is dead.
+///
+/// # Safety
+///
+/// This function is safe because it uses safety functions from `libc` without side effects.
+fn child_killer(master_pid: u32) {
+    unsafe {
+        libc::setsid();
+    }
+
+    let master_pid = i32::try_from(master_pid).expect("Master PID to big");
+
+    loop {
+        let ret = unsafe { libc::kill(master_pid, 0) };
+        if ret != 0 {
+            unsafe { libc::killpg(master_pid, libc::SIGKILL) };
+            break;
+        }
+
+        thread::sleep(Duration::from_secs(CK_CHECK_PARRENT_INTERVAL_SEC));
+    }
+
+    process::exit(0)
+}
+
 fn main() -> Result<()> {
+    let self_pid = std::process::id();
+
+    unsafe {
+        match fork() {
+            Ok(ForkResult::Parent { .. }) => (),
+            Ok(ForkResult::Child) => child_killer(self_pid),
+            Err(_) => log::warn!("Error run supervisor process"),
+        }
+    }
+
     colog::init();
     let cli = Cli::parse_from(env::args().skip(1));
 

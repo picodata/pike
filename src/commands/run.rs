@@ -123,6 +123,11 @@ fn enable_plugins(
                 .write_all(query.as_bytes())
                 .context("failed to send plugin installation queries")?;
         }
+
+        picodata_admin
+            .wait()
+            .context("failed to wait for picodata admin")?;
+
         thread::sleep(Duration::from_secs(3));
     }
 

@@ -48,6 +48,10 @@ fn apply_service_config(
                 .write_all(query.as_bytes())
                 .context("failed to push queries into picodata admin")?;
         }
+
+        picodata_admin
+            .wait()
+            .context("failed to wait for picodata admin")?;
     }
 
     Ok(())
