@@ -14,16 +14,22 @@ use std::{
 pub const TESTS_DIR: &str = "./tests/tmp/";
 pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, "test_plugin/");
 
-pub struct Cluster {}
+pub struct Cluster {
+    run_handler: Option<Child>,
+}
 
 impl Drop for Cluster {
     fn drop(&mut self) {
-        run_pike(vec!["stop"], PLUGIN_DIR).unwrap();
+        let mut child = run_pike(vec!["stop"], PLUGIN_DIR).unwrap();
+        child.wait().unwrap();
+        if let Some(ref mut run_handler) = self.run_handler {
+            run_handler.wait().unwrap();
+        }
     }
 }
 
 impl Cluster {
-    pub fn new() -> Cluster {
+    fn new() -> Cluster {
         info!("cleaning artefacts from previous run");
 
         match fs::remove_file(Path::new(TESTS_DIR).join("instance.log")) {
@@ -42,13 +48,17 @@ impl Cluster {
             Err(e) => panic!("failed to delete plugin_dir: {e}"),
         }
 
-        Cluster {}
+        Cluster { run_handler: None }
+    }
+
+    fn set_run_handler(&mut self, handler: Child) {
+        self.run_handler = Some(handler);
     }
 }
 
 pub fn run_cluster(timeout: Duration, total_instances: i32) -> Result<Cluster, std::io::Error> {
     // Set up cleanup function
-    let cluster_handle = Cluster::new();
+    let mut cluster_handle = Cluster::new();
 
     // Create plugin from template
     let mut plugin_creation_proc =
@@ -63,7 +73,8 @@ pub fn run_cluster(timeout: Duration, total_instances: i32) -> Result<Cluster, s
         .output()?;
 
     // Setup the cluster
-    run_pike(vec!["run"], PLUGIN_DIR).unwrap();
+    let run_handler = run_pike(vec!["run"], PLUGIN_DIR).unwrap();
+    cluster_handle.set_run_handler(run_handler);
 
     let start_time = Instant::now();
 
