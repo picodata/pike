@@ -268,10 +268,11 @@ pub fn cmd(
     base_pg_port: i32,
     use_release: bool,
     target_dir: &Path,
+    daemon: bool,
 ) -> Result<()> {
     fs::create_dir_all(data_dir).unwrap();
 
-    {
+    if !daemon {
         ctrlc::set_handler(move || {
             info!("{}", "received Ctrl+C. Shutting down ...");
 
@@ -296,18 +297,20 @@ pub fn cmd(
 
     // Run in the loop until the child processes are killed
     // with cargo stop or Ctrl+C signal is recieved
-    loop {
-        thread::sleep(std::time::Duration::from_millis(100));
-        let processes_lock = Arc::clone(&get_picodata_processes());
-        let mut processes = processes_lock.lock().unwrap();
+    if !daemon {
+        loop {
+            thread::sleep(std::time::Duration::from_millis(100));
+            let processes_lock = Arc::clone(&get_picodata_processes());
+            let mut processes = processes_lock.lock().unwrap();
 
-        let all_proccesses_ended = processes
-            .iter_mut()
-            .all(|p| p.try_wait().unwrap().is_some());
+            let all_proccesses_ended = processes
+                .iter_mut()
+                .all(|p| p.try_wait().unwrap().is_some());
 
-        if all_proccesses_ended {
-            info!("{}", "all child processes have ended, shutting down...");
-            break;
+            if all_proccesses_ended {
+                info!("{}", "all child processes have ended, shutting down...");
+                break;
+            }
         }
     }
 

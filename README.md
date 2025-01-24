@@ -77,6 +77,7 @@ cargo pike run --topology topology.toml --data-dir ./tmp
 - `--picodata-path <BINARY_PATH>` - Путь до исполняемого файла Пикодаты. Значение по умолчанию: `picodata`
 - `--release` - Сборка и запуск релизной версии плагина
 - `--target-dir <TARGET_DIR>` - Директория собранных бинарных файлов. Значение по умолчанию: `target`
+- `-d, --daemon` - Запуск кластера в режиме демона
 
 #### config.yaml
 

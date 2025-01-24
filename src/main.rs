@@ -46,7 +46,9 @@ enum Command {
         /// Change target folder
         #[arg(long, value_name = "TARGET_DIR", default_value = "target")]
         target_dir: PathBuf,
-        // TODO: add demon flag, if true then set output logs to file and release stdin
+        /// Run cluster in background
+        #[arg(long, short)]
+        daemon: bool,
     },
     /// Stop Picodata cluster
     Stop {
@@ -131,8 +133,16 @@ enum Config {
 /// # Safety
 ///
 /// This function is safe because it uses safety functions from `libc` without side effects.
-fn child_killer(master_pid: u32) {
+fn run_child_killer() {
+    let master_pid = std::process::id();
+
     unsafe {
+        match fork() {
+            Ok(ForkResult::Parent { .. }) => return,
+            Ok(ForkResult::Child) => (),
+            Err(_) => log::warn!("Error run supervisor process"),
+        }
+
         libc::setsid();
     }
 
@@ -152,16 +162,6 @@ fn child_killer(master_pid: u32) {
 }
 
 fn main() -> Result<()> {
-    let self_pid = std::process::id();
-
-    unsafe {
-        match fork() {
-            Ok(ForkResult::Parent { .. }) => (),
-            Ok(ForkResult::Child) => child_killer(self_pid),
-            Err(_) => log::warn!("Error run supervisor process"),
-        }
-    }
-
     colog::init();
     let cli = Cli::parse_from(env::args().skip(1));
 
@@ -175,51 +175,66 @@ fn main() -> Result<()> {
             base_pg_port,
             release,
             target_dir,
-        } => commands::run::cmd(
-            &topology,
-            &data_dir,
-            disable_plugin_install,
-            base_http_port,
-            &picodata_path,
-            base_pg_port,
-            release,
-            &target_dir,
-        )
-        .context("failed to execute Run command")?,
+            daemon,
+        } => {
+            if !daemon {
+                run_child_killer()
+            }
+            commands::run::cmd(
+                &topology,
+                &data_dir,
+                disable_plugin_install,
+                base_http_port,
+                &picodata_path,
+                base_pg_port,
+                release,
+                &target_dir,
+                daemon,
+            )
+            .context("failed to execute Run command")?
+        }
         Command::Stop { data_dir } => {
+            run_child_killer();
             commands::stop::cmd(&data_dir).context("failed to execute \"stop\" command")?;
         }
         Command::Clean { data_dir } => {
+            run_child_killer();
             commands::clean::cmd(&data_dir).context("failed to execute \"clean\" command")?;
         }
-        Command::Plugin { command } => match command {
-            Plugin::Pack { debug, target_dir } => {
-                commands::plugin::pack::cmd(debug, &target_dir)
-                    .context("failed to execute \"pack\" command")?;
+        Command::Plugin { command } => {
+            run_child_killer();
+            match command {
+                Plugin::Pack { debug, target_dir } => {
+                    commands::plugin::pack::cmd(debug, &target_dir)
+                        .context("failed to execute \"pack\" command")?;
+                }
+                Plugin::Build { release } => {
+                    commands::plugin::build::cmd(release)
+                        .context("failed to execute \"build\" command")?;
+                }
+                Plugin::New {
+                    path,
+                    without_git,
+                    workspace,
+                } => commands::plugin::new::cmd(Some(&path), without_git, workspace)
+                    .context("failed to execute \"plugin new\" command")?,
+                Plugin::Init {
+                    without_git,
+                    workspace,
+                } => commands::plugin::new::cmd(None, without_git, workspace)
+                    .context("failed to execute \"init\" command")?,
             }
-            Plugin::Build { release } => {
-                commands::plugin::build::cmd(release)
-                    .context("failed to execute \"build\" command")?;
+        }
+        Command::Config { command } => {
+            run_child_killer();
+            match command {
+                Config::Apply {
+                    config_path,
+                    data_dir,
+                } => commands::config::apply::cmd(&config_path, &data_dir)
+                    .context("failed to execute \"config apply\" command")?,
             }
-            Plugin::New {
-                path,
-                without_git,
-                workspace,
-            } => commands::plugin::new::cmd(Some(&path), without_git, workspace)
-                .context("failed to execute \"plugin new\" command")?,
-            Plugin::Init {
-                without_git,
-                workspace,
-            } => commands::plugin::new::cmd(None, without_git, workspace)
-                .context("failed to execute \"init\" command")?,
-        },
-        Command::Config { command } => match command {
-            Config::Apply {
-                config_path,
-                data_dir,
-            } => commands::config::apply::cmd(&config_path, &data_dir)
-                .context("failed to execute \"config apply\" command")?,
-        },
+        }
     };
 
     Ok(())
