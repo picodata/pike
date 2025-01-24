@@ -107,7 +107,7 @@ fn enable_plugins(
         }
     }
 
-    let admin_soket = data_dir.join("cluster").join("i_1").join("admin.sock");
+    let admin_soket = data_dir.join("cluster").join("i1").join("admin.sock");
 
     for query in queries {
         let mut picodata_admin = Command::new(picodata_path)

@@ -124,10 +124,10 @@ cargo pike stop --data-dir ./tmp
 
 ```bash
 [*] stopping picodata cluster, data folder: ./tmp
-[*] stopping picodata instance: i_1
-[*] stopping picodata instance: i_2
-[*] stopping picodata instance: i_3
-[*] stopping picodata instance: i_4
+[*] stopping picodata instance: i1
+[*] stopping picodata instance: i2
+[*] stopping picodata instance: i3
+[*] stopping picodata instance: i4
 ```
 
 #### Доступные опции

@@ -33,7 +33,7 @@ pub fn cmd(data_dir: &Path) -> Result<()> {
         if !folder_name
             .to_str()
             .context("invalid folder name")?
-            .starts_with("i_")
+            .starts_with('i')
         {
             continue;
         }

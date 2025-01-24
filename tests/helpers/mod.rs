@@ -176,7 +176,7 @@ pub fn await_picodata_admin(timeout: Duration) -> Result<Child, std::io::Error> 
 
         let picodata_admin = Command::new("picodata")
             .arg("admin")
-            .arg(PLUGIN_DIR.to_string() + "tmp/cluster/i_1/admin.sock")
+            .arg(PLUGIN_DIR.to_string() + "tmp/cluster/i1/admin.sock")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn();

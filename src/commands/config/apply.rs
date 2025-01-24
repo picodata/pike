@@ -69,7 +69,7 @@ struct CargoManifest {
 }
 
 pub fn cmd(config_path: &Path, data_dir: &Path) -> Result<()> {
-    let admin_socket = data_dir.join("cluster").join("i_1").join("admin.sock");
+    let admin_socket = data_dir.join("cluster").join("i1").join("admin.sock");
     let cargo_manifest: &CargoManifest =
         &toml::from_str(&fs::read_to_string("Cargo.toml").context("failed to read Cargo.toml")?)
             .context("failed to parse Cargo.toml")?;
