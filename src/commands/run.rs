@@ -1,13 +1,16 @@
 use anyhow::{bail, Context, Result};
+use colored::Colorize;
 use lib::cargo_build;
 use log::{error, info};
+use rand::Rng;
 use serde::Deserialize;
-use std::fs::File;
-use std::io::Write;
+use std::collections::BTreeMap;
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{exit, Child, Command, Stdio};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::thread;
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use std::{collections::HashMap, fs, path::PathBuf};
 
@@ -35,15 +38,7 @@ struct Tier {
 
 #[derive(Debug, Deserialize)]
 struct Topology {
-    tiers: HashMap<String, Tier>,
-}
-
-static PICODATA_PROCESSES: OnceLock<Arc<Mutex<Vec<Child>>>> = OnceLock::new();
-
-fn get_picodata_processes() -> Arc<Mutex<Vec<Child>>> {
-    PICODATA_PROCESSES
-        .get_or_init(|| Arc::new(Mutex::new(Vec::new())))
-        .clone()
+    tiers: BTreeMap<String, Tier>,
 }
 
 fn enable_plugins(
@@ -114,6 +109,8 @@ fn enable_plugins(
             .arg("admin")
             .arg(admin_soket.to_str().unwrap())
             .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .spawn()
             .context("failed to spawn child proccess of picodata admin")?;
 
@@ -131,6 +128,10 @@ fn enable_plugins(
         thread::sleep(Duration::from_secs(3));
     }
 
+    for (plugin, version) in &plugins {
+        info!("Plugin {plugin}:{version} is enabled");
+    }
+
     Ok(())
 }
 
@@ -139,8 +140,6 @@ fn push_migration_envs_queries(
     topology: &Topology,
     plugins: &HashMap<String, String>,
 ) {
-    info!("setting migration variables");
-
     for tier in topology.tiers.values() {
         let Some(migration_envs) = &tier.migration_envs else {
             continue;
@@ -156,28 +155,192 @@ fn push_migration_envs_queries(
     }
 }
 
-fn kill_picodata_instances() -> Result<()> {
-    let processes_lock = Arc::clone(&get_picodata_processes());
-    let mut processes = processes_lock.lock().unwrap();
-
-    for mut process in processes.drain(..) {
-        process.kill()?;
-    }
-
-    Ok(())
+pub struct PicodataInstance {
+    instance_name: String,
+    tier: String,
+    log_threads: Option<Vec<JoinHandle<()>>>,
+    child: Child,
+    daemon: bool,
+    disable_colors: bool,
+    data_dir: PathBuf,
+    log_file_path: PathBuf,
 }
 
+impl PicodataInstance {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        picodata_path: &Path,
+        instance_id: u16,
+        bin_port: u16,
+        http_port: u16,
+        pg_port: u16,
+        data_dir: &Path,
+        first_instance_bin_port: u16,
+        plugins_dir: &Path,
+        replication_factor: u8,
+        tier: &str,
+        daemon: bool,
+        disable_colors: bool,
+    ) -> Result<Self> {
+        let instance_name = format!("i{instance_id}");
+        let instance_data_dir = data_dir.join("cluster").join(&instance_name);
+        let log_file_path = instance_data_dir.join("picodata.log");
+
+        fs::create_dir_all(&instance_data_dir).context("Failed to create instance data dir")?;
+
+        let mut child = Command::new(picodata_path);
+        child.args([
+            "run",
+            "--data-dir",
+            instance_data_dir.to_str().expect("unreachable"),
+            "--plugin-dir",
+            plugins_dir.to_str().unwrap_or("target/debug"),
+            "--listen",
+            &format!("127.0.0.1:{bin_port}"),
+            "--peer",
+            &format!("127.0.0.1:{first_instance_bin_port}"),
+            "--init-replication-factor",
+            &replication_factor.to_string(),
+            "--http-listen",
+            &format!("127.0.0.1:{http_port}"),
+            "--pg-listen",
+            &format!("127.0.0.1:{pg_port}"),
+            "--tier",
+            tier,
+        ]);
+
+        if daemon {
+            child.stdout(Stdio::null()).stderr(Stdio::null());
+            child.args(["--log", log_file_path.to_str().expect("unreachable")]);
+        } else {
+            child.stdout(Stdio::piped()).stderr(Stdio::piped());
+        };
+
+        let child = child
+            .spawn()
+            .context(format!("failed to start picodata instance: {instance_id}"))?;
+
+        let mut pico_instance = PicodataInstance {
+            instance_name,
+            tier: tier.to_owned(),
+            log_threads: None,
+            child,
+            daemon,
+            disable_colors,
+            data_dir: instance_data_dir,
+            log_file_path,
+        };
+
+        if !daemon {
+            pico_instance.capture_logs()?;
+        }
+
+        // Save pid of picodata process to kill it after
+        pico_instance.make_pid_file()?;
+
+        Ok(pico_instance)
+    }
+
+    fn capture_logs(&mut self) -> Result<()> {
+        let mut rnd = rand::rng();
+        let instance_name_color = colored::CustomColor::new(
+            rnd.random_range(30..220),
+            rnd.random_range(30..220),
+            rnd.random_range(30..220),
+        );
+
+        let file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&self.log_file_path)
+            .expect("Failed to open log file");
+        let file = Arc::new(Mutex::new(file));
+
+        let mut log_threads = vec![];
+
+        let stdout = self.child.stdout.take().expect("Failed to capture stdout");
+        let stderr = self.child.stderr.take().expect("Failed to capture stderr");
+        let outputs: [Box<dyn Read + Send>; 2] = [Box::new(stdout), Box::new(stderr)];
+        for child_output in outputs {
+            let mut log_prefix = format!("{}-{}: ", self.tier, self.instance_name);
+            if !self.disable_colors {
+                log_prefix = log_prefix.custom_color(instance_name_color).to_string();
+            }
+            let file = file.clone();
+
+            let wrapper = move || {
+                let stdout_lines = BufReader::new(child_output).lines();
+                for line in stdout_lines {
+                    let line = line.unwrap();
+                    println!("{log_prefix}{line}");
+                    writeln!(file.lock().unwrap(), "{line}")
+                        .expect("Failed to write line to log file");
+                }
+            };
+
+            let t = thread::Builder::new()
+                .name(format!("log_catcher::{}", self.instance_name))
+                .spawn(wrapper)?;
+
+            log_threads.push(t);
+        }
+
+        self.log_threads = Some(log_threads);
+
+        Ok(())
+    }
+
+    fn make_pid_file(&self) -> Result<()> {
+        let pid = self.child.id();
+        let pid_location = self.data_dir.join("pid");
+        let mut file = File::create(pid_location)?;
+        writeln!(file, "{pid}")?;
+        Ok(())
+    }
+
+    fn kill(&mut self) -> Result<()> {
+        Ok(self.child.kill()?)
+    }
+
+    fn join(&mut self) {
+        let Some(threads) = self.log_threads.take() else {
+            return;
+        };
+        for h in threads {
+            h.join()
+                .expect("Failed to join thread for picodata instance");
+        }
+    }
+}
+
+impl Drop for PicodataInstance {
+    fn drop(&mut self) {
+        if self.daemon {
+            return;
+        }
+
+        self.child
+            .wait()
+            .expect("Failed to wait for picodata instance");
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::fn_params_excessive_bools)]
 #[allow(clippy::too_many_arguments)]
 pub fn cluster(
     topology_path: &PathBuf,
     data_dir: &Path,
     disable_plugin_install: bool,
-    base_http_port: i32,
+    base_http_port: u16,
     picodata_path: &PathBuf,
-    base_pg_port: i32,
+    base_pg_port: u16,
     use_release: bool,
     target_dir: &Path,
-) -> Result<()> {
+    daemon: bool,
+    disable_colors: bool,
+) -> Result<Vec<PicodataInstance>> {
     let topology: &Topology = &toml::from_str(
         &fs::read_to_string(topology_path)
             .context(format!("failed to read {}", topology_path.display()))?,
@@ -195,96 +358,71 @@ pub fn cluster(
         target_dir.join("debug")
     };
 
+    info!("Running the cluster...");
+
+    let mut picodata_processes = vec![];
+
     let first_instance_bin_port = 3001;
     let mut instance_id = 0;
     for (tier_name, tier) in &topology.tiers {
         for _ in 0..(tier.instances * tier.replication_factor) {
             instance_id += 1;
-            let bin_port = 3000 + instance_id;
-            let http_port = base_http_port + instance_id;
-            let pg_port = base_pg_port + instance_id;
-            let instance_data_dir = data_dir.join("cluster").join(format!("i_{instance_id}"));
+            let pico_instance = PicodataInstance::new(
+                picodata_path,
+                instance_id,
+                3000 + instance_id,
+                base_http_port + instance_id,
+                base_pg_port + instance_id,
+                data_dir,
+                first_instance_bin_port,
+                &plugins_dir,
+                tier.replication_factor,
+                tier_name,
+                daemon,
+                disable_colors,
+            )?;
 
-            // TODO: make it as child processes with catch output and redirect it to main
-            // output
-            let process = Command::new(picodata_path)
-                .args([
-                    "run",
-                    "--data-dir",
-                    instance_data_dir
-                        .to_str()
-                        .context("Invalid data dir path")?,
-                    "--plugin-dir",
-                    plugins_dir.to_str().unwrap_or("target"),
-                    "--listen",
-                    &format!("127.0.0.1:{bin_port}"),
-                    "--peer",
-                    &format!("127.0.0.1:{first_instance_bin_port}"),
-                    "--init-replication-factor",
-                    &tier.replication_factor.to_string(),
-                    "--http-listen",
-                    &format!("127.0.0.1:{http_port}"),
-                    "--pg-listen",
-                    &format!("127.0.0.1:{pg_port}"),
-                    "--tier",
-                    tier_name,
-                ])
-                .spawn()
-                .context(format!("failed to start picodata instance: {instance_id}"))?;
+            picodata_processes.push(pico_instance);
+
+            // TODO: check is started by logs or iproto
             thread::sleep(Duration::from_secs(5));
 
-            // Save pid of picodata process to kill it after
-            let pid = process.id();
-            let pid_location = instance_data_dir.join("pid");
-            let mut file = File::create(pid_location)?;
-            writeln!(file, "{pid}")?;
-
-            let processes_lock = Arc::clone(&get_picodata_processes());
-            let mut processes = processes_lock.lock().unwrap();
-            processes.push(process);
+            info!("i{instance_id} - started");
         }
     }
 
     if !disable_plugin_install {
-        enable_plugins(topology, data_dir, picodata_path, &plugins_dir)
-            .inspect_err(|_| {
-                kill_picodata_instances().unwrap_or_else(|e| {
+        let result = enable_plugins(topology, data_dir, picodata_path, &plugins_dir);
+        if let Err(e) = result {
+            for process in &mut picodata_processes {
+                process.kill().unwrap_or_else(|e| {
                     error!("failed to kill picodata instances: {:#}", e);
                 });
-            })
-            .context("failed to enable plugins")?;
+            }
+            return Err(e.context("failed to enable plugins"));
+        }
     };
 
-    Ok(())
+    info!("Picodata cluster is started");
+
+    Ok(picodata_processes)
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::fn_params_excessive_bools)]
 pub fn cmd(
     topology_path: &PathBuf,
     data_dir: &Path,
     disable_plugin_install: bool,
-    base_http_port: i32,
+    base_http_port: u16,
     picodata_path: &PathBuf,
-    base_pg_port: i32,
+    base_pg_port: u16,
     use_release: bool,
     target_dir: &Path,
     daemon: bool,
+    disable_colors: bool,
 ) -> Result<()> {
-    fs::create_dir_all(data_dir).unwrap();
-
-    if !daemon {
-        ctrlc::set_handler(move || {
-            info!("{}", "received Ctrl+C. Shutting down ...");
-
-            kill_picodata_instances()
-                .unwrap_or_else(|e| error!("failed to kill picodata instances: {:#}", e));
-
-            exit(0);
-        })
-        .context("failed to set Ctrl+c handler")?;
-    }
-
-    cluster(
+    let pico_instances = Arc::new(Mutex::new(cluster(
         topology_path,
         data_dir,
         disable_plugin_install,
@@ -293,25 +431,33 @@ pub fn cmd(
         base_pg_port,
         use_release,
         target_dir,
-    )?;
+        daemon,
+        disable_colors,
+    )?));
+
+    if daemon {
+        return Ok(());
+    }
 
     // Run in the loop until the child processes are killed
     // with cargo stop or Ctrl+C signal is recieved
-    if !daemon {
-        loop {
-            thread::sleep(std::time::Duration::from_millis(100));
-            let processes_lock = Arc::clone(&get_picodata_processes());
-            let mut processes = processes_lock.lock().unwrap();
+    let picodata_processes = pico_instances.clone();
+    ctrlc::set_handler(move || {
+        info!("received Ctrl+C. Shutting down ...");
 
-            let all_proccesses_ended = processes
-                .iter_mut()
-                .all(|p| p.try_wait().unwrap().is_some());
-
-            if all_proccesses_ended {
-                info!("{}", "all child processes have ended, shutting down...");
-                break;
-            }
+        let mut childs = picodata_processes.lock().unwrap();
+        for process in childs.iter_mut() {
+            process.kill().unwrap_or_else(|e| {
+                error!("failed to kill picodata instances: {:#}", e);
+            });
         }
+
+        exit(0);
+    })
+    .context("failed to set Ctrl+c handler")?;
+
+    for instance in pico_instances.lock().unwrap().iter_mut() {
+        instance.join();
     }
 
     Ok(())

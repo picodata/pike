@@ -33,10 +33,10 @@ enum Command {
         disable_install_plugins: bool,
         /// Base http port for picodata instances
         #[arg(long, default_value = "8000")]
-        base_http_port: i32,
+        base_http_port: u16,
         /// Port for Pgproto server
         #[arg(long, default_value = "5432")]
-        base_pg_port: i32,
+        base_pg_port: u16,
         /// Specify path to picodata binary
         #[arg(long, value_name = "BINARY_PATH", default_value = "picodata")]
         picodata_path: PathBuf,
@@ -49,6 +49,9 @@ enum Command {
         /// Run cluster in background
         #[arg(long, short)]
         daemon: bool,
+        /// Disable colors in stdout
+        #[arg(long)]
+        disable_colors: bool,
     },
     /// Stop Picodata cluster
     Stop {
@@ -176,9 +179,10 @@ fn main() -> Result<()> {
             release,
             target_dir,
             daemon,
+            disable_colors,
         } => {
             if !daemon {
-                run_child_killer()
+                run_child_killer();
             }
             commands::run::cmd(
                 &topology,
@@ -190,8 +194,9 @@ fn main() -> Result<()> {
                 release,
                 &target_dir,
                 daemon,
+                disable_colors,
             )
-            .context("failed to execute Run command")?
+            .context("failed to execute Run command")?;
         }
         Command::Stop { data_dir } => {
             run_child_killer();

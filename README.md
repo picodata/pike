@@ -78,6 +78,7 @@ cargo pike run --topology topology.toml --data-dir ./tmp
 - `--release` - Сборка и запуск релизной версии плагина
 - `--target-dir <TARGET_DIR>` - Директория собранных бинарных файлов. Значение по умолчанию: `target`
 - `-d, --daemon` - Запуск кластера в режиме демона
+- `--disable-colors` - Отключает раскрашивание имён инстансов в разные цвета в логах
 
 #### config.yaml
 
