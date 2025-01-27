@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
+use derive_builder::Builder;
 use lib::cargo_build;
 use log::{error, info};
 use rand::Rng;
@@ -169,26 +170,23 @@ pub struct PicodataInstance {
 impl PicodataInstance {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        picodata_path: &Path,
         instance_id: u16,
         bin_port: u16,
         http_port: u16,
         pg_port: u16,
-        data_dir: &Path,
         first_instance_bin_port: u16,
         plugins_dir: &Path,
         replication_factor: u8,
         tier: &str,
-        daemon: bool,
-        disable_colors: bool,
+        run_params: &Params,
     ) -> Result<Self> {
         let instance_name = format!("i{instance_id}");
-        let instance_data_dir = data_dir.join("cluster").join(&instance_name);
+        let instance_data_dir = run_params.data_dir.join("cluster").join(&instance_name);
         let log_file_path = instance_data_dir.join("picodata.log");
 
         fs::create_dir_all(&instance_data_dir).context("Failed to create instance data dir")?;
 
-        let mut child = Command::new(picodata_path);
+        let mut child = Command::new(&run_params.picodata_path);
         child.args([
             "run",
             "--data-dir",
@@ -209,7 +207,7 @@ impl PicodataInstance {
             tier,
         ]);
 
-        if daemon {
+        if run_params.daemon {
             child.stdout(Stdio::null()).stderr(Stdio::null());
             child.args(["--log", log_file_path.to_str().expect("unreachable")]);
         } else {
@@ -225,13 +223,13 @@ impl PicodataInstance {
             tier: tier.to_owned(),
             log_threads: None,
             child,
-            daemon,
-            disable_colors,
+            daemon: run_params.daemon,
+            disable_colors: run_params.disable_colors,
             data_dir: instance_data_dir,
             log_file_path,
         };
 
-        if !daemon {
+        if !run_params.daemon {
             pico_instance.capture_logs()?;
         }
 
@@ -326,36 +324,47 @@ impl Drop for PicodataInstance {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::fn_params_excessive_bools)]
-#[allow(clippy::too_many_arguments)]
-pub fn cluster(
-    topology_path: &PathBuf,
-    data_dir: &Path,
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Debug, Builder)]
+pub struct Params {
+    #[builder(default = "PathBuf::from(\"topology.toml\")")]
+    topology_path: PathBuf,
+    #[builder(default = "PathBuf::from(\"./tmp\")")]
+    data_dir: PathBuf,
+    #[builder(default = "false")]
     disable_plugin_install: bool,
+    #[builder(default = "8000")]
     base_http_port: u16,
-    picodata_path: &PathBuf,
+    #[builder(default = "PathBuf::from(\"picodata\")")]
+    picodata_path: PathBuf,
+    #[builder(default = "5432")]
     base_pg_port: u16,
+    #[builder(default = "false")]
     use_release: bool,
-    target_dir: &Path,
+    #[builder(default = "PathBuf::from(\"target\")")]
+    target_dir: PathBuf,
+    #[builder(default = "false")]
     daemon: bool,
+    #[builder(default = "false")]
     disable_colors: bool,
-) -> Result<Vec<PicodataInstance>> {
+}
+
+pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
     let topology: &Topology = &toml::from_str(
-        &fs::read_to_string(topology_path)
-            .context(format!("failed to read {}", topology_path.display()))?,
+        &fs::read_to_string(&params.topology_path)
+            .context(format!("failed to read {}", params.topology_path.display()))?,
     )
     .context(format!(
         "failed to parse .toml file of {}",
-        topology_path.display()
+        params.topology_path.display()
     ))?;
 
-    let plugins_dir = if use_release {
+    let plugins_dir = if params.use_release {
         cargo_build(lib::BuildType::Release)?;
-        target_dir.join("release")
+        params.target_dir.join("release")
     } else {
         cargo_build(lib::BuildType::Debug)?;
-        target_dir.join("debug")
+        params.target_dir.join("debug")
     };
 
     info!("Running the cluster...");
@@ -368,18 +377,15 @@ pub fn cluster(
         for _ in 0..(tier.instances * tier.replication_factor) {
             instance_id += 1;
             let pico_instance = PicodataInstance::new(
-                picodata_path,
                 instance_id,
                 3000 + instance_id,
-                base_http_port + instance_id,
-                base_pg_port + instance_id,
-                data_dir,
+                params.base_http_port + instance_id,
+                params.base_pg_port + instance_id,
                 first_instance_bin_port,
                 &plugins_dir,
                 tier.replication_factor,
                 tier_name,
-                daemon,
-                disable_colors,
+                params,
             )?;
 
             picodata_processes.push(pico_instance);
@@ -391,8 +397,13 @@ pub fn cluster(
         }
     }
 
-    if !disable_plugin_install {
-        let result = enable_plugins(topology, data_dir, picodata_path, &plugins_dir);
+    if !params.disable_plugin_install {
+        let result = enable_plugins(
+            topology,
+            &params.data_dir,
+            &params.picodata_path,
+            &plugins_dir,
+        );
         if let Err(e) = result {
             for process in &mut picodata_processes {
                 process.kill().unwrap_or_else(|e| {
@@ -410,32 +421,10 @@ pub fn cluster(
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::fn_params_excessive_bools)]
-pub fn cmd(
-    topology_path: &PathBuf,
-    data_dir: &Path,
-    disable_plugin_install: bool,
-    base_http_port: u16,
-    picodata_path: &PathBuf,
-    base_pg_port: u16,
-    use_release: bool,
-    target_dir: &Path,
-    daemon: bool,
-    disable_colors: bool,
-) -> Result<()> {
-    let pico_instances = Arc::new(Mutex::new(cluster(
-        topology_path,
-        data_dir,
-        disable_plugin_install,
-        base_http_port,
-        picodata_path,
-        base_pg_port,
-        use_release,
-        target_dir,
-        daemon,
-        disable_colors,
-    )?));
+pub fn cmd(params: &Params) -> Result<()> {
+    let pico_instances = Arc::new(Mutex::new(cluster(params)?));
 
-    if daemon {
+    if params.daemon {
         return Ok(());
     }
 

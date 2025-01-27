@@ -1,3 +1,6 @@
+use pike::helpers::build;
+
 fn main() {
-    pike::helpers::build::main()
+    let params = build::ParamsBuilder::default().build().unwrap();
+    build::main(&params);
 }

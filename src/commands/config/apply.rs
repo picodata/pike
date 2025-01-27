@@ -1,11 +1,12 @@
 use anyhow::{Context, Result};
+use derive_builder::Builder;
 use serde::Deserialize;
 use serde_yaml::Value;
 use std::{
     collections::HashMap,
     fs,
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
 };
 
@@ -68,19 +69,31 @@ struct CargoManifest {
     package: Package,
 }
 
-pub fn cmd(config_path: &Path, data_dir: &Path) -> Result<()> {
-    let admin_socket = data_dir.join("cluster").join("i1").join("admin.sock");
+#[derive(Debug, Builder)]
+pub struct Params {
+    #[builder(default = "PathBuf::from(\"plugin_config.yaml\")")]
+    config_path: PathBuf,
+    #[builder(default = "PathBuf::from(\"./tmp\")")]
+    data_dir: PathBuf,
+}
+
+pub fn cmd(params: &Params) -> Result<()> {
+    let admin_socket = params
+        .data_dir
+        .join("cluster")
+        .join("i1")
+        .join("admin.sock");
     let cargo_manifest: &CargoManifest =
         &toml::from_str(&fs::read_to_string("Cargo.toml").context("failed to read Cargo.toml")?)
             .context("failed to parse Cargo.toml")?;
     let config: HashMap<String, HashMap<String, Value>> =
-        serde_yaml::from_str(&fs::read_to_string(config_path).context(format!(
+        serde_yaml::from_str(&fs::read_to_string(&params.config_path).context(format!(
             "failed to read config file at {}",
-            config_path.display()
+            params.config_path.display()
         ))?)
         .context(format!(
             "failed to parse config file at {} as toml",
-            config_path.display()
+            params.config_path.display()
         ))?;
     for (service_name, service_config) in config {
         apply_service_config(

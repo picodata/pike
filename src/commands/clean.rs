@@ -5,7 +5,11 @@ use std::{fs, path::Path};
 
 pub fn cmd(data_dir: &Path) -> Result<()> {
     info!("Clearing cluster data directory:");
-    let _ = commands::stop::cmd(data_dir).context("failed stop cluster before clean");
+    let params = commands::stop::ParamsBuilder::default()
+        .data_dir(data_dir.into())
+        .build()
+        .unwrap();
+    let _ = commands::stop::cmd(&params).context("failed stop cluster before clean");
     if data_dir.exists() {
         fs::remove_dir_all(data_dir)
             .context(format!("failed to remove directory {}", data_dir.display()))?;

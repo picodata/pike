@@ -1,3 +1,4 @@
+use derive_builder::Builder;
 use fs_extra::dir;
 use fs_extra::dir::CopyOptions;
 use std::env;
@@ -42,7 +43,10 @@ fn get_output_path() -> PathBuf {
         .join(build_type)
 }
 
-pub fn main() {
+#[derive(Debug, Builder)]
+pub struct Params {}
+
+pub fn main(_params: &Params) {
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let crate_dir = Path::new(&crate_dir);
 

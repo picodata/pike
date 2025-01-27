@@ -1,12 +1,19 @@
 use anyhow::{bail, Context, Result};
+use derive_builder::Builder;
 use log::info;
 use std::fs::{self};
 use std::io::{self, BufRead};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-pub fn cmd(data_dir: &Path) -> Result<()> {
-    let instances_path = data_dir.join("cluster");
+#[derive(Debug, Builder)]
+pub struct Params {
+    #[builder(default = "PathBuf::from(\"./tmp\")")]
+    data_dir: PathBuf,
+}
+
+pub fn cmd(params: &Params) -> Result<()> {
+    let instances_path = params.data_dir.join("cluster");
     let dirs = fs::read_dir(&instances_path).context(format!(
         "cluster data dir with path {} does not exist",
         instances_path.to_string_lossy()
@@ -14,7 +21,7 @@ pub fn cmd(data_dir: &Path) -> Result<()> {
 
     info!(
         "stopping picodata cluster, data folder: {}",
-        data_dir.to_string_lossy()
+        params.data_dir.to_string_lossy()
     );
 
     // Iterate through instance folders and

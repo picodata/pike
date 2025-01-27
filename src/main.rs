@@ -184,23 +184,28 @@ fn main() -> Result<()> {
             if !daemon {
                 run_child_killer();
             }
-            commands::run::cmd(
-                &topology,
-                &data_dir,
-                disable_plugin_install,
-                base_http_port,
-                &picodata_path,
-                base_pg_port,
-                release,
-                &target_dir,
-                daemon,
-                disable_colors,
-            )
-            .context("failed to execute Run command")?;
+            let params = commands::run::ParamsBuilder::default()
+                .topology_path(topology)
+                .data_dir(data_dir)
+                .disable_plugin_install(disable_plugin_install)
+                .base_http_port(base_http_port)
+                .picodata_path(picodata_path)
+                .base_pg_port(base_pg_port)
+                .use_release(release)
+                .target_dir(target_dir)
+                .daemon(daemon)
+                .disable_colors(disable_colors)
+                .build()
+                .unwrap();
+            commands::run::cmd(&params).context("failed to execute Run command")?;
         }
         Command::Stop { data_dir } => {
             run_child_killer();
-            commands::stop::cmd(&data_dir).context("failed to execute \"stop\" command")?;
+            let params = commands::stop::ParamsBuilder::default()
+                .data_dir(data_dir)
+                .build()
+                .unwrap();
+            commands::stop::cmd(&params).context("failed to execute \"stop\" command")?;
         }
         Command::Clean { data_dir } => {
             run_child_killer();
@@ -236,8 +241,15 @@ fn main() -> Result<()> {
                 Config::Apply {
                     config_path,
                     data_dir,
-                } => commands::config::apply::cmd(&config_path, &data_dir)
-                    .context("failed to execute \"config apply\" command")?,
+                } => {
+                    let params = commands::config::apply::ParamsBuilder::default()
+                        .config_path(config_path)
+                        .data_dir(data_dir)
+                        .build()
+                        .unwrap();
+                    commands::config::apply::cmd(&params)
+                        .context("failed to execute \"config apply\" command")?;
+                }
             }
         }
     };
