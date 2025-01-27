@@ -149,7 +149,7 @@ fn push_migration_envs_queries(
         for migration_env in migration_envs {
             for (plugin, version) in plugins {
                 queries.push(format!(
-                    r#"ALTER PLUGIN {plugin} {version} SET migration_context.{}='{}';"#,
+                    "ALTER PLUGIN {plugin} {version} SET migration_context.{}='{}';",
                     migration_env.name, migration_env.value
                 ));
             }
