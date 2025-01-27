@@ -48,14 +48,13 @@ pub fn cmd(data_dir: &Path) -> Result<()> {
 
         let pid = read_pid_from_file(&pid_file_path).context("failed to read the PID file")?;
 
-        kill_process_by_pid(pid).context(format!(
-            "failed to kill picodata instance: {}",
-            folder_name.to_string_lossy()
-        ))?;
         info!(
             "stopping picodata instance: {}",
             folder_name.to_string_lossy()
         );
+        if let Err(e) = kill_process_by_pid(pid) {
+            log::debug!("{e}");
+        }
     }
 
     Ok(())
@@ -76,12 +75,12 @@ fn read_pid_from_file(pid_file_path: &Path) -> Result<u32> {
 }
 
 fn kill_process_by_pid(pid: u32) -> Result<()> {
-    let status = Command::new("kill")
+    let output = Command::new("kill")
         .args(["-9", &pid.to_string()])
-        .status()?;
+        .output()?;
 
-    if !status.success() {
-        bail!("failed to kill picodata instance with PID: {pid}")
+    if !output.status.success() {
+        bail!("failed to kill picodata instance (pid: {pid}): {output:?}");
     }
 
     Ok(())
