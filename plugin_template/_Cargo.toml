@@ -10,11 +10,11 @@ serde = { version = "1", features = ["derive"] }
 log = "0.4"
 
 [dev-dependencies]
-picodata-pike = { git = "https://github.com/picodata/pike.git", branch = "master" } # TODO: change after publish on crates.io
+picodata-pike = { git = "https://github.com/picodata/pike.git", branch = "daemon_v2" } # TODO: change after publish on crates.io
 reqwest = { version = "0.12", features = ["blocking"] }
 
 [build-dependencies]
-picodata-pike = { git = "https://github.com/picodata/pike.git", branch = "master" } # TODO: change after publish on crates.io
+picodata-pike = { git = "https://github.com/picodata/pike.git", branch = "daemon_v2" } # TODO: change after publish on crates.io
 liquid = "0.26"
 fs_extra = "1"
 
