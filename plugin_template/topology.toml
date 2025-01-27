@@ -1,8 +1,8 @@
-[tiers.default]
-instances = 2
+[tier.default]
+replicasets = 2
 replication_factor = 2
 
-[[tiers.default.services]]
+[[tier.default.services]]
 name = "main"
 plugin = "{{ project_name }}"
 migration_envs = [

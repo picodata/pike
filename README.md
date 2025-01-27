@@ -52,11 +52,11 @@ cargo pike --help
 Пример топологии:
 
 ```toml
-[tiers.default]
-instances = 2
+[tier.default]
+replicasets = 2
 replication_factor = 2
 
-[[tiers.default.services]]
+[[tier.default.services]]
 name = "main"
 plugin = "plugin_name"
 ```
@@ -106,8 +106,8 @@ cluster:
 
 # ...
 
-[tiers.inokentiy] # новый тир
-instances = 1
+[tier.compute] # новый тир
+replicasets = 1
 replication_factor = 1
 ```
 

@@ -31,7 +31,7 @@ struct MigrationEnv {
 
 #[derive(Debug, Deserialize)]
 struct Tier {
-    instances: u8,
+    replicasets: u8,
     replication_factor: u8,
     migration_envs: Option<Vec<MigrationEnv>>,
     services: Option<Vec<Service>>,
@@ -39,6 +39,7 @@ struct Tier {
 
 #[derive(Debug, Deserialize)]
 struct Topology {
+    #[serde(rename = "tier")]
     tiers: BTreeMap<String, Tier>,
 }
 
@@ -374,7 +375,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
     let first_instance_bin_port = 3001;
     let mut instance_id = 0;
     for (tier_name, tier) in &topology.tiers {
-        for _ in 0..(tier.instances * tier.replication_factor) {
+        for _ in 0..(tier.replicasets * tier.replication_factor) {
             instance_id += 1;
             let pico_instance = PicodataInstance::new(
                 instance_id,
