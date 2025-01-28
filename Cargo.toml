@@ -14,7 +14,7 @@ documentation = "https://github.com/picodata/pike"
 keywords = ["picodata", "cargo", "plugin"]
 categories = ["development-tools::cargo-plugins"]
 readme = "README.md"
-rust-version = "1.81.0"
+rust-version = "1.83.0"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
