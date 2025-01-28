@@ -56,9 +56,13 @@ cargo pike --help
 replicasets = 2
 replication_factor = 2
 
-[[tier.default.services]]
-name = "main"
-plugin = "plugin_name"
+[plugin.super_plugin]
+migration_context = [
+    { name = "example_name", value = "example_value" },
+]
+
+[plugin.super_plugin.service.main]
+tiers = ["default"]
 ```
 
 ```bash

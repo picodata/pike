@@ -2,9 +2,10 @@
 replicasets = 2
 replication_factor = 2
 
-[[tier.default.services]]
-name = "main"
-plugin = "{{ project_name }}"
-migration_envs = [
+[plugin.{{ project_name }}]
+migration_context = [
     { name = "example_name", value = "example_value" },
 ]
+
+[plugin.{{ project_name }}.service.main]
+tiers = ["default"]
