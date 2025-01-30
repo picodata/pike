@@ -123,12 +123,14 @@ fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &PathBuf)
     let admin_soket = data_dir.join("cluster").join("i1").join("admin.sock");
 
     for query in queries {
+        log::info!("picodata admin: {query}");
+
         let mut picodata_admin = Command::new(picodata_path)
             .arg("admin")
             .arg(admin_soket.to_str().unwrap())
             .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .context("failed to spawn child proccess of picodata admin")?;
 
@@ -142,6 +144,18 @@ fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &PathBuf)
         picodata_admin
             .wait()
             .context("failed to wait for picodata admin")?;
+
+        let outputs: [Box<dyn Read + Send>; 2] = [
+            Box::new(picodata_admin.stdout.unwrap()),
+            Box::new(picodata_admin.stderr.unwrap()),
+        ];
+        for output in outputs {
+            let reader = BufReader::new(output);
+            for line in reader.lines() {
+                let line = line.expect("failed to read picodata admin output");
+                log::info!("picodata admin: {line}");
+            }
+        }
     }
 
     for (plugin_name, plugin) in &topology.plugins {
