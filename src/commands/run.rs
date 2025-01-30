@@ -383,6 +383,8 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
     info!("Running the cluster...");
 
+    let is_clean_run = !params.data_dir.join("cluster").exists();
+
     let mut picodata_processes = vec![];
 
     let first_instance_bin_port = 3001;
@@ -404,8 +406,10 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
             picodata_processes.push(pico_instance);
 
-            // TODO: check is started by logs or iproto
-            thread::sleep(Duration::from_secs(5));
+            if is_clean_run {
+                // TODO: check is started by logs or iproto
+                thread::sleep(Duration::from_secs(5));
+            }
 
             info!("i{instance_id} - started");
         }
@@ -413,6 +417,11 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
     if !params.disable_plugin_install {
         info!("Enabling plugins...");
+
+        if !is_clean_run {
+            // TODO: check is started by logs or iproto
+            thread::sleep(Duration::from_secs(5));
+        }
 
         let result = enable_plugins(&topology, &params.data_dir, &params.picodata_path);
         if let Err(e) = result {
