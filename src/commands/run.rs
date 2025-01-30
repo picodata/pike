@@ -52,6 +52,8 @@ struct Topology {
     #[serde(default)]
     #[serde(rename = "plugin")]
     plugins: BTreeMap<String, Plugin>,
+    #[serde(default)]
+    enviroment: BTreeMap<String, String>,
 }
 
 impl Topology {
@@ -191,6 +193,7 @@ impl PicodataInstance {
         replication_factor: u8,
         tier: &str,
         run_params: &Params,
+        env_templates: &BTreeMap<String, String>,
     ) -> Result<Self> {
         let instance_name = format!("i{instance_id}");
         let instance_data_dir = run_params.data_dir.join("cluster").join(&instance_name);
@@ -198,7 +201,14 @@ impl PicodataInstance {
 
         fs::create_dir_all(&instance_data_dir).context("Failed to create instance data dir")?;
 
+        let env_templates_ctx = liquid::object!({
+            "instance_id": instance_id,
+        });
+        let env_vars = Self::compute_env_vars(env_templates, &env_templates_ctx)?;
+
         let mut child = Command::new(&run_params.picodata_path);
+        child.envs(&env_vars);
+
         child.args([
             "run",
             "--data-dir",
@@ -249,6 +259,19 @@ impl PicodataInstance {
         pico_instance.make_pid_file()?;
 
         Ok(pico_instance)
+    }
+
+    fn compute_env_vars(
+        env_templates: &BTreeMap<String, String>,
+        ctx: &liquid::Object,
+    ) -> Result<BTreeMap<String, String>> {
+        env_templates
+            .iter()
+            .map(|(k, v)| {
+                let tpl = liquid::ParserBuilder::with_stdlib().build()?.parse(v)?;
+                Ok((k.clone(), tpl.render(ctx)?))
+            })
+            .collect()
     }
 
     fn capture_logs(&mut self) -> Result<()> {
@@ -402,6 +425,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
                 tier.replication_factor,
                 tier_name,
                 params,
+                &topology.enviroment,
             )?;
 
             picodata_processes.push(pico_instance);
