@@ -46,4 +46,4 @@ name = "cargo-pike"
 path = "src/main.rs"
 
 [dev-dependencies]
-constcat = "0.5.1"
+constcat = "0.6.0"
