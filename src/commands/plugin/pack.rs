@@ -5,7 +5,7 @@ use lib::{cargo_build, BuildType};
 use serde::Deserialize;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::{env, fs};
 use tar::Builder;
 
@@ -28,7 +28,7 @@ const LIB_EXT: &str = "so";
 #[cfg(target_os = "macos")]
 const LIB_EXT: &str = "dylib";
 
-pub fn cmd(pack_debug: bool, target_dir: &Path) -> Result<()> {
+pub fn cmd(pack_debug: bool, target_dir: &PathBuf) -> Result<()> {
     let root_dir = env::current_dir()?;
     let plugin_name = &root_dir
         .file_name()
@@ -37,10 +37,10 @@ pub fn cmd(pack_debug: bool, target_dir: &Path) -> Result<()> {
         .context("parsing filename to string")?;
 
     let build_dir = if pack_debug {
-        cargo_build(BuildType::Debug).context("building release version of plugin")?;
+        cargo_build(BuildType::Debug, target_dir).context("building release version of plugin")?;
         Path::new(&root_dir).join(target_dir).join("debug")
     } else {
-        cargo_build(BuildType::Release).context("building debug version of plugin")?;
+        cargo_build(BuildType::Release, target_dir).context("building debug version of plugin")?;
         Path::new(&root_dir).join(target_dir).join("release")
     };
 

@@ -395,10 +395,10 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
     ))?;
 
     let plugins_dir = if params.use_release {
-        cargo_build(lib::BuildType::Release)?;
+        cargo_build(lib::BuildType::Release, &params.target_dir)?;
         params.target_dir.join("release")
     } else {
-        cargo_build(lib::BuildType::Debug)?;
+        cargo_build(lib::BuildType::Debug, &params.target_dir)?;
         params.target_dir.join("debug")
     };
 

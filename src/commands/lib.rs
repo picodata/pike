@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use std::io::{BufRead, BufReader, Read};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 pub enum BuildType {
@@ -8,7 +9,7 @@ pub enum BuildType {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub fn cargo_build(build_type: BuildType) -> Result<()> {
+pub fn cargo_build(build_type: BuildType, target_dir: &PathBuf) -> Result<()> {
     let mut args = vec!["build"];
     if let BuildType::Release = build_type {
         args.push("--release");
@@ -16,6 +17,8 @@ pub fn cargo_build(build_type: BuildType) -> Result<()> {
 
     let mut child = Command::new("cargo")
         .args(args)
+        .arg("--target-dir")
+        .args(target_dir)
         .stdout(Stdio::piped())
         .spawn()
         .context("running cargo build")?;

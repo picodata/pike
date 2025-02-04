@@ -248,6 +248,7 @@ cargo pike plugin build
 #### Доступные опции
 
 - `--release` - Сборка release-версии плагина
+- `--target-dir <TARGET_DIR>` - Директория собранных бинарных файлов. Значение по умолчанию: `target`
 
 ### `config apply`
 

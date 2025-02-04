@@ -3,8 +3,6 @@ use fs_extra::dir;
 use fs_extra::dir::CopyOptions;
 use std::env;
 use std::fs;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 const MANIFEST_TEMPLATE_NAME: &str = "manifest.yaml.template";
@@ -15,38 +13,54 @@ const LIB_EXT: &str = "so";
 #[cfg(target_os = "macos")]
 const LIB_EXT: &str = "dylib";
 
+// Get output path from env variable to get path up until debug/ or release/ folder
 fn get_output_path() -> PathBuf {
-    let manifest_dir_string = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let build_type = env::var("PROFILE").unwrap();
-
-    // Workaround for case, when plugins is a subcrate of workspace
-    if !Path::new("../Cargo.toml").exists() {
-        return Path::new(&manifest_dir_string)
-            .join("target")
-            .join(build_type);
-    }
-
-    let cargo_toml_file: File = File::open("../Cargo.toml").unwrap();
-    let toml_reader = BufReader::new(cargo_toml_file);
-    for line in toml_reader.lines() {
-        let line = line.unwrap();
-        if line.contains("workspace") {
-            return Path::new(&manifest_dir_string)
-                .join("..")
-                .join("target")
-                .join(build_type);
-        }
-    }
-
-    Path::new(&manifest_dir_string)
-        .join("target")
-        .join(build_type)
+    Path::new(&env::var("OUT_DIR").unwrap())
+        .ancestors()
+        .take(4)
+        .collect()
 }
 
 #[derive(Debug, Builder)]
 pub struct Params {}
 
 pub fn main(_params: &Params) {
+    let out_dir = get_output_path();
+    let out_manifest_path = Path::new(&out_dir).join("manifest.yaml");
+    let pkg_version = env::var("CARGO_PKG_VERSION").unwrap();
+    let pkg_name = env::var("CARGO_PKG_NAME").unwrap();
+    let plugin_path = out_dir.join(&pkg_name).join(&pkg_version);
+    let lib_name = format!("lib{}.{LIB_EXT}", pkg_name.replace('-', "_"));
+
+    dir::remove(&plugin_path).unwrap();
+    fs::create_dir_all(&plugin_path).unwrap();
+
+    // Iterate through plugins version to find the latest
+    // then replace symlinks with actual files
+    for plugin_version_entry in fs::read_dir(out_dir.join(&pkg_name)).unwrap() {
+        let plugin_version_path = plugin_version_entry.unwrap().path();
+        if !plugin_version_path.is_dir() {
+            continue;
+        }
+
+        for plugin_artefact in fs::read_dir(&plugin_version_path).unwrap() {
+            let entry = plugin_artefact.unwrap();
+            if !entry.file_type().unwrap().is_symlink()
+                || (entry.file_name().to_str().unwrap() != lib_name)
+            {
+                continue;
+            }
+
+            // Need to remove symlink before copying in order to properly replace symlink with file
+            let plugin_lib_path = plugin_version_path.join(&lib_name);
+            let _ = fs::remove_file(&plugin_lib_path);
+            fs::copy(out_dir.join(&lib_name), &plugin_lib_path).unwrap();
+
+            break;
+        }
+    }
+
+    // Generate new manifest.yaml and migrations from template
     let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let crate_dir = Path::new(&crate_dir);
 
@@ -74,40 +88,27 @@ pub fn main(_params: &Params) {
         Err(_) => Vec::new(),
     };
 
-    let pkg_version = env::var("CARGO_PKG_VERSION").unwrap();
-
     let template_ctx = liquid::object!({
         "version": pkg_version,
         "migrations": migrations,
     });
 
-    let out_dir = get_output_path();
-    let out_manifest_path = Path::new(&out_dir).join("manifest.yaml");
     fs::write(&out_manifest_path, template.render(&template_ctx).unwrap()).unwrap();
 
+    // Copy migrations directory and manifest into newest plugin version
     if !migrations.is_empty() {
         let mut cp_opts = CopyOptions::new();
         cp_opts.overwrite = true;
-        dir::copy(migrations_dir, &out_dir, &cp_opts).unwrap();
+        dir::copy(&migrations_dir, &out_dir, &cp_opts).unwrap();
+        dir::copy(out_dir.join("migrations"), &plugin_path, &cp_opts).unwrap();
     }
+    fs::copy(out_manifest_path, plugin_path.join("manifest.yaml")).unwrap();
 
-    // create symbolic link
-    let pkg_name = env::var("CARGO_PKG_NAME").unwrap();
-    let plugin_path = out_dir.join(&pkg_name).join(pkg_version);
-    dir::remove(&plugin_path).unwrap();
-    fs::create_dir_all(&plugin_path).unwrap();
-    std::os::unix::fs::symlink(out_manifest_path, plugin_path.join("manifest.yaml")).unwrap();
-    let lib_name = format!("lib{pkg_name}.{LIB_EXT}");
+    // Create symlinks for newest plugin version, which would be created after build.rs script
     std::os::unix::fs::symlink(out_dir.join(&lib_name), plugin_path.join(lib_name)).unwrap();
 
-    if !migrations.is_empty() {
-        std::os::unix::fs::symlink(out_dir.join("migrations"), plugin_path.join("migrations"))
-            .unwrap();
-
-        for m in &migrations {
-            println!("cargo::rerun-if-changed={m}");
-        }
-    }
-
+    // Trigger on Cargo.toml change in order not to run cargo update each time
+    // version is changed
+    println!("cargo::rerun-if-changed=Cargo.toml");
     println!("cargo::rerun-if-changed={MANIFEST_TEMPLATE_NAME}");
 }

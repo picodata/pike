@@ -88,6 +88,9 @@ enum Plugin {
     },
     /// Alias for cargo build command
     Build {
+        #[arg(long, value_name = "TARGET_DIR", default_value = "target")]
+        target_dir: PathBuf,
+
         #[arg(long, short)]
         release: bool,
     },
@@ -218,8 +221,11 @@ fn main() -> Result<()> {
                     commands::plugin::pack::cmd(debug, &target_dir)
                         .context("failed to execute \"pack\" command")?;
                 }
-                Plugin::Build { release } => {
-                    commands::plugin::build::cmd(release)
+                Plugin::Build {
+                    release,
+                    target_dir,
+                } => {
+                    commands::plugin::build::cmd(release, &target_dir)
                         .context("failed to execute \"build\" command")?;
                 }
                 Plugin::New {
