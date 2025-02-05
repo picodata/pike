@@ -21,13 +21,23 @@ pub enum BuildType {
     Debug,
 }
 
+#[derive(Default)]
+#[allow(clippy::struct_field_names)]
+pub struct CmdArguments {
+    pub run_args: Vec<String>,
+    pub build_args: Vec<String>,
+    pub plugin_args: Vec<String>,
+    pub stop_args: Vec<String>,
+}
+
 pub struct Cluster {
     run_handler: Option<Child>,
+    pub cmd_args: CmdArguments,
 }
 
 impl Drop for Cluster {
     fn drop(&mut self) {
-        let mut child = run_pike(vec!["stop"], PLUGIN_DIR).unwrap();
+        let mut child = run_pike(vec!["stop"], PLUGIN_DIR, &self.cmd_args.stop_args).unwrap();
         child.wait().unwrap();
         if let Some(ref mut run_handler) = self.run_handler {
             run_handler.wait().unwrap();
@@ -36,7 +46,7 @@ impl Drop for Cluster {
 }
 
 impl Cluster {
-    fn new() -> Cluster {
+    fn new(run_params: CmdArguments) -> Cluster {
         info!("cleaning artefacts from previous run");
 
         match fs::remove_file(Path::new(TESTS_DIR).join("instance.log")) {
@@ -55,7 +65,10 @@ impl Cluster {
             Err(e) => panic!("failed to delete plugin_dir: {e}"),
         }
 
-        Cluster { run_handler: None }
+        Cluster {
+            run_handler: None,
+            cmd_args: run_params,
+        }
     }
 
     fn set_run_handler(&mut self, handler: Child) {
@@ -135,24 +148,39 @@ pub fn build_plugin(build_type: &BuildType, new_version: &str) {
     };
 }
 
-pub fn run_cluster(timeout: Duration, total_instances: i32) -> Result<Cluster, std::io::Error> {
+pub fn run_cluster(
+    timeout: Duration,
+    total_instances: i32,
+    cmd_args: CmdArguments,
+) -> Result<Cluster, std::io::Error> {
     // Set up cleanup function
-    let mut cluster_handle = Cluster::new();
+    let mut cluster_handle = Cluster::new(cmd_args);
 
     // Create plugin from template
-    let mut plugin_creation_proc =
-        run_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR).unwrap();
+    let mut plugin_creation_proc = run_pike(
+        vec!["plugin", "new", "test-plugin"],
+        TESTS_DIR,
+        &cluster_handle.cmd_args.plugin_args,
+    )
+    .unwrap();
 
     wait_for_proc(&mut plugin_creation_proc, Duration::from_secs(10));
 
     // Build the plugin
     Command::new("cargo")
         .args(vec!["build"])
+        .args(&cluster_handle.cmd_args.build_args)
         .current_dir(PLUGIN_DIR)
         .output()?;
 
     // Setup the cluster
-    let run_handler = run_pike(vec!["run"], PLUGIN_DIR).unwrap();
+
+    let install_plugins = cluster_handle
+        .cmd_args
+        .run_args
+        .contains(&"--disable-install-plugins".to_string());
+
+    let run_handler = run_pike(vec!["run"], PLUGIN_DIR, &cluster_handle.cmd_args.run_args).unwrap();
     cluster_handle.set_run_handler(run_handler);
 
     let start_time = Instant::now();
@@ -203,7 +231,10 @@ pub fn run_cluster(timeout: Duration, total_instances: i32) -> Result<Cluster, s
 
         picodata_admin.kill().unwrap();
 
-        if can_connect && plugin_ready && online_instances_counter == total_instances {
+        if can_connect
+            && (plugin_ready || !install_plugins)
+            && online_instances_counter == total_instances
+        {
             return Ok(cluster_handle);
         }
 
@@ -211,7 +242,11 @@ pub fn run_cluster(timeout: Duration, total_instances: i32) -> Result<Cluster, s
     }
 }
 
-pub fn run_pike<A, P>(args: Vec<A>, current_dir: P) -> Result<std::process::Child, std::io::Error>
+pub fn run_pike<A, P>(
+    args: Vec<A>,
+    current_dir: P,
+    cmd_args: &Vec<String>,
+) -> Result<std::process::Child, std::io::Error>
 where
     A: AsRef<OsStr>,
     P: AsRef<Path>,
@@ -220,6 +255,7 @@ where
     Command::new(format!("{root_dir}/target/debug/cargo-pike"))
         .arg("pike")
         .args(args)
+        .args(cmd_args)
         .current_dir(current_dir)
         .spawn()
 }

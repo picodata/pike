@@ -1,0 +1,11 @@
+[tier.default]
+replicasets = 2
+replication_factor = 2
+
+[plugin.test-plugin]
+migration_context = [
+    { name = "example_name", value = "example_value" },
+]
+
+[plugin.test-plugin.service.main]
+tiers = ["default"]
