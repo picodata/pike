@@ -2,6 +2,7 @@ use constcat::concat;
 use log::info;
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Write};
+use std::path::PathBuf;
 use std::thread;
 use std::{
     fs::{self},
@@ -10,9 +11,15 @@ use std::{
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
+use toml_edit::{DocumentMut, Item};
 
 pub const TESTS_DIR: &str = "./tests/tmp/";
-pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, "test_plugin/");
+pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, "test-plugin/");
+
+pub enum BuildType {
+    Release,
+    Debug,
+}
 
 pub struct Cluster {
     run_handler: Option<Child>,
@@ -56,13 +63,85 @@ impl Cluster {
     }
 }
 
+pub fn check_plugin_version_artefacts(plugin_path: &Path, check_symlinks: bool) -> bool {
+    let symlink_path = plugin_path.join("libtest_plugin.so");
+
+    if check_symlinks && !validate_symlink(&symlink_path) {
+        return false;
+    }
+
+    check_existance(&plugin_path.join("manifest.yaml"), false)
+        && check_existance(&plugin_path.join("libtest_plugin.so"), check_symlinks)
+        && check_existance(&plugin_path.join("migrations"), false)
+}
+
+fn validate_symlink(symlink_path: &PathBuf) -> bool {
+    if let Ok(metadata) = fs::symlink_metadata(symlink_path) {
+        if metadata.file_type().is_symlink() {
+            if let Ok(resolved_path) = fs::read_link(symlink_path) {
+                return fs::metadata(resolved_path).is_ok();
+            }
+        }
+    }
+
+    false
+}
+
+fn check_existance(path: &Path, check_symlinks: bool) -> bool {
+    if !path.exists() {
+        return false;
+    };
+
+    let is_symlink = path
+        .symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false);
+    if check_symlinks {
+        is_symlink
+    } else {
+        !is_symlink
+    }
+}
+
+pub fn build_plugin(build_type: &BuildType, new_version: &str) {
+    // Change plugin version
+    let cargo_toml_path = Path::new(PLUGIN_DIR).join("Cargo.toml");
+    let toml_content = fs::read_to_string(&cargo_toml_path).unwrap();
+
+    let mut doc = toml_content
+        .parse::<DocumentMut>()
+        .expect("Failed to parse Cargo.toml");
+
+    if let Some(Item::Table(package)) = doc.get_mut("package") {
+        if let Some(version) = package.get_mut("version") {
+            *version = toml_edit::value(new_version);
+        }
+    }
+    fs::write(cargo_toml_path, doc.to_string()).unwrap();
+
+    // Build according version
+    match build_type {
+        BuildType::Debug => Command::new("cargo")
+            .args(vec!["build"])
+            .current_dir(PLUGIN_DIR)
+            .output()
+            .unwrap(),
+        BuildType::Release => Command::new("cargo")
+            .args(vec!["build"])
+            .arg("--release")
+            .current_dir(PLUGIN_DIR)
+            .output()
+            .unwrap(),
+    };
+}
+
 pub fn run_cluster(timeout: Duration, total_instances: i32) -> Result<Cluster, std::io::Error> {
     // Set up cleanup function
     let mut cluster_handle = Cluster::new();
 
     // Create plugin from template
     let mut plugin_creation_proc =
-        run_pike(vec!["plugin", "new", "test_plugin"], TESTS_DIR).unwrap();
+        run_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR).unwrap();
 
     wait_for_proc(&mut plugin_creation_proc, Duration::from_secs(10));
 
