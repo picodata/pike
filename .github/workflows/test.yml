@@ -2,9 +2,8 @@ name: Tests
 
 on:
   push:
-    branches:
-      - master
   pull_request:
+    types: [opened, reopened]
 
 jobs:
   pre_job:
