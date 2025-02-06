@@ -5,6 +5,8 @@ use helpers::{
     build_plugin, check_plugin_version_artefacts, cleanup_dir, get_picodata_table, run_cluster,
     run_pike, wait_for_proc, CmdArguments, PACK_PLUGIN_NAME, PLUGIN_DIR, TESTS_DIR,
 };
+use nix::sys::signal::kill;
+use nix::unistd::Pid;
 use std::{
     fs::{self, File},
     io::BufReader,
@@ -58,6 +60,8 @@ fn test_config_apply() {
     wait_for_proc(&mut plugin_creation_proc, Duration::from_secs(10));
 
     let pico_plugin_config = get_picodata_table(Path::new("tmp"), "_pico_plugin_config");
+
+    std::thread::sleep(Duration::from_secs(10));
 
     assert!(pico_plugin_config.contains("value") && pico_plugin_config.contains("changed"));
 }
@@ -190,4 +194,64 @@ fn test_cargo_pack() {
     assert!(plugin_path.join("libtest_pack_plugin.so").exists());
     assert!(plugin_path.join("manifest.yaml").exists());
     assert!(plugin_path.join("migrations").is_dir());
+}
+
+#[test]
+fn test_cargo_stop() {
+    let _cluster_handle = run_cluster(
+        Duration::from_secs(120),
+        TOTAL_INSTANCES,
+        CmdArguments::default(),
+    )
+    .unwrap();
+
+    // Stop picodata cluster
+    let mut cargo_stop_proc = run_pike(vec!["stop"], PLUGIN_DIR, &vec![]).unwrap();
+
+    wait_for_proc(&mut cargo_stop_proc, Duration::from_secs(10));
+
+    std::thread::sleep(Duration::from_secs(10));
+
+    // Search for PID's of picodata instances and check their liveness
+    for entry in fs::read_dir(Path::new(PLUGIN_DIR).join("tmp").join("cluster")).unwrap() {
+        let entry = entry.unwrap();
+        let pid_path = entry.path().join("pid");
+
+        assert!(pid_path.exists());
+
+        if let Ok(content) = fs::read_to_string(&pid_path) {
+            let pid = Pid::from_raw(content.trim().parse::<i32>().unwrap());
+
+            // Check if proccess of picodata is still running or not
+            assert!(kill(pid, None).is_err());
+        }
+    }
+}
+
+#[test]
+fn test_cargo_plugin_new() {
+    cleanup_dir(&Path::new(PLUGIN_DIR).to_path_buf());
+    let mut plugin_new_proc =
+        run_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]).unwrap();
+
+    wait_for_proc(&mut plugin_new_proc, Duration::from_secs(10));
+
+    assert!(Path::new(PLUGIN_DIR).join("config.yaml").exists());
+    assert!(Path::new(PLUGIN_DIR).join(".git").exists());
+    assert!(Path::new(PLUGIN_DIR).join("topology.toml").exists());
+    assert!(Path::new(PLUGIN_DIR)
+        .join("manifest.yaml.template")
+        .exists());
+
+    cleanup_dir(&Path::new(PLUGIN_DIR).to_path_buf());
+    plugin_new_proc = run_pike(
+        vec!["plugin", "new", "test-plugin", "--without-git"],
+        TESTS_DIR,
+        &vec![],
+    )
+    .unwrap();
+
+    wait_for_proc(&mut plugin_new_proc, Duration::from_secs(10));
+
+    assert!(!Path::new(PLUGIN_DIR).join(".git").exists());
 }
