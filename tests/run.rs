@@ -2,8 +2,8 @@ mod helpers;
 
 use flate2::bufread::GzDecoder;
 use helpers::{
-    build_plugin, check_plugin_version_artefacts, cleanup_dir, run_cluster, run_pike,
-    wait_for_proc, CmdArguments, PACK_PLUGIN_NAME, PLUGIN_DIR, TESTS_DIR,
+    build_plugin, check_plugin_version_artefacts, cleanup_dir, get_picodata_table, run_cluster,
+    run_pike, wait_for_proc, CmdArguments, PACK_PLUGIN_NAME, PLUGIN_DIR, TESTS_DIR,
 };
 use std::{
     fs::{self, File},
@@ -42,6 +42,24 @@ fn test_cluster_setup_release() {
 
     let _cluster_handle =
         run_cluster(Duration::from_secs(120), TOTAL_INSTANCES, run_params).unwrap();
+}
+
+#[test]
+fn test_config_apply() {
+    let _cluster_handle = run_cluster(
+        Duration::from_secs(120),
+        TOTAL_INSTANCES,
+        CmdArguments::default(),
+    )
+    .unwrap();
+
+    let mut plugin_creation_proc = run_pike(vec!["config", "apply"], PLUGIN_DIR, &vec![]).unwrap();
+
+    wait_for_proc(&mut plugin_creation_proc, Duration::from_secs(10));
+
+    let pico_plugin_config = get_picodata_table(Path::new("tmp"), "_pico_plugin_config");
+
+    assert!(pico_plugin_config.contains("value") && pico_plugin_config.contains("changed"));
 }
 
 // Using as much command line arguments in this test as we can

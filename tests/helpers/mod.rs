@@ -188,8 +188,16 @@ pub fn run_cluster(
 
     // Run in the loop until we get info about successful plugin installation
     loop {
+        // Get path to data dir from cmd_args
+        let cur_run_args = &cluster_handle.cmd_args.run_args;
+        let mut data_dir_path = Path::new("tmp");
+        if let Some(index) = cur_run_args.iter().position(|x| x == "--data-dir") {
+            if index + 1 < cur_run_args.len() {
+                data_dir_path = Path::new(&cur_run_args[index + 1]);
+            }
+        }
         // Check if cluster set up correctly
-        let mut picodata_admin = await_picodata_admin(Duration::from_secs(60))?;
+        let mut picodata_admin = await_picodata_admin(Duration::from_secs(60), data_dir_path)?;
         let stdout = picodata_admin
             .stdout
             .take()
@@ -243,6 +251,29 @@ pub fn run_cluster(
     }
 }
 
+pub fn get_picodata_table(data_dir_path: &Path, table_name: &str) -> String {
+    let mut picodata_admin = await_picodata_admin(Duration::from_secs(60), data_dir_path).unwrap();
+    let stdout = picodata_admin
+        .stdout
+        .take()
+        .expect("Failed to capture stdout");
+
+    // New scope to avoid infinite cycle while reading picodata stdout
+    {
+        let picodata_stdin = picodata_admin.stdin.as_mut().unwrap();
+        let query = format!(r"SELECT * FROM {table_name};");
+        picodata_stdin.write_all(query.as_bytes()).unwrap();
+        picodata_admin.wait().unwrap();
+    }
+
+    let reader = BufReader::new(stdout);
+    reader
+        .lines()
+        .collect::<Result<Vec<String>, _>>()
+        .unwrap()
+        .join("\n")
+}
+
 pub fn run_pike<A, P>(
     args: Vec<A>,
     current_dir: P,
@@ -281,9 +312,11 @@ pub fn wait_for_proc(proc: &mut Child, timeout: Duration) {
     }
 }
 
-pub fn await_picodata_admin(timeout: Duration) -> Result<Child, std::io::Error> {
+pub fn await_picodata_admin(
+    timeout: Duration,
+    data_dir_path: &Path,
+) -> Result<Child, std::io::Error> {
     let start_time = Instant::now();
-
     loop {
         assert!(
             start_time.elapsed() < timeout,
@@ -292,7 +325,9 @@ pub fn await_picodata_admin(timeout: Duration) -> Result<Child, std::io::Error> 
 
         let picodata_admin = Command::new("picodata")
             .arg("admin")
-            .arg(PLUGIN_DIR.to_string() + "tmp/cluster/i1/admin.sock")
+            .arg(
+                PLUGIN_DIR.to_string() + data_dir_path.to_str().unwrap() + "/cluster/i1/admin.sock",
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn();

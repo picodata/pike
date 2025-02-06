@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use derive_builder::Builder;
+use log::info;
 use serde::Deserialize;
 use serde_yaml::Value;
 use std::{
@@ -78,6 +79,8 @@ pub struct Params {
 }
 
 pub fn cmd(params: &Params) -> Result<()> {
+    info!("Applying plugin config...");
+
     let admin_socket = params
         .data_dir
         .join("cluster")
@@ -107,6 +110,8 @@ pub fn cmd(params: &Params) -> Result<()> {
             "failed to apply service config for service {service_name}"
         ))?;
     }
+
+    info!("Plugin config successfully applied.");
 
     Ok(())
 }
