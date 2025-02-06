@@ -68,8 +68,10 @@ pub fn cmd(pack_debug: bool, target_dir: &PathBuf) -> Result<()> {
     let normalized_package_name = cargo_manifest.package.name.replace('-', "_");
 
     let compressed_file = File::create(format!(
-        "target/{}-{}.tar.gz",
-        &normalized_package_name, cargo_manifest.package.version
+        "{}/{}-{}.tar.gz",
+        target_dir.display(),
+        &normalized_package_name,
+        cargo_manifest.package.version
     ))
     .context("failed to pack the plugin")?;
 
