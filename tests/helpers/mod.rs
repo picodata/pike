@@ -15,6 +15,7 @@ use toml_edit::{DocumentMut, Item};
 
 pub const TESTS_DIR: &str = "./tests/tmp/";
 pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, "test-plugin/");
+pub const PACK_PLUGIN_NAME: &str = "test-pack-plugin";
 
 pub enum BuildType {
     Release,
@@ -305,5 +306,15 @@ pub fn await_picodata_admin(timeout: Duration) -> Result<Child, std::io::Error> 
                 std::thread::sleep(Duration::from_secs(1));
             }
         }
+    }
+}
+
+pub fn cleanup_dir(path: &PathBuf) {
+    match fs::remove_dir_all(path) {
+        Ok(()) => info!("clearing test plugin dir."),
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            info!("plugin dir not found, skipping cleanup");
+        }
+        Err(e) => panic!("failed to delete plugin_dir: {e}"),
     }
 }
