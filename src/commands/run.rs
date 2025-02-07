@@ -99,7 +99,7 @@ fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &PathBuf)
         // add migration context
         for migration_env in &plugin.migration_context {
             queries.push(format!(
-                "ALTER PLUGIN {plugin_name} {plugin_version} SET migration_context.{}='{}';",
+                "ALTER PLUGIN \"{plugin_name}\" {plugin_version} SET migration_context.{}='{}';",
                 migration_env.name, migration_env.value
             ));
         }
