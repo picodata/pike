@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use constcat::concat;
 use log::info;
 use std::ffi::OsStr;
@@ -15,7 +17,6 @@ use toml_edit::{DocumentMut, Item};
 
 pub const TESTS_DIR: &str = "./tests/tmp/";
 pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, "test-plugin/");
-pub const PACK_PLUGIN_NAME: &str = "test-pack-plugin";
 
 pub enum BuildType {
     Release,
