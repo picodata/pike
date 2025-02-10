@@ -68,6 +68,6 @@ jobs:
           toolchain: "1.84"
           override: true
       - name: Run tests
-        run: exec make tests
+        run: make tests
         env:
           RUST_LOG: debug
