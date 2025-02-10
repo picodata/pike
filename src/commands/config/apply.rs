@@ -6,7 +6,7 @@ use serde_yaml::Value;
 use std::{
     collections::HashMap,
     fs,
-    io::Write,
+    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -29,6 +29,8 @@ fn apply_service_config(
     }
 
     for query in queries {
+        log::info!("picodata admin: {query}");
+
         let mut picodata_admin = Command::new("picodata")
             .arg("admin")
             .arg(
@@ -36,7 +38,8 @@ fn apply_service_config(
                     .to_str()
                     .context("path to picodata admin socket contains invalid characters")?,
             )
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .stdin(Stdio::piped())
             .spawn()
             .context("failed to run picodata admin")?;
@@ -54,6 +57,18 @@ fn apply_service_config(
         picodata_admin
             .wait()
             .context("failed to wait for picodata admin")?;
+
+        let outputs: [Box<dyn Read + Send>; 2] = [
+            Box::new(picodata_admin.stdout.unwrap()),
+            Box::new(picodata_admin.stderr.unwrap()),
+        ];
+        for output in outputs {
+            let reader = BufReader::new(output);
+            for line in reader.lines() {
+                let line = line.expect("failed to read picodata admin output");
+                log::info!("picodata admin: {line}");
+            }
+        }
     }
 
     Ok(())
