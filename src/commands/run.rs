@@ -3,13 +3,15 @@ use colored::Colorize;
 use derive_builder::Builder;
 use lib::cargo_build;
 use log::{error, info};
+use nix::sys::signal::{kill, Signal};
+use nix::unistd::Pid;
 use rand::Rng;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::process::{exit, Child, Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -465,31 +467,29 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::fn_params_excessive_bools)]
+#[allow(clippy::cast_possible_wrap)]
 pub fn cmd(params: &Params) -> Result<()> {
-    let pico_instances = Arc::new(Mutex::new(cluster(params)?));
+    let mut pico_instances = cluster(params)?;
 
     if params.daemon {
         return Ok(());
     }
 
-    // Run in the loop until the child processes are killed
-    // with cargo stop or Ctrl+C signal is recieved
-    let picodata_processes = pico_instances.clone();
+    // Set Ctrl+C handler. Upon recieving Ctrl+C signal
+    // All instances would be killed, then joined and
+    // destructors will be called
+    let picodata_pids: Vec<u32> = pico_instances.iter().map(|p| p.child.id()).collect();
     ctrlc::set_handler(move || {
         info!("received Ctrl+C. Shutting down ...");
 
-        let mut childs = picodata_processes.lock().unwrap();
-        for process in childs.iter_mut() {
-            process.kill().unwrap_or_else(|e| {
-                error!("failed to kill picodata instances: {:#}", e);
-            });
+        for &pid in &picodata_pids {
+            let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
         }
-
-        exit(0);
     })
     .context("failed to set Ctrl+c handler")?;
 
-    for instance in pico_instances.lock().unwrap().iter_mut() {
+    // Wait for all instances to stop
+    for instance in &mut pico_instances {
         instance.join();
     }
 

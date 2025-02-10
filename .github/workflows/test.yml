@@ -61,11 +61,13 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system dependencies
-        run: dnf install -y gcc git make
+        run: dnf install -y gcc git make procps
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: "1.84"
           override: true
       - name: Run tests
-        run: make tests
+        run: exec make tests
+        env:
+          RUST_LOG: debug

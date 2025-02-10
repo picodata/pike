@@ -6,6 +6,7 @@ use nix::unistd::Pid;
 use std::{
     fs::{self},
     path::Path,
+    thread,
     time::{Duration, Instant},
     vec,
 };
@@ -90,14 +91,14 @@ fn test_cargo_stop() {
         CmdArguments::default(),
     )
     .unwrap();
-    std::thread::sleep(Duration::from_secs(10));
+
     // Stop picodata cluster
     let mut cargo_stop_proc = run_pike(vec!["stop"], PLUGIN_DIR, &vec![]).unwrap();
 
     wait_for_proc(&mut cargo_stop_proc, Duration::from_secs(10));
 
     let start = Instant::now();
-    while Instant::now().duration_since(start) < Duration::from_secs(120) {
+    while Instant::now().duration_since(start) < Duration::from_secs(60) {
         // Search for PID's of picodata instances and check their liveness
         let mut cluster_stopped = true;
         for entry in fs::read_dir(Path::new(PLUGIN_DIR).join("tmp").join("cluster")).unwrap() {
@@ -106,7 +107,6 @@ fn test_cargo_stop() {
 
             if let Ok(content) = fs::read_to_string(&pid_path) {
                 let pid = Pid::from_raw(content.trim().parse::<i32>().unwrap());
-
                 // Check if proccess of picodata is still running
                 if kill(pid, None).is_ok() {
                     cluster_stopped = false;
@@ -118,6 +118,8 @@ fn test_cargo_stop() {
         if cluster_stopped {
             return;
         }
+
+        thread::sleep(Duration::from_secs(1));
     }
 
     panic!(

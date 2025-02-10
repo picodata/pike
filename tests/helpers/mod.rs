@@ -177,11 +177,6 @@ pub fn run_cluster(
 
     // Setup the cluster
 
-    let install_plugins = cluster_handle
-        .cmd_args
-        .run_args
-        .contains(&"--disable-install-plugins".to_string());
-
     let run_handler = run_pike(vec!["run"], PLUGIN_DIR, &cluster_handle.cmd_args.run_args).unwrap();
     cluster_handle.set_run_handler(run_handler);
 
@@ -241,10 +236,7 @@ pub fn run_cluster(
 
         picodata_admin.kill().unwrap();
 
-        if can_connect
-            && (plugin_ready || !install_plugins)
-            && online_instances_counter == total_instances
-        {
+        if can_connect && plugin_ready && online_instances_counter == total_instances {
             return Ok(cluster_handle);
         }
 
