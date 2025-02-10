@@ -47,4 +47,4 @@ path = "src/main.rs"
 
 [dev-dependencies]
 toml_edit = "0.22.23"
-constcat = "0.5.1"
+constcat = "0.6.0"
