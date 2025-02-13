@@ -1,6 +1,6 @@
 mod helpers;
 
-use helpers::{get_picodata_table, run_cluster, run_pike, wait_for_proc, CmdArguments, PLUGIN_DIR};
+use helpers::{exec_pike, get_picodata_table, run_cluster, CmdArguments, PLUGIN_DIR};
 use std::{
     path::Path,
     thread,
@@ -21,9 +21,9 @@ fn test_config_apply() {
 
     thread::sleep(Duration::from_secs(30));
 
-    let mut plugin_creation_proc = run_pike(vec!["config", "apply"], PLUGIN_DIR, &vec![]).unwrap();
-
-    wait_for_proc(&mut plugin_creation_proc, Duration::from_secs(10));
+    assert!(exec_pike(vec!["config", "apply"], PLUGIN_DIR, &vec![])
+        .unwrap()
+        .success());
 
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {

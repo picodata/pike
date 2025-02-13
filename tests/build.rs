@@ -1,12 +1,9 @@
 mod helpers;
 
-use helpers::{
-    build_plugin, check_plugin_version_artefacts, run_pike, wait_for_proc, PLUGIN_DIR, TESTS_DIR,
-};
+use helpers::{build_plugin, check_plugin_version_artefacts, exec_pike, PLUGIN_DIR, TESTS_DIR};
 use std::{
     fs::{self},
     path::Path,
-    time::Duration,
     vec,
 };
 
@@ -17,10 +14,11 @@ fn test_cargo_build() {
         fs::remove_dir_all(PLUGIN_DIR).unwrap();
     }
 
-    let mut plugin_creation_proc =
-        run_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]).unwrap();
-
-    wait_for_proc(&mut plugin_creation_proc, Duration::from_secs(10));
+    assert!(
+        exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![])
+            .unwrap()
+            .success()
+    );
 
     build_plugin(&helpers::BuildType::Debug, "0.1.0");
     build_plugin(&helpers::BuildType::Debug, "0.1.1");

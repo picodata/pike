@@ -5,6 +5,7 @@ use log::info;
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
+use std::process::ExitStatus;
 use std::thread;
 use std::{
     fs::{self},
@@ -39,8 +40,12 @@ pub struct Cluster {
 
 impl Drop for Cluster {
     fn drop(&mut self) {
-        let mut child = run_pike(vec!["stop"], PLUGIN_DIR, &self.cmd_args.stop_args).unwrap();
-        child.wait().unwrap();
+        assert!(
+            exec_pike(vec!["stop"], PLUGIN_DIR, &self.cmd_args.stop_args)
+                .unwrap()
+                .success()
+        );
+
         if let Some(ref mut run_handler) = self.run_handler {
             run_handler.wait().unwrap();
         }
@@ -159,14 +164,19 @@ pub fn run_cluster(
     let mut cluster_handle = Cluster::new(cmd_args);
 
     // Create plugin from template
-    let mut plugin_creation_proc = run_pike(
+    let exec_status = exec_pike(
         vec!["plugin", "new", "test-plugin"],
         TESTS_DIR,
         &cluster_handle.cmd_args.plugin_args,
     )
     .unwrap();
 
-    wait_for_proc(&mut plugin_creation_proc, Duration::from_secs(10));
+    if !exec_status.success() {
+        return Err(std::io::Error::new(
+            ErrorKind::Other,
+            "Failed to execute `cargo pike plugin new` command",
+        ));
+    }
 
     // Build the plugin
     Command::new("cargo")
@@ -176,8 +186,14 @@ pub fn run_cluster(
         .output()?;
 
     // Setup the cluster
-
-    let run_handler = run_pike(vec!["run"], PLUGIN_DIR, &cluster_handle.cmd_args.run_args).unwrap();
+    let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let run_handler = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
+        .arg("pike")
+        .arg("run")
+        .args(&cluster_handle.cmd_args.run_args)
+        .current_dir(PLUGIN_DIR)
+        .spawn()
+        .unwrap();
     cluster_handle.set_run_handler(run_handler);
 
     let start_time = Instant::now();
@@ -267,11 +283,13 @@ pub fn get_picodata_table(data_dir_path: &Path, table_name: &str) -> String {
         .join("\n")
 }
 
-pub fn run_pike<A, P>(
+// Spawn child process where pike is executed
+// Funciton waits for child process to end
+pub fn exec_pike<A, P>(
     args: Vec<A>,
     current_dir: P,
     cmd_args: &Vec<String>,
-) -> Result<std::process::Child, std::io::Error>
+) -> Result<ExitStatus, std::io::Error>
 where
     A: AsRef<OsStr>,
     P: AsRef<Path>,
@@ -282,7 +300,7 @@ where
         .args(args)
         .args(cmd_args)
         .current_dir(current_dir)
-        .spawn()
+        .status()
 }
 
 pub fn wait_for_proc(proc: &mut Child, timeout: Duration) {

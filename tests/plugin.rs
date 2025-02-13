@@ -1,8 +1,8 @@
 mod helpers;
 
 use flate2::bufread::GzDecoder;
-use helpers::{cleanup_dir, run_pike, wait_for_proc, PLUGIN_DIR, TESTS_DIR};
-use std::{fs::File, io::BufReader, path::Path, time::Duration, vec};
+use helpers::{cleanup_dir, exec_pike, PLUGIN_DIR, TESTS_DIR};
+use std::{fs::File, io::BufReader, path::Path, vec};
 use tar::Archive;
 
 pub const PACK_PLUGIN_NAME: &str = "test-pack-plugin";
@@ -11,19 +11,19 @@ pub const PACK_PLUGIN_NAME: &str = "test-pack-plugin";
 fn test_cargo_pack() {
     cleanup_dir(&Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME));
 
-    let mut plugin_creation_proc =
-        run_pike(vec!["plugin", "new", PACK_PLUGIN_NAME], TESTS_DIR, &vec![]).unwrap();
+    assert!(
+        exec_pike(vec!["plugin", "new", PACK_PLUGIN_NAME], TESTS_DIR, &vec![])
+            .unwrap()
+            .success()
+    );
 
-    wait_for_proc(&mut plugin_creation_proc, Duration::from_secs(10));
-
-    let mut plugin_pack_proc = run_pike(
+    assert!(exec_pike(
         vec!["plugin", "pack"],
         Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME),
         &vec!["--target-dir".to_string(), "tmp_target".to_string()],
     )
-    .unwrap();
-
-    wait_for_proc(&mut plugin_pack_proc, Duration::from_secs(120));
+    .unwrap()
+    .success());
 
     // Hail for archive handling in Rust
     let plugin_path = Path::new(TESTS_DIR)
@@ -44,10 +44,12 @@ fn test_cargo_pack() {
 #[test]
 fn test_cargo_plugin_new() {
     cleanup_dir(&Path::new(PLUGIN_DIR).to_path_buf());
-    let mut plugin_new_proc =
-        run_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]).unwrap();
 
-    wait_for_proc(&mut plugin_new_proc, Duration::from_secs(10));
+    assert!(
+        exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![])
+            .unwrap()
+            .success()
+    );
 
     assert!(Path::new(PLUGIN_DIR).join("config.yaml").exists());
     assert!(Path::new(PLUGIN_DIR).join(".git").exists());
@@ -57,14 +59,14 @@ fn test_cargo_plugin_new() {
         .exists());
 
     cleanup_dir(&Path::new(PLUGIN_DIR).to_path_buf());
-    plugin_new_proc = run_pike(
+
+    assert!(exec_pike(
         vec!["plugin", "new", "test-plugin", "--without-git"],
         TESTS_DIR,
         &vec![],
     )
-    .unwrap();
-
-    wait_for_proc(&mut plugin_new_proc, Duration::from_secs(10));
+    .unwrap()
+    .success());
 
     assert!(!Path::new(PLUGIN_DIR).join(".git").exists());
 }
