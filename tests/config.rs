@@ -3,7 +3,6 @@ mod helpers;
 use helpers::{exec_pike, get_picodata_table, run_cluster, CmdArguments, PLUGIN_DIR};
 use std::{
     path::Path,
-    thread,
     time::{Duration, Instant},
     vec,
 };
@@ -18,8 +17,6 @@ fn test_config_apply() {
         CmdArguments::default(),
     )
     .unwrap();
-
-    thread::sleep(Duration::from_secs(30));
 
     assert!(exec_pike(vec!["config", "apply"], PLUGIN_DIR, &vec![])
         .unwrap()
