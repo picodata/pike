@@ -1,3 +1,3 @@
 .PHONY: tests
 tests:
-	cargo test -- --nocapture --test-threads=1
+	cargo test -- --test-threads=1

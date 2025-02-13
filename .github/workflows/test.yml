@@ -61,7 +61,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system dependencies
-        run: dnf install -y gcc git make procps
+        run: dnf install -y gcc git make
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
         with:
