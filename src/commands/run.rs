@@ -19,25 +19,51 @@ use std::{fs, path::PathBuf};
 
 use crate::commands::lib;
 
-#[derive(Debug, Deserialize)]
-struct Tier {
+#[derive(Debug, Deserialize, Clone)]
+pub struct Tier {
     replicasets: u8,
     replication_factor: u8,
 }
 
-#[derive(Debug, Deserialize)]
-struct MigrationContextVar {
+impl Default for Tier {
+    fn default() -> Self {
+        Self {
+            replicasets: 2,
+            replication_factor: 2,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct MigrationContextVar {
     name: String,
     value: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct Service {
+impl Default for MigrationContextVar {
+    fn default() -> Self {
+        Self {
+            name: "example_name".to_string(),
+            value: "example_value".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Service {
     tiers: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Plugin {
+impl Default for Service {
+    fn default() -> Self {
+        Self {
+            tiers: vec!["default".to_string()],
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Plugin {
     #[serde(default)]
     migration_context: Vec<MigrationContextVar>,
     #[serde(default)]
@@ -47,15 +73,44 @@ struct Plugin {
     version: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Topology {
+impl Default for Plugin {
+    fn default() -> Self {
+        let mut services = BTreeMap::new();
+        services.insert("main".to_string(), Service::default());
+
+        Self {
+            migration_context: vec![MigrationContextVar::default()],
+            services,
+            version: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Topology {
     #[serde(rename = "tier")]
-    tiers: BTreeMap<String, Tier>,
+    pub tiers: BTreeMap<String, Tier>,
     #[serde(default)]
     #[serde(rename = "plugin")]
-    plugins: BTreeMap<String, Plugin>,
+    pub plugins: BTreeMap<String, Plugin>,
     #[serde(default)]
-    enviroment: BTreeMap<String, String>,
+    pub enviroment: BTreeMap<String, String>,
+}
+
+impl Default for Topology {
+    fn default() -> Self {
+        let mut tiers = BTreeMap::new();
+        tiers.insert("default".to_string(), Tier::default());
+
+        let mut plugins = BTreeMap::new();
+        plugins.insert("default_plugin_name".to_string(), Plugin::default());
+
+        Self {
+            tiers,
+            plugins,
+            enviroment: BTreeMap::new(),
+        }
+    }
 }
 
 impl Topology {
@@ -364,8 +419,8 @@ impl Drop for PicodataInstance {
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Builder)]
 pub struct Params {
-    #[builder(default = "PathBuf::from(\"topology.toml\")")]
-    topology_path: PathBuf,
+    #[builder]
+    topology: Topology,
     #[builder(default = "PathBuf::from(\"./tmp\")")]
     data_dir: PathBuf,
     #[builder(default = "false")]
@@ -386,16 +441,7 @@ pub struct Params {
     disable_colors: bool,
 }
 
-pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
-    let mut topology: Topology = toml::from_str(
-        &fs::read_to_string(&params.topology_path)
-            .context(format!("failed to read {}", params.topology_path.display()))?,
-    )
-    .context(format!(
-        "failed to parse .toml file of {}",
-        params.topology_path.display()
-    ))?;
-
+pub fn cluster(params: &mut Params) -> Result<Vec<PicodataInstance>> {
     let plugins_dir = if params.use_release {
         cargo_build(lib::BuildType::Release, &params.target_dir)?;
         params.target_dir.join("release")
@@ -404,7 +450,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         params.target_dir.join("debug")
     };
 
-    topology.find_plugin_versions(&plugins_dir)?;
+    params.topology.find_plugin_versions(&plugins_dir)?;
 
     info!("Running the cluster...");
 
@@ -414,7 +460,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
     let first_instance_bin_port = 3001;
     let mut instance_id = 0;
-    for (tier_name, tier) in &topology.tiers {
+    for (tier_name, tier) in &params.topology.tiers {
         for _ in 0..(tier.replicasets * tier.replication_factor) {
             instance_id += 1;
             let pico_instance = PicodataInstance::new(
@@ -427,7 +473,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
                 tier.replication_factor,
                 tier_name,
                 params,
-                &topology.enviroment,
+                &params.topology.enviroment,
             )?;
 
             picodata_processes.push(pico_instance);
@@ -449,7 +495,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             thread::sleep(Duration::from_secs(5));
         }
 
-        let result = enable_plugins(&topology, &params.data_dir, &params.picodata_path);
+        let result = enable_plugins(&params.topology, &params.data_dir, &params.picodata_path);
         if let Err(e) = result {
             for process in &mut picodata_processes {
                 process.kill().unwrap_or_else(|e| {
@@ -468,7 +514,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::fn_params_excessive_bools)]
 #[allow(clippy::cast_possible_wrap)]
-pub fn cmd(params: &Params) -> Result<()> {
+pub fn cmd(params: &mut Params) -> Result<()> {
     let mut pico_instances = cluster(params)?;
 
     if params.daemon {

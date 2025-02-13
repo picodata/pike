@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use nix::unistd::{fork, ForkResult};
-use std::{env, path::PathBuf, process, thread, time::Duration};
+use std::{env, fs, path::PathBuf, process, thread, time::Duration};
 
 mod commands;
 
@@ -187,8 +187,17 @@ fn main() -> Result<()> {
             if !daemon {
                 run_child_killer();
             }
-            let params = commands::run::ParamsBuilder::default()
-                .topology_path(topology)
+            let topology: commands::run::Topology = toml::from_str(
+                &fs::read_to_string(&topology)
+                    .context(format!("failed to read {}", &topology.display()))?,
+            )
+            .context(format!(
+                "failed to parse .toml file of {}",
+                topology.display()
+            ))?;
+
+            let mut params = commands::run::ParamsBuilder::default()
+                .topology(topology)
                 .data_dir(data_dir)
                 .disable_plugin_install(disable_plugin_install)
                 .base_http_port(base_http_port)
@@ -200,7 +209,7 @@ fn main() -> Result<()> {
                 .disable_colors(disable_colors)
                 .build()
                 .unwrap();
-            commands::run::cmd(&params).context("failed to execute Run command")?;
+            commands::run::cmd(&mut params).context("failed to execute Run command")?;
         }
         Command::Stop { data_dir } => {
             run_child_killer();

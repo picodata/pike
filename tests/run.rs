@@ -1,6 +1,11 @@
 mod helpers;
 
-use helpers::{run_cluster, CmdArguments, PLUGIN_DIR};
+use helpers::{exec_pike, run_cluster, CmdArguments, PLUGIN_DIR, TESTS_DIR};
+use pike::cluster::run;
+use pike::cluster::Plugin;
+use pike::cluster::RunParamsBuilder;
+use pike::cluster::Topology;
+use std::collections::BTreeMap;
 use std::{
     fs::{self},
     path::Path,
@@ -78,4 +83,43 @@ fn test_cluster_daemon_and_arguments() {
             assert!(content.trim().parse::<u32>().is_ok());
         }
     }
+}
+
+#[test]
+fn test_topology_struct_run() {
+    // Cleaning up metadata from past run
+    if Path::new(PLUGIN_DIR).exists() {
+        fs::remove_dir_all(PLUGIN_DIR).unwrap();
+    }
+
+    assert!(
+        exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![])
+            .unwrap()
+            .success()
+    );
+
+    let mut plugins = BTreeMap::new();
+    plugins.insert("test-plugin".to_string(), Plugin::default());
+    let topology = Topology {
+        plugins: plugins,
+        ..Default::default()
+    };
+
+    dbg!(&topology);
+
+    let mut params = RunParamsBuilder::default()
+        .topology(topology)
+        .data_dir(Path::new("./tmp").to_path_buf())
+        .disable_plugin_install(false)
+        .base_http_port(8000)
+        .picodata_path(Path::new("picodata").to_path_buf())
+        .base_pg_port(5432)
+        .use_release(false)
+        .target_dir(Path::new("./target").to_path_buf())
+        .daemon(false)
+        .disable_colors(false)
+        .build()
+        .unwrap();
+
+    run(&mut params).unwrap();
 }
