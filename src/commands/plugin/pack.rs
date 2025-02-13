@@ -69,7 +69,7 @@ pub fn cmd(pack_debug: bool, target_dir: &PathBuf) -> Result<()> {
 
     let compressed_file = File::create(format!(
         "{}/{}-{}.tar.gz",
-        target_dir.display(),
+        build_dir.display(),
         &normalized_package_name,
         cargo_manifest.package.version
     ))

@@ -34,7 +34,8 @@ fn test_cargo_pack() {
     let plugin_path = Path::new(TESTS_DIR)
         .join(PACK_PLUGIN_NAME)
         .join("tmp_target");
-    let tar_archive = File::open(plugin_path.join("test_pack_plugin-0.1.0.tar.gz")).unwrap();
+    let tar_archive =
+        File::open(plugin_path.join("release/test_pack_plugin-0.1.0.tar.gz")).unwrap();
     let buf_reader = BufReader::new(tar_archive);
     let decompressor = GzDecoder::new(buf_reader);
     let mut archive = Archive::new(decompressor);
