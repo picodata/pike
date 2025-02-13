@@ -2,7 +2,12 @@ mod helpers;
 
 use flate2::bufread::GzDecoder;
 use helpers::{cleanup_dir, exec_pike, PLUGIN_DIR, TESTS_DIR};
-use std::{fs::File, io::BufReader, path::Path, vec};
+use std::{
+    fs::{self, File},
+    io::BufReader,
+    path::Path,
+    vec,
+};
 use tar::Archive;
 
 pub const PACK_PLUGIN_NAME: &str = "test-pack-plugin";
@@ -69,4 +74,19 @@ fn test_cargo_plugin_new() {
     .success());
 
     assert!(!Path::new(PLUGIN_DIR).join(".git").exists());
+
+    cleanup_dir(&Path::new(PLUGIN_DIR).to_path_buf());
+
+    // Test creating plugin as workspace
+    exec_pike(
+        vec!["plugin", "new", "test-plugin", "--workspace"],
+        TESTS_DIR,
+        &vec![],
+    )
+    .unwrap();
+
+    assert!(Path::new(PLUGIN_DIR).join("test-plugin").exists());
+
+    let contents = fs::read_to_string(Path::new(PLUGIN_DIR).join("Cargo.toml")).unwrap();
+    assert!(contents.contains("[workspace]"));
 }
