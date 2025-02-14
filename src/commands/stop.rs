@@ -10,10 +10,12 @@ use std::process::Command;
 pub struct Params {
     #[builder(default = "PathBuf::from(\"./tmp\")")]
     data_dir: PathBuf,
+    #[builder(default = "PathBuf::from(\"./\")")]
+    plugin_path: PathBuf,
 }
 
 pub fn cmd(params: &Params) -> Result<()> {
-    let instances_path = params.data_dir.join("cluster");
+    let instances_path = params.plugin_path.join(params.data_dir.join("cluster"));
     let dirs = fs::read_dir(&instances_path).context(format!(
         "cluster data dir with path {} does not exist",
         instances_path.to_string_lossy()

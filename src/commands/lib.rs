@@ -9,7 +9,7 @@ pub enum BuildType {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub fn cargo_build(build_type: BuildType, target_dir: &PathBuf) -> Result<()> {
+pub fn cargo_build(build_type: BuildType, target_dir: &PathBuf, build_dir: &PathBuf) -> Result<()> {
     let mut args = vec!["build"];
     if let BuildType::Release = build_type {
         args.push("--release");
@@ -18,8 +18,9 @@ pub fn cargo_build(build_type: BuildType, target_dir: &PathBuf) -> Result<()> {
     let mut child = Command::new("cargo")
         .args(args)
         .arg("--target-dir")
-        .args(target_dir)
+        .arg(target_dir)
         .stdout(Stdio::piped())
+        .current_dir(build_dir)
         .spawn()
         .context("running cargo build")?;
 

@@ -1,11 +1,39 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use nix::unistd::{fork, ForkResult};
-use std::{env, path::PathBuf, process, thread, time::Duration};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process, thread,
+    time::Duration,
+};
 
 mod commands;
 
 const CK_CHECK_PARRENT_INTERVAL_SEC: u64 = 3;
+
+const CARING_FISH: &str = r#"
+  ________________________________________
+/ It seems to me, that you are trying to \
+| run pike outside Plugin directory, try |
+| using --plugin-dir flag or move into   |
+\ plugin directory.                      /
+ ----------------------------------------
+                    |
+                    |
+                   ,|.
+                  ,\|/.
+                ,' .V. `.
+               / .     . \
+              /_`       '_\
+             ,' .:     ;, `.
+             |@)|  . .  |(@|
+        ,-._ `._';  .  :`_,' _,-.
+       '--  `-\ /,-===-.\ /-'  --`
+      (----  _|  ||___||  |_  ----)
+       `._,-'  \  `-.-'  /  `-._,'
+                `-.___,-'
+ "#;
 
 /// A helper utility to work with Picodata plugins.
 #[derive(Parser)]
@@ -52,11 +80,17 @@ enum Command {
         /// Disable colors in stdout
         #[arg(long)]
         disable_colors: bool,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
     },
     /// Stop Picodata cluster
     Stop {
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
     },
     /// Remove all data files of previous cluster run
     Clean {
@@ -85,14 +119,21 @@ enum Plugin {
         /// Change target folder
         #[arg(long, value_name = "TARGET_DIR", default_value = "target")]
         target_dir: PathBuf,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
     },
     /// Alias for cargo build command
     Build {
+        /// Change target folder
         #[arg(long, value_name = "TARGET_DIR", default_value = "target")]
         target_dir: PathBuf,
-
+        /// Build release version of plugin
         #[arg(long, short)]
         release: bool,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
     },
     /// Create a new Picodata plugin
     New {
@@ -167,6 +208,15 @@ fn run_child_killer() {
     process::exit(0)
 }
 
+fn check_plugin_directory() {
+    if !Path::new("./topology.toml").exists() {
+        println!("{}", CARING_FISH);
+
+        process::exit(1);
+    }
+}
+
+#[allow(clippy::too_many_lines)]
 fn main() -> Result<()> {
     colog::init();
     let cli = Cli::parse_from(env::args().skip(1));
@@ -183,12 +233,24 @@ fn main() -> Result<()> {
             target_dir,
             daemon,
             disable_colors,
+            plugin_path,
         } => {
+            check_plugin_directory();
+
             if !daemon {
                 run_child_killer();
             }
-            let params = commands::run::ParamsBuilder::default()
-                .topology_path(topology)
+            let topology: commands::run::Topology = toml::from_str(
+                &fs::read_to_string(plugin_path.join(&topology))
+                    .context(format!("failed to read {}", &topology.display()))?,
+            )
+            .context(format!(
+                "failed to parse .toml file of {}",
+                topology.display()
+            ))?;
+
+            let mut params = commands::run::ParamsBuilder::default()
+                .topology(topology)
                 .data_dir(data_dir)
                 .disable_plugin_install(disable_plugin_install)
                 .base_http_port(base_http_port)
@@ -198,14 +260,21 @@ fn main() -> Result<()> {
                 .target_dir(target_dir)
                 .daemon(daemon)
                 .disable_colors(disable_colors)
+                .plugin_path(plugin_path)
                 .build()
                 .unwrap();
-            commands::run::cmd(&params).context("failed to execute Run command")?;
+            commands::run::cmd(&mut params).context("failed to execute Run command")?;
         }
-        Command::Stop { data_dir } => {
+        Command::Stop {
+            data_dir,
+            plugin_path,
+        } => {
+            check_plugin_directory();
+
             run_child_killer();
             let params = commands::stop::ParamsBuilder::default()
                 .data_dir(data_dir)
+                .plugin_path(plugin_path)
                 .build()
                 .unwrap();
             commands::stop::cmd(&params).context("failed to execute \"stop\" command")?;
@@ -217,15 +286,24 @@ fn main() -> Result<()> {
         Command::Plugin { command } => {
             run_child_killer();
             match command {
-                Plugin::Pack { debug, target_dir } => {
-                    commands::plugin::pack::cmd(debug, &target_dir)
+                Plugin::Pack {
+                    debug,
+                    target_dir,
+                    plugin_path,
+                } => {
+                    check_plugin_directory();
+
+                    commands::plugin::pack::cmd(debug, &target_dir, &plugin_path)
                         .context("failed to execute \"pack\" command")?;
                 }
                 Plugin::Build {
                     release,
                     target_dir,
+                    plugin_path,
                 } => {
-                    commands::plugin::build::cmd(release, &target_dir)
+                    check_plugin_directory();
+
+                    commands::plugin::build::cmd(release, &target_dir, &plugin_path)
                         .context("failed to execute \"build\" command")?;
                 }
                 Plugin::New {

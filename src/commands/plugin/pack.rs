@@ -28,8 +28,8 @@ const LIB_EXT: &str = "so";
 #[cfg(target_os = "macos")]
 const LIB_EXT: &str = "dylib";
 
-pub fn cmd(pack_debug: bool, target_dir: &PathBuf) -> Result<()> {
-    let root_dir = env::current_dir()?;
+pub fn cmd(pack_debug: bool, target_dir: &PathBuf, pluging_path: &PathBuf) -> Result<()> {
+    let root_dir = env::current_dir()?.join(pluging_path);
     let plugin_name = &root_dir
         .file_name()
         .context("extracting project name")?
@@ -37,10 +37,12 @@ pub fn cmd(pack_debug: bool, target_dir: &PathBuf) -> Result<()> {
         .context("parsing filename to string")?;
 
     let build_dir = if pack_debug {
-        cargo_build(BuildType::Debug, target_dir).context("building release version of plugin")?;
+        cargo_build(BuildType::Debug, target_dir, pluging_path)
+            .context("building release version of plugin")?;
         Path::new(&root_dir).join(target_dir).join("debug")
     } else {
-        cargo_build(BuildType::Release, target_dir).context("building debug version of plugin")?;
+        cargo_build(BuildType::Release, target_dir, pluging_path)
+            .context("building debug version of plugin")?;
         Path::new(&root_dir).join(target_dir).join("release")
     };
 
