@@ -460,7 +460,6 @@ pub fn cluster(params: &mut Params) -> Result<Vec<PicodataInstance>> {
         )?;
         params.plugin_path.join(params.target_dir.join("debug"))
     };
-
     params.topology.find_plugin_versions(&plugins_dir)?;
 
     info!("Running the cluster...");

@@ -14,7 +14,7 @@ pub fn cargo_build(build_type: BuildType, target_dir: &PathBuf, build_dir: &Path
     if let BuildType::Release = build_type {
         args.push("--release");
     }
-    dbg!(target_dir);
+
     let mut child = Command::new("cargo")
         .args(args)
         .arg("--target-dir")

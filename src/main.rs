@@ -180,6 +180,7 @@ fn run_child_killer() {
     process::exit(0)
 }
 
+#[allow(clippy::too_many_lines)]
 fn main() -> Result<()> {
     colog::init();
     let cli = Cli::parse_from(env::args().skip(1));
@@ -202,7 +203,7 @@ fn main() -> Result<()> {
                 run_child_killer();
             }
             let topology: commands::run::Topology = toml::from_str(
-                &fs::read_to_string(&plugin_path.join(&topology))
+                &fs::read_to_string(plugin_path.join(&topology))
                     .context(format!("failed to read {}", &topology.display()))?,
             )
             .context(format!(
