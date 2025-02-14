@@ -439,15 +439,26 @@ pub struct Params {
     daemon: bool,
     #[builder(default = "false")]
     disable_colors: bool,
+    #[builder(default = "PathBuf::from(\"./\")")]
+    plugin_path: PathBuf,
 }
 
 pub fn cluster(params: &mut Params) -> Result<Vec<PicodataInstance>> {
+    params.data_dir = params.plugin_path.join(&params.data_dir);
     let plugins_dir = if params.use_release {
-        cargo_build(lib::BuildType::Release, &params.target_dir)?;
-        params.target_dir.join("release")
+        cargo_build(
+            lib::BuildType::Release,
+            &params.target_dir,
+            &params.plugin_path,
+        )?;
+        params.plugin_path.join(params.target_dir.join("release"))
     } else {
-        cargo_build(lib::BuildType::Debug, &params.target_dir)?;
-        params.target_dir.join("debug")
+        cargo_build(
+            lib::BuildType::Debug,
+            &params.target_dir,
+            &params.plugin_path,
+        )?;
+        params.plugin_path.join(params.target_dir.join("debug"))
     };
 
     params.topology.find_plugin_versions(&plugins_dir)?;

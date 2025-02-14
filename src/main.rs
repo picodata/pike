@@ -52,11 +52,17 @@ enum Command {
         /// Disable colors in stdout
         #[arg(long)]
         disable_colors: bool,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
     },
     /// Stop Picodata cluster
     Stop {
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
     },
     /// Remove all data files of previous cluster run
     Clean {
@@ -85,14 +91,21 @@ enum Plugin {
         /// Change target folder
         #[arg(long, value_name = "TARGET_DIR", default_value = "target")]
         target_dir: PathBuf,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
     },
     /// Alias for cargo build command
     Build {
+        /// Change target folder
         #[arg(long, value_name = "TARGET_DIR", default_value = "target")]
         target_dir: PathBuf,
-
+        /// Build release version of plugin
         #[arg(long, short)]
         release: bool,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
     },
     /// Create a new Picodata plugin
     New {
@@ -183,12 +196,13 @@ fn main() -> Result<()> {
             target_dir,
             daemon,
             disable_colors,
+            plugin_path,
         } => {
             if !daemon {
                 run_child_killer();
             }
             let topology: commands::run::Topology = toml::from_str(
-                &fs::read_to_string(&topology)
+                &fs::read_to_string(&plugin_path.join(&topology))
                     .context(format!("failed to read {}", &topology.display()))?,
             )
             .context(format!(
@@ -207,14 +221,19 @@ fn main() -> Result<()> {
                 .target_dir(target_dir)
                 .daemon(daemon)
                 .disable_colors(disable_colors)
+                .plugin_path(plugin_path)
                 .build()
                 .unwrap();
             commands::run::cmd(&mut params).context("failed to execute Run command")?;
         }
-        Command::Stop { data_dir } => {
+        Command::Stop {
+            data_dir,
+            plugin_path,
+        } => {
             run_child_killer();
             let params = commands::stop::ParamsBuilder::default()
                 .data_dir(data_dir)
+                .plugin_path(plugin_path)
                 .build()
                 .unwrap();
             commands::stop::cmd(&params).context("failed to execute \"stop\" command")?;
@@ -226,15 +245,20 @@ fn main() -> Result<()> {
         Command::Plugin { command } => {
             run_child_killer();
             match command {
-                Plugin::Pack { debug, target_dir } => {
-                    commands::plugin::pack::cmd(debug, &target_dir)
+                Plugin::Pack {
+                    debug,
+                    target_dir,
+                    plugin_path,
+                } => {
+                    commands::plugin::pack::cmd(debug, &target_dir, &plugin_path)
                         .context("failed to execute \"pack\" command")?;
                 }
                 Plugin::Build {
                     release,
                     target_dir,
+                    plugin_path,
                 } => {
-                    commands::plugin::build::cmd(release, &target_dir)
+                    commands::plugin::build::cmd(release, &target_dir, &plugin_path)
                         .context("failed to execute \"build\" command")?;
                 }
                 Plugin::New {
