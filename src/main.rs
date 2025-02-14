@@ -1,11 +1,39 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use nix::unistd::{fork, ForkResult};
-use std::{env, fs, path::PathBuf, process, thread, time::Duration};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process, thread,
+    time::Duration,
+};
 
 mod commands;
 
 const CK_CHECK_PARRENT_INTERVAL_SEC: u64 = 3;
+
+const CARING_FISH: &str = r#"
+  ________________________________________
+/ It seems to me, that you are trying to \
+| run pike outside Plugin directory, try |
+| using --plugin-dir flag or move into   |
+\ plugin directory.                      /
+ ----------------------------------------
+                    |
+                    |
+                   ,|.
+                  ,\|/.
+                ,' .V. `.
+               / .     . \
+              /_`       '_\
+             ,' .:     ;, `.
+             |@)|  . .  |(@|
+        ,-._ `._';  .  :`_,' _,-.
+       '--  `-\ /,-===-.\ /-'  --`
+      (----  _|  ||___||  |_  ----)
+       `._,-'  \  `-.-'  /  `-._,'
+                `-.___,-'
+ "#;
 
 /// A helper utility to work with Picodata plugins.
 #[derive(Parser)]
@@ -180,6 +208,14 @@ fn run_child_killer() {
     process::exit(0)
 }
 
+fn check_plugin_directory() {
+    if !Path::new("./topology.toml").exists() {
+        println!("{}", CARING_FISH);
+
+        process::exit(1);
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<()> {
     colog::init();
@@ -199,6 +235,8 @@ fn main() -> Result<()> {
             disable_colors,
             plugin_path,
         } => {
+            check_plugin_directory();
+
             if !daemon {
                 run_child_killer();
             }
@@ -231,6 +269,8 @@ fn main() -> Result<()> {
             data_dir,
             plugin_path,
         } => {
+            check_plugin_directory();
+
             run_child_killer();
             let params = commands::stop::ParamsBuilder::default()
                 .data_dir(data_dir)
@@ -251,6 +291,8 @@ fn main() -> Result<()> {
                     target_dir,
                     plugin_path,
                 } => {
+                    check_plugin_directory();
+
                     commands::plugin::pack::cmd(debug, &target_dir, &plugin_path)
                         .context("failed to execute \"pack\" command")?;
                 }
@@ -259,6 +301,8 @@ fn main() -> Result<()> {
                     target_dir,
                     plugin_path,
                 } => {
+                    check_plugin_directory();
+
                     commands::plugin::build::cmd(release, &target_dir, &plugin_path)
                         .context("failed to execute \"build\" command")?;
                 }
