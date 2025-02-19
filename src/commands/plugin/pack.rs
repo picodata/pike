@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use lib::{cargo_build, BuildType};
@@ -66,6 +66,11 @@ pub fn cmd(pack_debug: bool, target_dir: &PathBuf) -> Result<()> {
 }
 
 fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
+    let plugin_version = get_latest_plugin_version(plugin_dir)?;
+    let plugin_build_dir = build_dir
+        .join(plugin_dir.file_name().unwrap())
+        .join(plugin_version);
+
     let cargo_manifest: CargoManifest = toml::from_str(
         &fs::read_to_string(plugin_dir.join("Cargo.toml")).context("failed to read Cargo.toml")?,
     )
@@ -88,8 +93,8 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
     {
         let mut tarball = Builder::new(&mut encoder);
 
-        if build_dir.join(&lib_name).exists() {
-            let mut lib_file = File::open(build_dir.join(&lib_name))
+        if plugin_build_dir.join(&lib_name).exists() {
+            let mut lib_file = File::open(plugin_build_dir.join(&lib_name))
                 .context(format!("failed to open {lib_name}"))?;
             tarball
                 .append_file(lib_name, &mut lib_file)
@@ -98,17 +103,17 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
                 ))?;
         }
 
-        if build_dir.join("manifest.yaml").exists() {
-            let mut manifest_file = File::open(build_dir.join("manifest.yaml"))
+        if plugin_build_dir.join("manifest.yaml").exists() {
+            let mut manifest_file = File::open(plugin_build_dir.join("manifest.yaml"))
                 .context("failed to open file manifest.yaml")?;
             tarball
                 .append_file("manifest.yaml", &mut manifest_file)
                 .context("failed to add manifest.yaml to archive")?;
         }
 
-        if build_dir.join("migrations").exists() {
+        if plugin_build_dir.join("migrations").exists() {
             tarball
-                .append_dir_all("migrations", build_dir.join("migrations"))
+                .append_dir_all("migrations", plugin_build_dir.join("migrations"))
                 .context("failed to append \"migrations\" to archive")?;
         }
     }
@@ -116,4 +121,29 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
     encoder.finish()?;
 
     Ok(())
+}
+
+fn get_latest_plugin_version(plugin_dir: &Path) -> Result<String> {
+    let cargo_toml =
+        fs::read_to_string(plugin_dir.join("Cargo.toml")).expect("Failed to read Cargo.toml");
+
+    let parsed: toml::Value = toml::de::from_str(&cargo_toml).expect("Failed to parse TOML");
+
+    if let Some(package) = parsed.get("package") {
+        if let Some(version) = package.get("version") {
+            return Ok(version
+                .to_string()
+                .strip_prefix("\"")
+                .unwrap()
+                .strip_suffix("\"")
+                .unwrap()
+                .to_string());
+        }
+        bail!("Couldn't find version in plugin Cargo.toml");
+    }
+
+    bail!(
+        "Couldn't resolve plugin version from Cargo.toml at {}",
+        plugin_dir.display()
+    )
 }
