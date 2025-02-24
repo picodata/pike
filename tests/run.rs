@@ -5,6 +5,7 @@ use helpers::{get_picodata_table, TESTS_DIR};
 use pike::cluster::run;
 use pike::cluster::Plugin;
 use pike::cluster::RunParamsBuilder;
+use pike::cluster::Tier;
 use pike::cluster::Topology;
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -87,6 +88,8 @@ fn test_cluster_daemon_and_arguments() {
     }
 }
 
+// This code tests Pike's public interface.
+// Any changes are potential BREAKING changes.
 #[test]
 fn test_topology_struct_run() {
     // Cleaning up metadata from past run
@@ -100,9 +103,17 @@ fn test_topology_struct_run() {
             .success()
     );
 
-    let mut plugins = BTreeMap::new();
-    plugins.insert("test-plugin".to_string(), Plugin::default());
+    let plugins = BTreeMap::from([("test-plugin".to_string(), Plugin::default())]);
+    let tiers = BTreeMap::from([(
+        "default".to_string(),
+        Tier {
+            replicasets: 2,
+            replication_factor: 2,
+        },
+    )]);
+
     let topology = Topology {
+        tiers,
         plugins,
         ..Default::default()
     };
@@ -129,7 +140,7 @@ fn test_topology_struct_run() {
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
         let pico_plugin_config = get_picodata_table(Path::new("tmp"), "_pico_instance");
 
-        // Compare with 8, because table gives current state and desired state
+        // Compare with 8, because table gives current state and target state
         // both of them should be online
         if pico_plugin_config.matches("Online").count() == 8 {
             cluster_started = true;

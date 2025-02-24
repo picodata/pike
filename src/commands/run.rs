@@ -21,96 +21,38 @@ use crate::commands::lib;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Tier {
-    replicasets: u8,
-    replication_factor: u8,
+    pub replicasets: u8,
+    pub replication_factor: u8,
 }
 
-impl Default for Tier {
-    fn default() -> Self {
-        Self {
-            replicasets: 2,
-            replication_factor: 2,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Default, Debug, Deserialize, Clone)]
 pub struct MigrationContextVar {
-    name: String,
-    value: String,
+    pub name: String,
+    pub value: String,
 }
 
-impl Default for MigrationContextVar {
-    fn default() -> Self {
-        Self {
-            name: "example_name".to_string(),
-            value: "example_value".to_string(),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Default, Debug, Deserialize, Clone)]
 pub struct Service {
-    tiers: Vec<String>,
+    pub tiers: Vec<String>,
 }
 
-impl Default for Service {
-    fn default() -> Self {
-        Self {
-            tiers: vec!["default".to_string()],
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Default, Debug, Deserialize, Clone)]
 pub struct Plugin {
-    #[serde(default)]
-    migration_context: Vec<MigrationContextVar>,
-    #[serde(default)]
+    pub migration_context: Vec<MigrationContextVar>,
     #[serde(rename = "service")]
-    services: BTreeMap<String, Service>,
+    pub services: BTreeMap<String, Service>,
     #[serde(skip)]
-    version: Option<String>,
+    pub version: Option<String>,
 }
 
-impl Default for Plugin {
-    fn default() -> Self {
-        let mut services = BTreeMap::new();
-        services.insert("main".to_string(), Service::default());
-
-        Self {
-            migration_context: vec![MigrationContextVar::default()],
-            services,
-            version: None,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Default, Debug, Deserialize, Clone)]
 pub struct Topology {
     #[serde(rename = "tier")]
     pub tiers: BTreeMap<String, Tier>,
-    #[serde(default)]
     #[serde(rename = "plugin")]
     pub plugins: BTreeMap<String, Plugin>,
     #[serde(default)]
     pub enviroment: BTreeMap<String, String>,
-}
-
-impl Default for Topology {
-    fn default() -> Self {
-        let mut tiers = BTreeMap::new();
-        tiers.insert("default".to_string(), Tier::default());
-
-        let mut plugins = BTreeMap::new();
-        plugins.insert("default_plugin_name".to_string(), Plugin::default());
-
-        Self {
-            tiers,
-            plugins,
-            enviroment: BTreeMap::new(),
-        }
-    }
 }
 
 impl Topology {
@@ -419,7 +361,6 @@ impl Drop for PicodataInstance {
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Builder)]
 pub struct Params {
-    #[builder]
     topology: Topology,
     #[builder(default = "PathBuf::from(\"./tmp\")")]
     data_dir: PathBuf,

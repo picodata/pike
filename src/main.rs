@@ -12,7 +12,8 @@ mod commands;
 
 const CK_CHECK_PARRENT_INTERVAL_SEC: u64 = 3;
 
-const CARING_FISH: &str = r#"
+// Translation of work Pike can also mean Щука.
+const CARING_PIKE: &str = r"
   ________________________________________
 / It seems to me, that you are trying to \
 | run pike outside Plugin directory, try |
@@ -33,7 +34,7 @@ const CARING_FISH: &str = r#"
       (----  _|  ||___||  |_  ----)
        `._,-'  \  `-.-'  /  `-._,'
                 `-.___,-'
- "#;
+ ";
 
 /// A helper utility to work with Picodata plugins.
 #[derive(Parser)]
@@ -208,9 +209,9 @@ fn run_child_killer() {
     process::exit(0)
 }
 
-fn check_plugin_directory() {
-    if !Path::new("./topology.toml").exists() {
-        println!("{}", CARING_FISH);
+fn check_plugin_directory(plugin_dir: &Path) {
+    if !plugin_dir.join("./topology.toml").exists() {
+        println!("{CARING_PIKE}");
 
         process::exit(1);
     }
@@ -235,7 +236,7 @@ fn main() -> Result<()> {
             disable_colors,
             plugin_path,
         } => {
-            check_plugin_directory();
+            check_plugin_directory(&plugin_path);
 
             if !daemon {
                 run_child_killer();
@@ -269,7 +270,7 @@ fn main() -> Result<()> {
             data_dir,
             plugin_path,
         } => {
-            check_plugin_directory();
+            check_plugin_directory(&plugin_path);
 
             run_child_killer();
             let params = commands::stop::ParamsBuilder::default()
@@ -291,7 +292,7 @@ fn main() -> Result<()> {
                     target_dir,
                     plugin_path,
                 } => {
-                    check_plugin_directory();
+                    check_plugin_directory(&plugin_path);
 
                     commands::plugin::pack::cmd(debug, &target_dir, &plugin_path)
                         .context("failed to execute \"pack\" command")?;
@@ -301,7 +302,7 @@ fn main() -> Result<()> {
                     target_dir,
                     plugin_path,
                 } => {
-                    check_plugin_directory();
+                    check_plugin_directory(&plugin_path);
 
                     commands::plugin::build::cmd(release, &target_dir, &plugin_path)
                         .context("failed to execute \"build\" command")?;
