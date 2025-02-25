@@ -119,7 +119,7 @@ fn test_topology_struct_run() {
         ..Default::default()
     };
 
-    let mut params = RunParamsBuilder::default()
+    let params = RunParamsBuilder::default()
         .topology(topology)
         .data_dir(Path::new("./tmp").to_path_buf())
         .disable_plugin_install(false)
@@ -134,7 +134,7 @@ fn test_topology_struct_run() {
         .build()
         .unwrap();
 
-    run(&mut params).unwrap();
+    run(&params).unwrap();
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -177,8 +177,7 @@ fn test_quickstart_pipeline() {
     let stdout = String::from_utf8_lossy(&wrong_plugin_path_cmd.stdout);
     assert!(
         stdout.contains("pike outside Plugin directory"),
-        "Recieved unexpected output, while trying to run pike in wrong directory, where is the fish? Output: {}",
-        stdout
+        "Recieved unexpected output, while trying to run pike in wrong directory, where is the fish? Output: {stdout}"
     );
 
     // Cleaning up metadata from past run
@@ -210,7 +209,7 @@ fn test_quickstart_pipeline() {
         ..Default::default()
     };
 
-    let mut params = RunParamsBuilder::default()
+    let params = RunParamsBuilder::default()
         .topology(topology)
         .data_dir(Path::new("./tmp").to_path_buf())
         .disable_plugin_install(false)
@@ -226,7 +225,7 @@ fn test_quickstart_pipeline() {
         .unwrap();
 
     // Run cluster and check successful plugin installation
-    run(&mut params).unwrap();
+    run(&params).unwrap();
 
     let start = Instant::now();
     let mut cluster_started = false;

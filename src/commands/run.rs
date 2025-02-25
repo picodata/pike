@@ -25,7 +25,7 @@ pub struct Tier {
     pub replication_factor: u8,
 }
 
-#[derive(Default, Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct MigrationContextVar {
     pub name: String,
     pub value: String,
@@ -38,7 +38,9 @@ pub struct Service {
 
 #[derive(Default, Debug, Deserialize, Clone)]
 pub struct Plugin {
+    #[serde(default)]
     pub migration_context: Vec<MigrationContextVar>,
+    #[serde(default)]
     #[serde(rename = "service")]
     pub services: BTreeMap<String, Service>,
     #[serde(skip)]
@@ -50,6 +52,7 @@ pub struct Topology {
     #[serde(rename = "tier")]
     pub tiers: BTreeMap<String, Tier>,
     #[serde(rename = "plugin")]
+    #[serde(default)]
     pub plugins: BTreeMap<String, Plugin>,
     #[serde(default)]
     pub enviroment: BTreeMap<String, String>,
@@ -359,7 +362,7 @@ impl Drop for PicodataInstance {
 }
 
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Builder)]
+#[derive(Debug, Builder, Clone)]
 pub struct Params {
     topology: Topology,
     #[builder(default = "PathBuf::from(\"./tmp\")")]
@@ -384,8 +387,10 @@ pub struct Params {
     plugin_path: PathBuf,
 }
 
-pub fn cluster(params: &mut Params) -> Result<Vec<PicodataInstance>> {
+pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
+    let mut params = params.clone();
     params.data_dir = params.plugin_path.join(&params.data_dir);
+
     let plugins_dir = if params.use_release {
         cargo_build(
             lib::BuildType::Release,
@@ -423,7 +428,7 @@ pub fn cluster(params: &mut Params) -> Result<Vec<PicodataInstance>> {
                 &plugins_dir,
                 tier.replication_factor,
                 tier_name,
-                params,
+                &params,
                 &params.topology.enviroment,
             )?;
 
@@ -465,7 +470,7 @@ pub fn cluster(params: &mut Params) -> Result<Vec<PicodataInstance>> {
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::fn_params_excessive_bools)]
 #[allow(clippy::cast_possible_wrap)]
-pub fn cmd(params: &mut Params) -> Result<()> {
+pub fn cmd(params: &Params) -> Result<()> {
     let mut pico_instances = cluster(params)?;
 
     if params.daemon {

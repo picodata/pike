@@ -250,7 +250,7 @@ fn main() -> Result<()> {
                 topology.display()
             ))?;
 
-            let mut params = commands::run::ParamsBuilder::default()
+            let params = commands::run::ParamsBuilder::default()
                 .topology(topology)
                 .data_dir(data_dir)
                 .disable_plugin_install(disable_plugin_install)
@@ -264,7 +264,7 @@ fn main() -> Result<()> {
                 .plugin_path(plugin_path)
                 .build()
                 .unwrap();
-            commands::run::cmd(&mut params).context("failed to execute Run command")?;
+            commands::run::cmd(&params).context("failed to execute Run command")?;
         }
         Command::Stop {
             data_dir,
