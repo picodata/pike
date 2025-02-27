@@ -57,7 +57,7 @@ fn test_cargo_plugin_new() {
             .success()
     );
 
-    assert!(Path::new(PLUGIN_DIR).join("config.yaml").exists());
+    assert!(Path::new(PLUGIN_DIR).join("picodata.yaml").exists());
     assert!(Path::new(PLUGIN_DIR).join(".git").exists());
     assert!(Path::new(PLUGIN_DIR).join("topology.toml").exists());
     assert!(Path::new(PLUGIN_DIR)

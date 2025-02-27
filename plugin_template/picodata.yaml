@@ -2,7 +2,7 @@ cluster:
   name: "{{ project_name }}"
   tier:
     default:
-      replication_factor: 2
+      can_vote: true
   default_replication_factor: 2
 
 instance:

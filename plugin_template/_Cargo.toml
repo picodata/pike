@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-picodata-plugin = "24.6.1"
+picodata-plugin = "25.1.1"
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
 

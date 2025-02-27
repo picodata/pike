@@ -90,7 +90,7 @@ fn workspace_init(root_path: &Path, project_name: &str) -> Result<()> {
         root_path.join(project_name).join("plugin_config.yaml"),
         root_path.join("plugin_config.yaml"),
     )
-    .context("failed to move config.yaml to workspace dir")?;
+    .context("failed to move picodata.yaml to workspace dir")?;
 
     Ok(())
 }

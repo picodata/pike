@@ -12,6 +12,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::str;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -211,9 +212,19 @@ impl PicodataInstance {
         let mut child = Command::new(&run_params.picodata_path);
         child.envs(&env_vars);
 
+        let picodata_version = Self::get_picodata_version(&run_params.picodata_path)?;
+        let data_dir_flag = if picodata_version.contains("picodata 25.1") {
+            "--instance-dir"
+        } else {
+            log::warn!(
+                "You are using old version of picodata: {picodata_version} In the next major release it WILL NOT BE SUPPORTED"
+            );
+            "--data-dir"
+        };
+
         child.args([
             "run",
-            "--data-dir",
+            data_dir_flag,
             instance_data_dir.to_str().expect("unreachable"),
             "--plugin-dir",
             plugins_dir.to_str().unwrap_or("target/debug"),
@@ -261,6 +272,15 @@ impl PicodataInstance {
         pico_instance.make_pid_file()?;
 
         Ok(pico_instance)
+    }
+
+    fn get_picodata_version(picodata_path: &PathBuf) -> Result<String> {
+        let picodata_output = Command::new(picodata_path)
+            .arg("--version")
+            .output()
+            .expect("Failed to execute command");
+
+        Ok(str::from_utf8(&picodata_output.stdout)?.to_string())
     }
 
     fn compute_env_vars(
