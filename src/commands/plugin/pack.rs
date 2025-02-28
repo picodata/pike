@@ -43,9 +43,11 @@ pub fn cmd(pack_debug: bool, target_dir: &PathBuf, pluging_path: &PathBuf) -> Re
 
     let plugin_dir = root_dir.clone();
 
-    let cargo_toml_path = Path::new("Cargo.toml");
-    let cargo_toml_content =
-        fs::read_to_string(cargo_toml_path).expect("Failed to read Cargo.toml");
+    let cargo_toml_path = root_dir.join("Cargo.toml");
+    let cargo_toml_content = fs::read_to_string(&cargo_toml_path).context(format!(
+        "Failed to read Cargo.toml in {}",
+        &cargo_toml_path.display()
+    ))?;
 
     let parsed_toml: Value = cargo_toml_content
         .parse()

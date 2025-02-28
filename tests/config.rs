@@ -24,7 +24,11 @@ fn test_config_apply() {
 
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_plugin_config = get_picodata_table(Path::new("tmp"), "_pico_plugin_config");
+        let pico_plugin_config = get_picodata_table(
+            Path::new(PLUGIN_DIR),
+            Path::new("tmp"),
+            "_pico_plugin_config",
+        );
         if pico_plugin_config.contains("value") && pico_plugin_config.contains("changed") {
             return;
         }
