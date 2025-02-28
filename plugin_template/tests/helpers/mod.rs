@@ -1,5 +1,7 @@
 use log::info;
+use pike::cluster::{Plugin, Service, Tier, Topology};
 use std::{
+    collections::BTreeMap,
     fs::{self},
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -7,7 +9,6 @@ use std::{
 
 // TODO: check in workspaces
 pub const TMP_DIR: &str = "tmp/";
-pub const TOPOLOGY_PATH: &str = "topology.toml";
 pub const TARGET_DIR: &str = "target";
 
 pub struct Cluster {}
@@ -50,10 +51,36 @@ impl Cluster {
 pub fn run_cluster() -> Cluster {
     let cluster_handle = Cluster::new();
     let data_dir = PathBuf::from(TMP_DIR.to_owned());
-    let topology_path = PathBuf::from(TOPOLOGY_PATH.to_owned());
     let target_dir = PathBuf::from(TARGET_DIR.to_owned());
+    let plugins = BTreeMap::from([(
+        "{{ project_name }}".to_string(),
+        Plugin {
+            services: BTreeMap::from([(
+                "main".to_string(),
+                Service {
+                    tiers: vec!["default".to_string()],
+                },
+            )]),
+            ..Default::default()
+        },
+    )]);
+
+    let tiers = BTreeMap::from([(
+        "default".to_string(),
+        Tier {
+            replicasets: 2,
+            replication_factor: 2,
+        },
+    )]);
+
+    let topology = Topology {
+        tiers,
+        plugins,
+        ..Default::default()
+    };
+
     let params = pike::cluster::RunParamsBuilder::default()
-        .topology_path(topology_path)
+        .topology(topology)
         .data_dir(data_dir)
         .target_dir(target_dir)
         .daemon(true)
