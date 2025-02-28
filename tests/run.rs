@@ -18,6 +18,10 @@ use std::{
     vec,
 };
 
+use flate2::bufread::GzDecoder;
+use std::{fs::File, io::BufReader};
+use tar::Archive;
+
 const TOTAL_INSTANCES: i32 = 4;
 
 #[test]
@@ -156,8 +160,10 @@ fn test_topology_struct_run() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(Path::new("tmp"), "_pico_instance");
-        let pico_plugin = get_picodata_table(Path::new("tmp"), "_pico_plugin");
+        let pico_instance =
+            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_instance");
+        let pico_plugin =
+            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_plugin");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -226,8 +232,10 @@ fn test_topology_struct_one_tier() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(Path::new("tmp"), "_pico_instance");
-        let pico_plugin = get_picodata_table(Path::new("tmp"), "_pico_plugin");
+        let pico_instance =
+            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_instance");
+        let pico_plugin =
+            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_plugin");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -294,7 +302,8 @@ fn test_topology_struct_run_no_plugin() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(Path::new("tmp"), "_pico_instance");
+        let pico_instance =
+            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_instance");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -385,8 +394,11 @@ fn test_quickstart_pipeline() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_plugin_config =
-            get_picodata_table(Path::new("../quickstart/test-plugin/tmp"), "_pico_instance");
+        let pico_plugin_config = get_picodata_table(
+            &Path::new(TESTS_DIR).join("quickstart/test-plugin"),
+            Path::new("tmp"),
+            "_pico_instance",
+        );
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -427,4 +439,173 @@ fn test_quickstart_pipeline() {
     assert!(quickstart_plugin_dir
         .join("target/debug/test_plugin-0.1.0.tar.gz")
         .exists());
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn test_workspace_pipeline() {
+    let tests_dir = Path::new(TESTS_DIR);
+    let workspace_path = tests_dir.join("workspace_plugin");
+
+    // Cleaning up metadata from past run
+    if workspace_path.exists() {
+        fs::remove_dir_all(&workspace_path).unwrap();
+    }
+
+    assert!(exec_pike(
+        vec!["plugin", "new", "workspace_plugin"],
+        tests_dir,
+        &vec!["--workspace".to_string()]
+    )
+    .unwrap()
+    .success());
+
+    assert!(exec_pike(
+        vec!["plugin", "add", "sub_plugin"],
+        tests_dir,
+        &vec![
+            "--plugin-path".to_string(),
+            "./workspace_plugin".to_string()
+        ]
+    )
+    .unwrap()
+    .success());
+
+    let plugins = BTreeMap::from([
+        ("workspace_plugin".to_string(), Plugin::default()),
+        ("sub_plugin".to_string(), Plugin::default()),
+    ]);
+
+    // Change build script for sub plugin to test custom assets
+    fs::copy(
+        tests_dir.join("../assets/custom_assets_build.rs"),
+        workspace_path.join("sub_plugin/build.rs"),
+    )
+    .unwrap();
+
+    let tiers = BTreeMap::from([(
+        "default".to_string(),
+        Tier {
+            replicasets: 2,
+            replication_factor: 2,
+        },
+    )]);
+
+    let topology = Topology {
+        tiers,
+        plugins,
+        ..Default::default()
+    };
+
+    let params = RunParamsBuilder::default()
+        .topology(topology)
+        .data_dir(Path::new("./tmp").to_path_buf())
+        .disable_plugin_install(false)
+        .base_http_port(8000)
+        .picodata_path(Path::new("picodata").to_path_buf())
+        .base_pg_port(5432)
+        .use_release(false)
+        .target_dir(Path::new("./target").to_path_buf())
+        .daemon(true)
+        .disable_colors(false)
+        .plugin_path(Path::new(&workspace_path).to_path_buf())
+        .build()
+        .unwrap();
+
+    // Run cluster and check successful plugin installation
+    run(&params).unwrap();
+
+    let start = Instant::now();
+    let mut cluster_started = false;
+    while Instant::now().duration_since(start) < Duration::from_secs(60) {
+        let pico_instance = get_picodata_table(&workspace_path, Path::new("tmp"), "_pico_instance");
+        let pico_plugin = get_picodata_table(&workspace_path, Path::new("tmp"), "_pico_plugin");
+
+        // Compare with 8, because table gives current state and target state
+        // both of them should be online
+        // Also check that both of the plugins were enabled
+        if pico_instance.matches("Online").count() == 8 && pico_plugin.matches("true").count() == 2
+        {
+            cluster_started = true;
+            break;
+        }
+    }
+
+    assert!(exec_pike(
+        vec!["stop"],
+        TESTS_DIR,
+        &vec![
+            "--data-dir".to_string(),
+            "./tmp".to_string(),
+            "--plugin-path".to_string(),
+            "./workspace_plugin".to_string()
+        ],
+    )
+    .unwrap()
+    .success());
+
+    assert!(cluster_started);
+
+    // Fully test pack command for proper artefacts inside archives
+
+    assert!(exec_pike(
+        vec!["plugin", "pack"],
+        TESTS_DIR,
+        &vec![
+            "--debug".to_string(),
+            "--plugin-path".to_string(),
+            "./workspace_plugin".to_string()
+        ],
+    )
+    .unwrap()
+    .success());
+
+    assert!(workspace_path
+        .join("target/debug/workspace_plugin-0.1.0.tar.gz")
+        .exists());
+    assert!(workspace_path
+        .join("target/debug/sub_plugin-0.1.0.tar.gz")
+        .exists());
+
+    let build_dir = workspace_path.join("target/debug");
+
+    // Check first plugin
+    let _ = fs::create_dir(build_dir.join("tmp_workspace_plugin"));
+    unpack_archive(
+        &build_dir.join("workspace_plugin-0.1.0.tar.gz"),
+        &build_dir.join("tmp_workspace_plugin"),
+    );
+
+    assert!(build_dir
+        .join("tmp_workspace_plugin/libworkspace_plugin.so")
+        .exists());
+    assert!(build_dir
+        .join("tmp_workspace_plugin/manifest.yaml")
+        .exists());
+    assert!(build_dir.join("tmp_workspace_plugin/migrations").is_dir());
+    assert!(build_dir.join("tmp_workspace_plugin/assets").is_dir());
+
+    // Check second plugin with custom assets
+    let _ = fs::create_dir(build_dir.join("tmp_sub_plugin"));
+    unpack_archive(
+        &build_dir.join("sub_plugin-0.1.0.tar.gz"),
+        &build_dir.join("tmp_sub_plugin"),
+    );
+
+    assert!(build_dir.join("tmp_sub_plugin/libsub_plugin.so").exists());
+    assert!(build_dir.join("tmp_sub_plugin/manifest.yaml").exists());
+    assert!(build_dir.join("tmp_sub_plugin/migrations").is_dir());
+    assert!(build_dir.join("tmp_sub_plugin/assets").is_dir());
+    assert!(build_dir
+        .join("tmp_sub_plugin/assets/topology.toml")
+        .exists());
+}
+
+fn unpack_archive(path: &Path, unpack_to: &Path) {
+    let tar_archive = File::open(path).unwrap();
+    let buf_reader = BufReader::new(tar_archive);
+    let decompressor = GzDecoder::new(buf_reader);
+    let mut archive = Archive::new(decompressor);
+
+    archive.unpack(unpack_to).unwrap();
 }

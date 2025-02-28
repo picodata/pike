@@ -209,7 +209,11 @@ pub fn run_cluster(
             }
         }
         // Check if cluster set up correctly
-        let mut picodata_admin = await_picodata_admin(Duration::from_secs(60), data_dir_path)?;
+        let mut picodata_admin = await_picodata_admin(
+            Duration::from_secs(60),
+            Path::new(PLUGIN_DIR),
+            data_dir_path,
+        )?;
         let stdout = picodata_admin
             .stdout
             .take()
@@ -260,8 +264,9 @@ pub fn run_cluster(
     }
 }
 
-pub fn get_picodata_table(data_dir_path: &Path, table_name: &str) -> String {
-    let mut picodata_admin = await_picodata_admin(Duration::from_secs(60), data_dir_path).unwrap();
+pub fn get_picodata_table(plugin_path: &Path, data_dir_path: &Path, table_name: &str) -> String {
+    let mut picodata_admin =
+        await_picodata_admin(Duration::from_secs(60), plugin_path, data_dir_path).unwrap();
     let stdout = picodata_admin
         .stdout
         .take()
@@ -325,6 +330,7 @@ pub fn wait_for_proc(proc: &mut Child, timeout: Duration) {
 
 pub fn await_picodata_admin(
     timeout: Duration,
+    plugin_path: &Path,
     data_dir_path: &Path,
 ) -> Result<Child, std::io::Error> {
     let start_time = Instant::now();
@@ -337,7 +343,10 @@ pub fn await_picodata_admin(
         let picodata_admin = Command::new("picodata")
             .arg("admin")
             .arg(
-                PLUGIN_DIR.to_string() + data_dir_path.to_str().unwrap() + "/cluster/i1/admin.sock",
+                plugin_path.display().to_string()
+                    + "/"
+                    + data_dir_path.to_str().unwrap()
+                    + "/cluster/i1/admin.sock",
             )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
