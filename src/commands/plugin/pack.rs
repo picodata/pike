@@ -1,13 +1,13 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use lib::{cargo_build, BuildType};
 use serde::Deserialize;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 use tar::Builder;
+use toml::Value;
 
 use crate::commands::lib;
 
@@ -30,11 +30,6 @@ const LIB_EXT: &str = "dylib";
 
 pub fn cmd(pack_debug: bool, target_dir: &PathBuf, pluging_path: &PathBuf) -> Result<()> {
     let root_dir = env::current_dir()?.join(pluging_path);
-    let plugin_name = &root_dir
-        .file_name()
-        .context("extracting project name")?
-        .to_str()
-        .context("parsing filename to string")?;
 
     let build_dir = if pack_debug {
         cargo_build(BuildType::Debug, target_dir, pluging_path)
@@ -46,24 +41,41 @@ pub fn cmd(pack_debug: bool, target_dir: &PathBuf, pluging_path: &PathBuf) -> Re
         Path::new(&root_dir).join(target_dir).join("release")
     };
 
-    let mut manifest_dir = root_dir.clone();
-    // Workaround for case, when plugins is a subcrate of workspace
-    {
-        let cargo_toml_file: File = File::open(root_dir.join("Cargo.toml")).unwrap();
-        let toml_reader = BufReader::new(cargo_toml_file);
+    let plugin_dir = root_dir.clone();
 
-        for line in toml_reader.lines() {
-            let line = line?;
-            if line.contains("workspace") {
-                manifest_dir = root_dir.join(plugin_name);
-                break;
+    let cargo_toml_path = Path::new("Cargo.toml");
+    let cargo_toml_content =
+        fs::read_to_string(cargo_toml_path).expect("Failed to read Cargo.toml");
+
+    let parsed_toml: Value = cargo_toml_content
+        .parse()
+        .context("Failed to parse Cargo.toml")?;
+
+    if let Some(workspace) = parsed_toml.get("workspace") {
+        if let Some(members) = workspace.get("members") {
+            if let Some(members_array) = members.as_array() {
+                for member in members_array {
+                    if let Some(member_str) = member.as_str() {
+                        create_plugin_archive(&build_dir, &root_dir.join(member_str))?;
+                    }
+                }
             }
         }
+
+        return Ok(());
     }
 
+    create_plugin_archive(&build_dir, &plugin_dir)
+}
+
+fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
+    let plugin_version = get_latest_plugin_version(plugin_dir)?;
+    let plugin_build_dir = build_dir
+        .join(plugin_dir.file_name().unwrap())
+        .join(plugin_version);
+
     let cargo_manifest: CargoManifest = toml::from_str(
-        &fs::read_to_string(manifest_dir.join("Cargo.toml"))
-            .context("failed to read Cargo.toml")?,
+        &fs::read_to_string(plugin_dir.join("Cargo.toml")).context("failed to read Cargo.toml")?,
     )
     .context("failed to parse Cargo.toml")?;
 
@@ -80,30 +92,72 @@ pub fn cmd(pack_debug: bool, target_dir: &PathBuf, pluging_path: &PathBuf) -> Re
     let mut encoder = GzEncoder::new(compressed_file, Compression::best());
 
     let lib_name = format!("lib{normalized_package_name}.{LIB_EXT}");
-    let mut lib_file =
-        File::open(build_dir.join(&lib_name)).context(format!("failed to open {lib_name}"))?;
 
-    let mut manifest_file =
-        File::open(build_dir.join("manifest.yaml")).context("failed to open file manifest.yaml")?;
     {
         let mut tarball = Builder::new(&mut encoder);
 
-        tarball
-            .append_file(lib_name, &mut lib_file)
-            .context(format!(
-                "failed to append lib{normalized_package_name}.{LIB_EXT}"
-            ))?;
-
-        tarball
-            .append_file("manifest.yaml", &mut manifest_file)
-            .context("failed to add manifest.yaml to archive")?;
-
-        tarball
-            .append_dir_all("migrations", build_dir.join("migrations"))
-            .context("failed to append \"migrations\" to archive")?;
+        archive_if_exists(&plugin_build_dir.join(&lib_name), &mut tarball)?;
+        archive_if_exists(&plugin_build_dir.join("manifest.yaml"), &mut tarball)?;
+        archive_if_exists(&plugin_build_dir.join("migrations"), &mut tarball)?;
+        archive_if_exists(&plugin_build_dir.join("assets"), &mut tarball)?;
     }
 
     encoder.finish()?;
 
     Ok(())
+}
+
+fn archive_if_exists(file_path: &Path, tarball: &mut Builder<&mut GzEncoder<File>>) -> Result<()> {
+    if file_path.exists() {
+        if file_path.is_dir() {
+            tarball
+                .append_dir_all(file_path.file_name().unwrap(), file_path)
+                .context(format!(
+                    "failed to append directory: {} to archive",
+                    file_path.display()
+                ))?;
+        } else {
+            let mut opened_file = File::open(file_path)
+                .context(format!("failed to open file {}", &file_path.display()))?;
+
+            tarball
+                .append_file(file_path.file_name().unwrap(), &mut opened_file)
+                .context(format!(
+                    "failed to append file: {} to archive",
+                    file_path.display()
+                ))?;
+        }
+    } else {
+        log::info!(
+            "Couldn't find {} while packing plugin - skipping.",
+            file_path.display()
+        );
+    }
+
+    Ok(())
+}
+
+fn get_latest_plugin_version(plugin_dir: &Path) -> Result<String> {
+    let cargo_toml =
+        fs::read_to_string(plugin_dir.join("Cargo.toml")).expect("Failed to read Cargo.toml");
+
+    let parsed: toml::Value = toml::de::from_str(&cargo_toml).expect("Failed to parse TOML");
+
+    if let Some(package) = parsed.get("package") {
+        if let Some(version) = package.get("version") {
+            return Ok(version
+                .to_string()
+                .strip_prefix("\"")
+                .unwrap()
+                .strip_suffix("\"")
+                .unwrap()
+                .to_string());
+        }
+        bail!("Couldn't find version in plugin Cargo.toml");
+    }
+
+    bail!(
+        "Couldn't resolve plugin version from Cargo.toml at {}",
+        plugin_dir.display()
+    )
 }
