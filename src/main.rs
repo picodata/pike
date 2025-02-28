@@ -377,7 +377,7 @@ fn main() -> Result<()> {
                     modify_workspace(path.file_name().unwrap().to_str().unwrap(), &plugin_path)
                         .context("failed to add new plugin to workspace")?;
 
-                    commands::plugin::new::cmd(Some(&plugin_path.join(&path)), true, false)
+                    commands::plugin::new::cmd(Some(&plugin_path.join(path)), without_git, false)
                         .context("failed to execute \"add\" command")?;
 
                     fs::remove_file(plugin_path.join(&path).join("picodata.yaml"))?;

@@ -583,6 +583,7 @@ fn test_workspace_pipeline() {
         .join("tmp_workspace_plugin/manifest.yaml")
         .exists());
     assert!(build_dir.join("tmp_workspace_plugin/migrations").is_dir());
+    assert!(build_dir.join("tmp_workspace_plugin/assets").is_dir());
 
     // Check second plugin with custom assets
     let _ = fs::create_dir(build_dir.join("tmp_sub_plugin"));
@@ -594,7 +595,10 @@ fn test_workspace_pipeline() {
     assert!(build_dir.join("tmp_sub_plugin/libsub_plugin.so").exists());
     assert!(build_dir.join("tmp_sub_plugin/manifest.yaml").exists());
     assert!(build_dir.join("tmp_sub_plugin/migrations").is_dir());
-    assert!(build_dir.join("tmp_sub_plugin/topology.toml").exists());
+    assert!(build_dir.join("tmp_sub_plugin/assets").is_dir());
+    assert!(build_dir
+        .join("tmp_sub_plugin/assets/topology.toml")
+        .exists());
 }
 
 fn unpack_archive(path: &Path, unpack_to: &Path) {
