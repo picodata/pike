@@ -34,7 +34,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: "1.84"
+          toolchain: "1.85"
           components: clippy
           override: true
       - name: Checking code format
@@ -65,7 +65,7 @@ jobs:
       - name: Install toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: "1.84"
+          toolchain: "1.85"
           override: true
       - name: Run tests
         run: make tests
