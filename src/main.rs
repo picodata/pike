@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use nix::unistd::{fork, ForkResult};
 use std::{
@@ -7,6 +7,7 @@ use std::{
     process, thread,
     time::Duration,
 };
+use toml_edit::{DocumentMut, Item, Value};
 
 mod commands;
 
@@ -147,6 +148,17 @@ enum Plugin {
         #[arg(long)]
         workspace: bool,
     },
+    /// Add new plugin to workspace
+    Add {
+        #[arg(value_name = "path")]
+        path: PathBuf,
+        /// Disable the automatic git initialization
+        #[arg(long)]
+        without_git: bool,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
+    },
     /// Create a new Picodata plugin in an existing directory
     Init {
         /// Disable the automatic git initialization
@@ -215,6 +227,44 @@ fn check_plugin_directory(plugin_dir: &Path) {
 
         process::exit(1);
     }
+}
+
+// Add new member to Cargo.toml, additionally checks proper
+// environment for `plugin add` command
+fn modify_workspace(plugin_name: &str, plugin_path: &Path) -> Result<()> {
+    let cargo_toml_path = plugin_path.join("Cargo.toml");
+
+    let content = fs::read_to_string(&cargo_toml_path)?;
+    let mut doc = content.parse::<DocumentMut>()?;
+
+    let workspace = doc.get("workspace").and_then(Item::as_table);
+    if workspace.is_none() {
+        bail!("You are trying to add plugin outside of workspace directory");
+    }
+
+    let workspace = doc["workspace"].as_table_mut().unwrap();
+
+    let already_exists = workspace
+        .get("members")
+        .and_then(Item::as_value)
+        .and_then(Value::as_array)
+        .is_some_and(|members| members.iter().any(|v| v.as_str() == Some(plugin_name)));
+
+    if already_exists {
+        bail!("Plugin with this name already exists");
+    }
+
+    let members = workspace
+        .get_mut("members")
+        .and_then(Item::as_value_mut)
+        .and_then(Value::as_array_mut)
+        .expect("Members field can't be found");
+
+    members.push(plugin_name);
+
+    fs::write(cargo_toml_path, doc.to_string())?;
+
+    Ok(())
 }
 
 #[allow(clippy::too_many_lines)]
@@ -318,6 +368,19 @@ fn main() -> Result<()> {
                     workspace,
                 } => commands::plugin::new::cmd(None, without_git, workspace)
                     .context("failed to execute \"init\" command")?,
+                Plugin::Add {
+                    path,
+                    without_git,
+                    plugin_path,
+                } => {
+                    check_plugin_directory(&plugin_path);
+
+                    modify_workspace(path.file_name().unwrap().to_str().unwrap(), &plugin_path)
+                        .context("failed to add new plugin to workspace")?;
+
+                    commands::plugin::new::cmd(Some(&path), without_git, false)
+                        .context("failed to execute \"add\" command")?;
+                }
             }
         }
         Command::Config { command } => {
