@@ -222,13 +222,19 @@ impl PicodataInstance {
             "--data-dir"
         };
 
+        let listen_flag = if picodata_version.contains("picodata 25.1") {
+            "--iproto-listen"
+        } else {
+            "--listen"
+        };
+
         child.args([
             "run",
             data_dir_flag,
             instance_data_dir.to_str().expect("unreachable"),
             "--plugin-dir",
             plugins_dir.to_str().unwrap_or("target/debug"),
-            "--listen",
+            listen_flag,
             &format!("127.0.0.1:{bin_port}"),
             "--peer",
             &format!("127.0.0.1:{first_instance_bin_port}"),
