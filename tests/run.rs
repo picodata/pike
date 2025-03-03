@@ -11,6 +11,7 @@ use pike::cluster::{run, MigrationContextVar};
 use std::collections::BTreeMap;
 use std::process::Command;
 use std::time::Instant;
+use std::{env, thread};
 use std::{
     fs::{self},
     path::Path,
@@ -604,4 +605,64 @@ fn unpack_archive(path: &Path, unpack_to: &Path) {
     let mut archive = Archive::new(decompressor);
 
     archive.unpack(unpack_to).unwrap();
+}
+
+#[test]
+fn test_run_without_plugin_directory() {
+    let run_dir = Path::new(TESTS_DIR);
+    let plugin_dir = Path::new("test_run_without_plugin_directory");
+    let data_dir = plugin_dir.join("tmp");
+
+    // Cleaning up metadata from past run
+    let _ = fs::remove_dir_all(run_dir.join(plugin_dir));
+
+    let tiers = BTreeMap::from([(
+        "default".to_string(),
+        Tier {
+            replicasets: 2,
+            replication_factor: 2,
+        },
+    )]);
+
+    let topology = Topology {
+        tiers,
+        ..Default::default()
+    };
+
+    let params = RunParamsBuilder::default()
+        .topology(topology)
+        .data_dir(run_dir.join(&data_dir))
+        .daemon(true)
+        .build()
+        .unwrap();
+
+    run(&params).unwrap();
+
+    let start = Instant::now();
+    let mut cluster_started = false;
+    while Instant::now().duration_since(start) < Duration::from_secs(60) {
+        let pico_instance = get_picodata_table(run_dir, &data_dir, "_pico_instance");
+
+        // Compare with 8, because table gives current state and target state
+        // both of them should be online
+        if pico_instance.matches("Online").count() == 8 {
+            cluster_started = true;
+            break;
+        }
+
+        thread::sleep(Duration::from_secs(1));
+    }
+
+    assert!(exec_pike(
+        vec!["stop"],
+        env::current_dir().unwrap(),
+        &vec![
+            "--data-dir".to_string(),
+            run_dir.join(&data_dir).to_str().unwrap().to_string()
+        ],
+    )
+    .unwrap()
+    .success());
+
+    assert!(cluster_started);
 }

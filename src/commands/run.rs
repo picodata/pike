@@ -173,6 +173,26 @@ fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &PathBuf)
     Ok(())
 }
 
+fn is_plugin_dir(path: &Path) -> bool {
+    if !path.is_dir() {
+        return false;
+    }
+    if !path.join("Cargo.toml").exists() {
+        return false;
+    }
+
+    if path.join("manifest.yaml.template").exists() {
+        return true;
+    }
+
+    fs::read_dir(path)
+        .unwrap()
+        .filter(Result::is_ok)
+        .map(|e| e.unwrap().path())
+        .filter(|e| e.is_dir())
+        .any(|dir| dir.join("manifest.yaml.template").exists())
+}
+
 pub struct PicodataInstance {
     instance_name: String,
     tier: String,
@@ -192,7 +212,7 @@ impl PicodataInstance {
         http_port: u16,
         pg_port: u16,
         first_instance_bin_port: u16,
-        plugins_dir: &Path,
+        plugins_dir: Option<&Path>,
         replication_factor: u8,
         tier: &str,
         run_params: &Params,
@@ -232,8 +252,6 @@ impl PicodataInstance {
             "run",
             data_dir_flag,
             instance_data_dir.to_str().expect("unreachable"),
-            "--plugin-dir",
-            plugins_dir.to_str().unwrap_or("target/debug"),
             listen_flag,
             &format!("127.0.0.1:{bin_port}"),
             "--peer",
@@ -247,6 +265,13 @@ impl PicodataInstance {
             "--tier",
             tier,
         ]);
+
+        if let Some(plugins_dir) = plugins_dir {
+            child.args([
+                "--plugin-dir",
+                plugins_dir.to_str().unwrap_or("target/debug"),
+            ]);
+        }
 
         if run_params.daemon {
             child.stdout(Stdio::null()).stderr(Stdio::null());
@@ -417,22 +442,28 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
     let mut params = params.clone();
     params.data_dir = params.plugin_path.join(&params.data_dir);
 
-    let plugins_dir = if params.use_release {
-        cargo_build(
-            lib::BuildType::Release,
-            &params.target_dir,
-            &params.plugin_path,
-        )?;
-        params.plugin_path.join(params.target_dir.join("release"))
-    } else {
-        cargo_build(
-            lib::BuildType::Debug,
-            &params.target_dir,
-            &params.plugin_path,
-        )?;
-        params.plugin_path.join(params.target_dir.join("debug"))
-    };
-    params.topology.find_plugin_versions(&plugins_dir)?;
+    let mut plugins_dir = None;
+    if is_plugin_dir(&params.plugin_path) {
+        plugins_dir = if params.use_release {
+            cargo_build(
+                lib::BuildType::Release,
+                &params.target_dir,
+                &params.plugin_path,
+            )?;
+            Some(params.plugin_path.join(params.target_dir.join("release")))
+        } else {
+            cargo_build(
+                lib::BuildType::Debug,
+                &params.target_dir,
+                &params.plugin_path,
+            )?;
+            Some(params.plugin_path.join(params.target_dir.join("debug")))
+        };
+
+        params
+            .topology
+            .find_plugin_versions(plugins_dir.as_ref().unwrap())?;
+    }
 
     info!("Running the cluster...");
 
@@ -451,7 +482,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
                 params.base_http_port + instance_id,
                 params.base_pg_port + instance_id,
                 first_instance_bin_port,
-                &plugins_dir,
+                plugins_dir.as_deref(),
                 tier.replication_factor,
                 tier_name,
                 &params,
@@ -477,14 +508,16 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             thread::sleep(Duration::from_secs(5));
         }
 
-        let result = enable_plugins(&params.topology, &params.data_dir, &params.picodata_path);
-        if let Err(e) = result {
-            for process in &mut picodata_processes {
-                process.kill().unwrap_or_else(|e| {
-                    error!("failed to kill picodata instances: {:#}", e);
-                });
+        if plugins_dir.is_some() {
+            let result = enable_plugins(&params.topology, &params.data_dir, &params.picodata_path);
+            if let Err(e) = result {
+                for process in &mut picodata_processes {
+                    process.kill().unwrap_or_else(|e| {
+                        error!("failed to kill picodata instances: {:#}", e);
+                    });
+                }
+                return Err(e.context("failed to enable plugins"));
             }
-            return Err(e.context("failed to enable plugins"));
         }
     };
 
