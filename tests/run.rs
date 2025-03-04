@@ -595,10 +595,7 @@ fn test_workspace_pipeline() {
     assert!(build_dir.join("tmp_sub_plugin/libsub_plugin.so").exists());
     assert!(build_dir.join("tmp_sub_plugin/manifest.yaml").exists());
     assert!(build_dir.join("tmp_sub_plugin/migrations").is_dir());
-    assert!(build_dir.join("tmp_sub_plugin/assets").is_dir());
-    assert!(build_dir
-        .join("tmp_sub_plugin/assets/topology.toml")
-        .exists());
+    assert!(build_dir.join("tmp_sub_plugin/topology.toml").exists());
 }
 
 fn unpack_archive(path: &Path, unpack_to: &Path) {

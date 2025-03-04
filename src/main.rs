@@ -152,9 +152,6 @@ enum Plugin {
     Add {
         #[arg(value_name = "path")]
         path: PathBuf,
-        /// Disable the automatic git initialization
-        #[arg(long)]
-        without_git: bool,
         /// Path to plugin folder
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
@@ -368,17 +365,13 @@ fn main() -> Result<()> {
                     workspace,
                 } => commands::plugin::new::cmd(None, without_git, workspace)
                     .context("failed to execute \"init\" command")?,
-                Plugin::Add {
-                    path,
-                    without_git,
-                    plugin_path,
-                } => {
+                Plugin::Add { path, plugin_path } => {
                     check_plugin_directory(&plugin_path);
 
                     modify_workspace(path.file_name().unwrap().to_str().unwrap(), &plugin_path)
                         .context("failed to add new plugin to workspace")?;
 
-                    commands::plugin::new::cmd(Some(&plugin_path.join(path)), without_git, false)
+                    commands::plugin::new::cmd(Some(&plugin_path.join(path)), true, false)
                         .context("failed to execute \"add\" command")?;
                 }
             }

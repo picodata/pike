@@ -89,22 +89,19 @@ pub fn main(params: &Params) {
     let crate_dir = Path::new(&crate_dir);
 
     let migrations_dir = crate_dir.join("migrations");
-    let mut migrations: Vec<String> = vec![];
-    if migrations_dir.exists() {
-        migrations = match fs::read_dir(&migrations_dir) {
-            Ok(dir) => dir
-                .map(|path| {
-                    path.unwrap()
-                        .path()
-                        .strip_prefix(crate_dir)
-                        .unwrap()
-                        .to_string_lossy()
-                        .into()
-                })
-                .collect(),
-            Err(_) => Vec::new(),
-        };
-    }
+    let migrations: Vec<String> = fs::read_dir(&migrations_dir)
+        .map(|dir| {
+            dir.map(|p| {
+                p.unwrap()
+                    .path()
+                    .strip_prefix(crate_dir)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into()
+            })
+            .collect()
+        })
+        .unwrap_or_default();
 
     // Copy migrations directory and manifest into newest plugin version
     if !migrations.is_empty() {

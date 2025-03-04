@@ -343,10 +343,9 @@ pub fn await_picodata_admin(
         let picodata_admin = Command::new("picodata")
             .arg("admin")
             .arg(
-                plugin_path.display().to_string()
-                    + "/"
-                    + data_dir_path.to_str().unwrap()
-                    + "/cluster/i1/admin.sock",
+                plugin_path
+                    .join(data_dir_path)
+                    .join("cluster/i1/admin.sock"),
             )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

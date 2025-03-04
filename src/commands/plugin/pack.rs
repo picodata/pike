@@ -57,9 +57,20 @@ pub fn cmd(pack_debug: bool, target_dir: &PathBuf, pluging_path: &PathBuf) -> Re
         if let Some(members) = workspace.get("members") {
             if let Some(members_array) = members.as_array() {
                 for member in members_array {
-                    if let Some(member_str) = member.as_str() {
-                        create_plugin_archive(&build_dir, &root_dir.join(member_str))?;
+                    let member_str = member.as_str();
+                    if member_str.is_none() {
+                        continue;
                     }
+
+                    if !root_dir
+                        .join(member_str.unwrap())
+                        .join("manifest.yaml.template")
+                        .exists()
+                    {
+                        continue;
+                    }
+
+                    create_plugin_archive(&build_dir, &root_dir.join(member_str.unwrap()))?;
                 }
             }
         }
@@ -101,7 +112,16 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
         archive_if_exists(&plugin_build_dir.join(&lib_name), &mut tarball)?;
         archive_if_exists(&plugin_build_dir.join("manifest.yaml"), &mut tarball)?;
         archive_if_exists(&plugin_build_dir.join("migrations"), &mut tarball)?;
-        archive_if_exists(&plugin_build_dir.join("assets"), &mut tarball)?;
+
+        let assets_path = &plugin_build_dir.join("assets");
+        // no need to notify user if there is no assets folder
+        if assets_path.exists() {
+            for entry in fs::read_dir(assets_path)? {
+                let entry = entry?;
+                let entry_name = entry.file_name();
+                archive_if_exists(&assets_path.join(entry_name), &mut tarball)?;
+            }
+        }
     }
 
     encoder.finish()?;
@@ -110,30 +130,32 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
 }
 
 fn archive_if_exists(file_path: &Path, tarball: &mut Builder<&mut GzEncoder<File>>) -> Result<()> {
-    if file_path.exists() {
-        if file_path.is_dir() {
-            tarball
-                .append_dir_all(file_path.file_name().unwrap(), file_path)
-                .context(format!(
-                    "failed to append directory: {} to archive",
-                    file_path.display()
-                ))?;
-        } else {
-            let mut opened_file = File::open(file_path)
-                .context(format!("failed to open file {}", &file_path.display()))?;
-
-            tarball
-                .append_file(file_path.file_name().unwrap(), &mut opened_file)
-                .context(format!(
-                    "failed to append file: {} to archive",
-                    file_path.display()
-                ))?;
-        }
-    } else {
+    if !file_path.exists() {
         log::info!(
             "Couldn't find {} while packing plugin - skipping.",
             file_path.display()
         );
+
+        return Ok(());
+    }
+
+    if file_path.is_dir() {
+        tarball
+            .append_dir_all(file_path.file_name().unwrap(), file_path)
+            .context(format!(
+                "failed to append directory: {} to archive",
+                file_path.display()
+            ))?;
+    } else {
+        let mut opened_file = File::open(file_path)
+            .context(format!("failed to open file {}", &file_path.display()))?;
+
+        tarball
+            .append_file(file_path.file_name().unwrap(), &mut opened_file)
+            .context(format!(
+                "failed to append file: {} to archive",
+                file_path.display()
+            ))?;
     }
 
     Ok(())
