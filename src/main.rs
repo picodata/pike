@@ -167,7 +167,7 @@ enum Plugin {
     },
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum Config {
     /// Apply services config on Picodata cluster started by the Run command
     Apply {
@@ -182,6 +182,12 @@ enum Config {
         /// Path to data directory of the cluster
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
+        /// Choose plugin which config should be applied
+        #[arg(long, value_name = "PLUGIN_NAME")]
+        plugin_name: Option<String>,
     },
 }
 
@@ -371,8 +377,11 @@ fn main() -> Result<()> {
                     modify_workspace(path.file_name().unwrap().to_str().unwrap(), &plugin_path)
                         .context("failed to add new plugin to workspace")?;
 
-                    commands::plugin::new::cmd(Some(&plugin_path.join(path)), true, false)
+                    commands::plugin::new::cmd(Some(&plugin_path.join(&path)), true, false)
                         .context("failed to execute \"add\" command")?;
+
+                    fs::remove_file(plugin_path.join(&path).join("picodata.yaml"))?;
+                    fs::remove_file(plugin_path.join(&path).join("topology.toml"))?;
                 }
             }
         }
@@ -382,10 +391,14 @@ fn main() -> Result<()> {
                 Config::Apply {
                     config_path,
                     data_dir,
+                    plugin_path,
+                    plugin_name,
                 } => {
                     let params = commands::config::apply::ParamsBuilder::default()
                         .config_path(config_path)
                         .data_dir(data_dir)
+                        .plugin_path(plugin_path)
+                        .plugin_name(plugin_name)
                         .build()
                         .unwrap();
                     commands::config::apply::cmd(&params)
