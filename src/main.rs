@@ -224,12 +224,15 @@ fn run_child_killer() {
     process::exit(0)
 }
 
-fn check_plugin_directory(plugin_dir: &Path) {
-    if !plugin_dir.join("./topology.toml").exists() {
-        println!("{CARING_PIKE}");
-
-        process::exit(1);
+fn is_required_path_exists(plugin_dir: &Path, required_path: &Path) {
+    if required_path.exists() {
+        return;
     }
+    if plugin_dir.join(required_path).exists() {
+        return;
+    }
+    println!("{CARING_PIKE}");
+    process::exit(1);
 }
 
 // Add new member to Cargo.toml, additionally checks proper
@@ -289,7 +292,7 @@ fn main() -> Result<()> {
             disable_colors,
             plugin_path,
         } => {
-            check_plugin_directory(&plugin_path);
+            is_required_path_exists(&plugin_path, &topology);
 
             if !daemon {
                 run_child_killer();
@@ -323,7 +326,7 @@ fn main() -> Result<()> {
             data_dir,
             plugin_path,
         } => {
-            check_plugin_directory(&plugin_path);
+            is_required_path_exists(&plugin_path, &data_dir);
 
             run_child_killer();
             let params = commands::stop::ParamsBuilder::default()
@@ -345,7 +348,7 @@ fn main() -> Result<()> {
                     target_dir,
                     plugin_path,
                 } => {
-                    check_plugin_directory(&plugin_path);
+                    is_required_path_exists(&plugin_path, Path::new("Cargo.toml"));
 
                     commands::plugin::pack::cmd(debug, &target_dir, &plugin_path)
                         .context("failed to execute \"pack\" command")?;
@@ -355,7 +358,7 @@ fn main() -> Result<()> {
                     target_dir,
                     plugin_path,
                 } => {
-                    check_plugin_directory(&plugin_path);
+                    is_required_path_exists(&plugin_path, Path::new("Cargo.toml"));
 
                     commands::plugin::build::cmd(release, &target_dir, &plugin_path)
                         .context("failed to execute \"build\" command")?;
@@ -372,7 +375,7 @@ fn main() -> Result<()> {
                 } => commands::plugin::new::cmd(None, without_git, workspace)
                     .context("failed to execute \"init\" command")?,
                 Plugin::Add { path, plugin_path } => {
-                    check_plugin_directory(&plugin_path);
+                    is_required_path_exists(&plugin_path, Path::new("Cargo.toml"));
 
                     modify_workspace(path.file_name().unwrap().to_str().unwrap(), &plugin_path)
                         .context("failed to add new plugin to workspace")?;
