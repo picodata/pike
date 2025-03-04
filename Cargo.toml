@@ -36,6 +36,7 @@ nix = "0.29.0"
 colored = "3"
 rand = "0.9"
 derive_builder = "0.20"
+toml_edit = "0.22.24"
 
 [lib]
 name = "pike"
