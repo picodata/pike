@@ -90,6 +90,12 @@ fn workspace_init(root_path: &Path, project_name: &str) -> Result<()> {
         root_path.join(project_name).join("plugin_config.yaml"),
         root_path.join("plugin_config.yaml"),
     )
+    .context("failed to move plugin_config.yaml to workspace dir")?;
+
+    fs::copy(
+        root_path.join(project_name).join("picodata.yaml"),
+        root_path.join("picodata.yaml"),
+    )
     .context("failed to move picodata.yaml to workspace dir")?;
 
     Ok(())
