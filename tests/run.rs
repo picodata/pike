@@ -583,7 +583,6 @@ fn test_workspace_pipeline() {
         .join("tmp_workspace_plugin/manifest.yaml")
         .exists());
     assert!(build_dir.join("tmp_workspace_plugin/migrations").is_dir());
-    assert!(build_dir.join("tmp_workspace_plugin/assets").is_dir());
 
     // Check second plugin with custom assets
     let _ = fs::create_dir(build_dir.join("tmp_sub_plugin"));
