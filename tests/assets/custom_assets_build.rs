@@ -16,7 +16,7 @@ fn main() {
     // The path is calculated from plugin directory
 
     let params = build::ParamsBuilder::default()
-        .custom_assets(vec!["topology.toml"])
+        .custom_assets(vec!["../topology.toml"])
         .build()
         .unwrap();
     build::main(&params);

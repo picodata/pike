@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use derive_builder::Builder;
 use log::info;
 use serde::Deserialize;
@@ -8,7 +8,7 @@ use std::{
     env, fs,
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{self, Command, Stdio},
 };
 
 const WISE_PIKE: &str = r"
@@ -166,8 +166,6 @@ pub fn cmd(params: &Params) -> Result<()> {
         return Ok(());
     }
 
-    info!("Applying plugin config in each plugin");
-
     let root_dir = env::current_dir()?.join(&params.plugin_path);
 
     let cargo_toml_path = root_dir.join("Cargo.toml");
@@ -182,8 +180,10 @@ pub fn cmd(params: &Params) -> Result<()> {
 
     if let Some(workspace) = parsed_toml.get("workspace") {
         if params.config_path.to_str().unwrap() != "plugin_config.yaml" {
-            bail!(WISE_PIKE);
+            println!("{WISE_PIKE}");
+            process::exit(1);
         }
+        info!("Applying plugin config in each plugin");
 
         if let Some(members) = workspace.get("members") {
             if let Some(members_array) = members.as_array() {
@@ -207,6 +207,8 @@ pub fn cmd(params: &Params) -> Result<()> {
 
         return Ok(());
     }
+
+    info!("Applying plugin config");
 
     apply_plugin_config(params, "./")?;
 

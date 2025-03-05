@@ -4,8 +4,9 @@ use helpers::{exec_pike, get_picodata_table, run_cluster, CmdArguments, PLUGIN_D
 use std::{
     collections::BTreeMap,
     fs,
+    io::{BufRead, BufReader},
     path::Path,
-    process::Command,
+    process::{Command, Stdio},
     time::{Duration, Instant},
     vec,
 };
@@ -213,29 +214,6 @@ fn test_workspace_config_apply() {
 
     assert!(is_cluster_valid, "Failed to apply config for one plugin");
 
-    // Test uncle Pike wise advice's
-    // Forced to call Command manually instead of exec_pike to read output
-    let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let wrong_plugin_path_cmd = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
-        .args([
-            "pike",
-            "config",
-            "apply",
-            "--config-path",
-            "./gangam_style",
-            "--plugin-path",
-            "./workspace_plugin",
-        ])
-        .current_dir(TESTS_DIR)
-        .output()
-        .unwrap();
-
-    let stdout = String::from_utf8_lossy(&wrong_plugin_path_cmd.stdout);
-    assert!(
-        stdout.contains("You are trying to apply config from"),
-        "Failed to handle case with invalid command line arguments combination"
-    );
-
     assert!(exec_pike(
         vec!["stop"],
         TESTS_DIR,
@@ -248,4 +226,72 @@ fn test_workspace_config_apply() {
     )
     .unwrap()
     .success());
+}
+
+#[test]
+fn test_plugin_apply_wrong_cmd_combination() {
+    let tests_dir = Path::new(TESTS_DIR);
+    let workspace_path = tests_dir.join("workspace_plugin");
+
+    // Cleaning up metadata from past run
+    if workspace_path.exists() {
+        fs::remove_dir_all(&workspace_path).unwrap();
+    }
+
+    assert!(exec_pike(
+        vec!["plugin", "new", "workspace_plugin"],
+        tests_dir,
+        &vec!["--workspace".to_string()]
+    )
+    .unwrap()
+    .success());
+
+    assert!(exec_pike(
+        vec!["plugin", "add", "sub_plugin"],
+        tests_dir,
+        &vec![
+            "--plugin-path".to_string(),
+            "./workspace_plugin".to_string()
+        ]
+    )
+    .unwrap()
+    .success());
+
+    // Test uncle Pike wise advice's
+    // Forced to call Command manually instead of exec_pike to read output
+    let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let mut wrong_plugin_path_cmd = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
+        .args([
+            "pike",
+            "config",
+            "apply",
+            "--config-path",
+            "./gangam_style",
+            "--plugin-path",
+            "./workspace_plugin",
+        ])
+        .current_dir(TESTS_DIR)
+        .stdout(Stdio::piped()) // Capture stdout
+        .stderr(Stdio::piped()) // Capture stderr
+        .spawn()
+        .expect("Failed to start command");
+    wrong_plugin_path_cmd.wait().unwrap();
+
+    let mut good_output = false;
+    if let Some(stdout) = wrong_plugin_path_cmd.stdout.take() {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if line
+                .unwrap()
+                .contains("You are trying to apply config from")
+            {
+                good_output = true;
+            }
+        }
+    }
+
+    assert!(
+        good_output,
+        "Failed to handle case with invalid command line arguments combination line",
+    );
 }
