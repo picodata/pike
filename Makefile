@@ -1,7 +1,3 @@
-.PHONY: tests
-tests:
-	cargo test -- --test-threads=1
-
 .PHONY: style-check
 style-check:
 	cargo check --all --bins --tests --benches

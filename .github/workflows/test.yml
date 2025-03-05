@@ -66,6 +66,6 @@ jobs:
           toolchain: "1.85"
           components: clippy, rustfmt
       - name: Run tests
-        run: make tests
+        run: cargo test
         env:
           RUST_LOG: debug
