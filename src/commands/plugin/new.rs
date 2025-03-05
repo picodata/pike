@@ -11,6 +11,12 @@ use std::{
 use include_dir::{include_dir, Dir, DirEntry};
 
 static PLUGIN_TEMPLATE: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/plugin_template");
+static WS_CARGO_MANIFEST_TEMPLATE: &str = r#"[workspace]
+resolver = "3"
+members = [
+    "{{ project_name }}",
+]
+"#;
 
 fn place_file(target_path: &Path, t_ctx: &liquid::Object, entries: &[DirEntry<'_>]) -> Result<()> {
     for entry in entries {
@@ -71,14 +77,19 @@ where
     Ok(())
 }
 
-fn workspace_init(root_path: &Path, project_name: &str) -> Result<()> {
+fn workspace_init(root_path: &Path, project_name: &str, t_ctx: &liquid::Object) -> Result<()> {
     let cargo_toml_path = root_path.join("Cargo.toml");
 
     let mut cargo_toml =
         File::create(cargo_toml_path).context("failed to create Cargo.toml for workspace")?;
 
-    cargo_toml
-        .write_all(format!("[workspace]\nmembers = [\n  \"{project_name}\",\n]").as_bytes())?;
+    let ws_template = liquid::ParserBuilder::with_stdlib()
+        .build()
+        .context("couldn't build from template")?
+        .parse(WS_CARGO_MANIFEST_TEMPLATE)
+        .unwrap();
+
+    cargo_toml.write_all(ws_template.render(&t_ctx).unwrap().as_bytes())?;
 
     fs::copy(
         root_path.join(project_name).join("topology.toml"),
@@ -138,7 +149,8 @@ pub fn cmd(path: Option<&Path>, without_git: bool, init_workspace: bool) -> Resu
     }
 
     if init_workspace {
-        workspace_init(&path, project_name).context("failed to initiate workspace")?;
+        workspace_init(&path, project_name, &templates_ctx)
+            .context("failed to initiate workspace")?;
     }
 
     Ok(())
