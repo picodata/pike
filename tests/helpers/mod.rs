@@ -3,7 +3,7 @@
 use constcat::concat;
 use log::info;
 use std::ffi::OsStr;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::thread;
@@ -83,16 +83,16 @@ impl Cluster {
     }
 }
 
-pub fn check_plugin_version_artefacts(plugin_path: &Path, check_symlinks: bool) -> bool {
-    let symlink_path = plugin_path.join("libtest_plugin.so");
+pub fn assert_plugin_build_artefacts(plugin_path: &Path, must_be_symlinks: bool) {
+    let lib_path = plugin_path.join("libtest_plugin.so");
 
-    if check_symlinks && !validate_symlink(&symlink_path) {
-        return false;
+    if must_be_symlinks {
+        assert!(validate_symlink(&lib_path));
     }
 
-    check_existance(&plugin_path.join("manifest.yaml"), false)
-        && check_existance(&plugin_path.join("libtest_plugin.so"), check_symlinks)
-        && check_existance(&plugin_path.join("migrations"), false)
+    assert_path_existance(&plugin_path.join("manifest.yaml"), false);
+    assert_path_existance(&lib_path, must_be_symlinks);
+    assert_path_existance(&plugin_path.join("migrations"), false);
 }
 
 fn validate_symlink(symlink_path: &PathBuf) -> bool {
@@ -107,19 +107,18 @@ fn validate_symlink(symlink_path: &PathBuf) -> bool {
     false
 }
 
-fn check_existance(path: &Path, check_symlinks: bool) -> bool {
-    if !path.exists() {
-        return false;
-    };
+fn assert_path_existance(path: &Path, must_be_symlink: bool) {
+    assert!(path.exists());
 
     let is_symlink = path
         .symlink_metadata()
         .map(|m| m.file_type().is_symlink())
         .unwrap_or(false);
-    if check_symlinks {
-        is_symlink
+
+    if must_be_symlink {
+        assert!(is_symlink);
     } else {
-        !is_symlink
+        assert!(!is_symlink);
     }
 }
 
@@ -140,7 +139,7 @@ pub fn build_plugin(build_type: &BuildType, new_version: &str) {
     fs::write(cargo_toml_path, doc.to_string()).unwrap();
 
     // Build according version
-    match build_type {
+    let output = match build_type {
         BuildType::Debug => Command::new("cargo")
             .args(vec!["build"])
             .current_dir(PLUGIN_DIR)
@@ -153,6 +152,13 @@ pub fn build_plugin(build_type: &BuildType, new_version: &str) {
             .output()
             .unwrap(),
     };
+
+    if !output.status.success() {
+        io::stdout().write_all(&output.stdout).unwrap();
+        io::stderr().write_all(&output.stderr).unwrap();
+
+        assert!(output.status.code().unwrap() != 0);
+    }
 }
 
 pub fn run_cluster(
@@ -305,6 +311,8 @@ where
         .args(args)
         .args(cmd_args)
         .current_dir(current_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .status()
 }
 

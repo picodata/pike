@@ -1,6 +1,6 @@
 mod helpers;
 
-use helpers::{build_plugin, check_plugin_version_artefacts, exec_pike, PLUGIN_DIR, TESTS_DIR};
+use helpers::{assert_plugin_build_artefacts, build_plugin, exec_pike, PLUGIN_DIR, TESTS_DIR};
 use std::{
     fs::{self},
     path::Path,
@@ -25,39 +25,39 @@ fn test_cargo_build() {
     build_plugin(&helpers::BuildType::Release, "0.1.0");
     build_plugin(&helpers::BuildType::Release, "0.1.1");
 
-    assert!(check_plugin_version_artefacts(
+    assert_plugin_build_artefacts(
         &Path::new(PLUGIN_DIR)
             .join("target")
             .join("debug")
             .join("test-plugin")
             .join("0.1.0"),
-        false
-    ));
+        false,
+    );
 
-    assert!(check_plugin_version_artefacts(
+    assert_plugin_build_artefacts(
         &Path::new(PLUGIN_DIR)
             .join("target")
             .join("debug")
             .join("test-plugin")
             .join("0.1.1"),
-        true
-    ));
+        true,
+    );
 
-    assert!(check_plugin_version_artefacts(
+    assert_plugin_build_artefacts(
         &Path::new(PLUGIN_DIR)
             .join("target")
             .join("release")
             .join("test-plugin")
             .join("0.1.0"),
-        false
-    ));
+        false,
+    );
 
-    assert!(check_plugin_version_artefacts(
+    assert_plugin_build_artefacts(
         &Path::new(PLUGIN_DIR)
             .join("target")
             .join("release")
             .join("test-plugin")
             .join("0.1.1"),
-        true
-    ));
+        true,
+    );
 }
