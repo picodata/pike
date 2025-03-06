@@ -18,6 +18,7 @@ pub mod cluster {
 
 pub mod config {
     pub use crate::commands::config::apply::cmd as apply;
+    pub use crate::commands::config::apply::ConfigMap as PluginConfigMap;
     pub use crate::commands::config::apply::ParamsBuilder as ApplyParamsBuilder;
 }
 

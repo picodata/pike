@@ -1,11 +1,12 @@
 mod helpers;
 
 use helpers::{exec_pike, get_picodata_table, run_cluster, CmdArguments, PLUGIN_DIR, TESTS_DIR};
+use rstest::rstest;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fs,
     io::{BufRead, BufReader},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant},
     vec,
@@ -17,11 +18,38 @@ use pike::cluster::Plugin;
 use pike::cluster::RunParamsBuilder;
 use pike::cluster::Tier;
 use pike::cluster::Topology;
+use pike::config::ApplyParamsBuilder;
 
 const TOTAL_INSTANCES: i32 = 4;
 
-#[test]
-fn test_config_apply() {
+#[rstest]
+// Default configuration.
+#[case(
+    ApplyParamsBuilder::default()
+        .plugin_path(PathBuf::from(PLUGIN_DIR))
+        .clone()
+)]
+// Explicitly specified file path.
+#[case(
+    ApplyParamsBuilder::default()
+        .plugin_path(PathBuf::from(PLUGIN_DIR))
+        .config_path(PathBuf::from("plugin_config.yaml"))
+        .clone()
+)]
+// Pass config map directly.
+#[case(
+    ApplyParamsBuilder::default()
+        .plugin_path(PathBuf::from(PLUGIN_DIR))
+        .config_map(HashMap::from([(
+            "main".to_string(),
+            [(
+                "value".to_string(),
+                serde_yaml::to_value("changed").unwrap(),
+            )].iter().cloned().collect(),
+        )]))
+        .clone()
+)]
+fn test_config_apply(#[case] params_builder: ApplyParamsBuilder) {
     let _cluster_handle = run_cluster(
         Duration::from_secs(120),
         TOTAL_INSTANCES,
@@ -29,9 +57,11 @@ fn test_config_apply() {
     )
     .unwrap();
 
-    assert!(exec_pike(vec!["config", "apply"], PLUGIN_DIR, &vec![])
-        .unwrap()
-        .success());
+    let params = params_builder
+        .build()
+        .expect("Failed to build config apply parameters");
+
+    pike::config::apply(&params).expect("Failed to apply plugin configuration");
 
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {

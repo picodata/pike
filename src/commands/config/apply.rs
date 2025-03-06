@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use derive_builder::Builder;
 use log::info;
 use serde::Deserialize;
-use serde_yaml::Value;
 use std::{
     collections::HashMap,
     env, fs,
@@ -11,6 +10,9 @@ use std::{
     process::{self, Command, Stdio},
 };
 
+pub type ConfigMap = HashMap<String, HashMap<String, serde_yaml::Value>>;
+
+const DEFAULT_PLUGIN_CONFIG_PATH: &str = "plugin_config.yaml";
 const WISE_PIKE: &str = r"
   ________________________________________
 / You are trying to apply config from     \
@@ -28,11 +30,22 @@ o      ______/~/~/~/__           /((
                                  \((
  ";
 
+fn read_config_from_path(path: &PathBuf) -> Result<ConfigMap> {
+    serde_yaml::from_str(
+        &fs::read_to_string(path)
+            .context(format!("failed to read config file at {}", path.display()))?,
+    )
+    .context(format!(
+        "failed to parse config file at {} as toml",
+        path.display()
+    ))
+}
+
 fn apply_service_config(
     plugin_name: &str,
     plugin_version: &str,
     service_name: &str,
-    config: &HashMap<String, Value>,
+    config: &HashMap<String, serde_yaml::Value>,
     admin_socket: &Path,
 ) -> Result<()> {
     let mut queries: Vec<String> = Vec::new();
@@ -109,16 +122,11 @@ fn apply_plugin_config(params: &Params, current_plugin_path: &str) -> Result<()>
     )
     .context("failed to parse Cargo.toml")?;
 
-    let config: HashMap<String, HashMap<String, Value>> = serde_yaml::from_str(
-        &fs::read_to_string(cur_plugin_dir.join(&params.config_path)).context(format!(
-            "failed to read config file at {}",
-            params.config_path.display()
-        ))?,
-    )
-    .context(format!(
-        "failed to parse config file at {} as toml",
-        params.config_path.display()
-    ))?;
+    let config: ConfigMap = match &params.config_source {
+        ConfigSource::Map(map) => map.clone(),
+        ConfigSource::Path(path) => read_config_from_path(&cur_plugin_dir.join(path))?,
+    };
+
     for (service_name, service_config) in config {
         apply_service_config(
             &cargo_manifest.package.name,
@@ -146,15 +154,41 @@ struct CargoManifest {
     package: Package,
 }
 
+#[derive(Debug, Clone)]
+pub enum ConfigSource {
+    Map(ConfigMap),
+    Path(PathBuf),
+}
+
+impl Default for ConfigSource {
+    fn default() -> Self {
+        ConfigSource::Path(DEFAULT_PLUGIN_CONFIG_PATH.into())
+    }
+}
+
 #[derive(Debug, Builder)]
 pub struct Params {
-    #[builder(default = "PathBuf::from(\"plugin_config.yaml\")")]
-    config_path: PathBuf,
+    #[builder(default, setter(custom))]
+    config_source: ConfigSource,
     #[builder(default = "PathBuf::from(\"./tmp\")")]
     data_dir: PathBuf,
     #[builder(default = "PathBuf::from(\"./\")")]
     plugin_path: PathBuf,
+    #[builder(default)]
     plugin_name: Option<String>,
+}
+
+impl ParamsBuilder {
+    pub fn config_path(&mut self, path: PathBuf) -> &mut Self {
+        self.config_source = Some(ConfigSource::Path(path));
+        self
+    }
+
+    #[allow(unused)]
+    pub fn config_map(&mut self, map: ConfigMap) -> &mut Self {
+        self.config_source = Some(ConfigSource::Map(map));
+        self
+    }
 }
 
 pub fn cmd(params: &Params) -> Result<()> {
@@ -179,11 +213,13 @@ pub fn cmd(params: &Params) -> Result<()> {
         .context("Failed to parse Cargo.toml")?;
 
     if let Some(workspace) = parsed_toml.get("workspace") {
-        if params.config_path.to_str().unwrap() != "plugin_config.yaml" {
-            println!("{WISE_PIKE}");
-            process::exit(1);
+        if let ConfigSource::Path(config_path) = &params.config_source {
+            if config_path.to_str().unwrap() != DEFAULT_PLUGIN_CONFIG_PATH {
+                println!("{WISE_PIKE}");
+                process::exit(1);
+            }
         }
-        info!("Applying plugin config in each plugin");
+        info!("Applying plugin config for each plugin");
 
         if let Some(members) = workspace.get("members") {
             if let Some(members_array) = members.as_array() {
