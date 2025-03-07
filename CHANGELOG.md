@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [Unreleased]
 
+### Added
+
+- Support passing plugin config as a map to the "config apply" command API (a2a1a8b)
+
 ### Changed
 
 - Sort migration files, before inserting into `manifest.yaml` (fc01dca)
