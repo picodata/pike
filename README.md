@@ -136,20 +136,9 @@ SP_LIQUID_VAR2 = "{{ instance_id | plus: 4242 }}"
 
 #### Настройка нескольких тиров
 
-Для настройки необходимо добавить нужные тиры в конфигурацию кластера (файл `picodata.yaml`). И после указать их в файле топологии topology.toml.
+Для настройки необходимо указать нужные тиры в файле топологии topology.toml.
 
 Пример добавления тира `compute`:
-
-```yaml
-# picodata.yaml
-
-cluster:
-  tier:
-    default:
-      can_vote: true
-    compute: # новый тир
-      can_vote: true
-```
 
 ```toml
 # topology.toml

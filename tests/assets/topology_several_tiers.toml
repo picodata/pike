@@ -1,0 +1,14 @@
+[tier.default]
+replicasets = 1
+replication_factor = 3
+
+[tier.second]
+replicasets = 1
+replication_factor = 1
+
+[tier.third]
+replicasets = 1
+replication_factor = 2
+
+[plugin.test-plugin.service.main]
+tiers = ["second", "third"]

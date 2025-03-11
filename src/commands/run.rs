@@ -7,7 +7,8 @@ use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
 use rand::Rng;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use serde_yaml::{Mapping, Value};
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
@@ -206,17 +207,17 @@ pub struct PicodataInstance {
 
 impl PicodataInstance {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    fn new(
         instance_id: u16,
         bin_port: u16,
         http_port: u16,
         pg_port: u16,
         first_instance_bin_port: u16,
         plugins_dir: Option<&Path>,
-        replication_factor: u8,
         tier: &str,
         run_params: &Params,
         env_templates: &BTreeMap<String, String>,
+        tiers_config: &str,
     ) -> Result<Self> {
         let instance_name = format!("i{instance_id}");
         let instance_data_dir = run_params.data_dir.join("cluster").join(&instance_name);
@@ -256,14 +257,14 @@ impl PicodataInstance {
             &format!("127.0.0.1:{bin_port}"),
             "--peer",
             &format!("127.0.0.1:{first_instance_bin_port}"),
-            "--init-replication-factor",
-            &replication_factor.to_string(),
             "--http-listen",
             &format!("127.0.0.1:{http_port}"),
             "--pg-listen",
             &format!("127.0.0.1:{pg_port}"),
             "--tier",
             tier,
+            "--config-parameter",
+            &format!("cluster.tier={tiers_config}",),
         ]);
 
         if let Some(plugins_dir) = plugins_dir {
@@ -412,6 +413,54 @@ impl Drop for PicodataInstance {
     }
 }
 
+fn get_merged_cluster_tier_config(plugin_path: &Path, tiers: &BTreeMap<String, Tier>) -> String {
+    let picodata_conf_path = plugin_path.join("picodata.yaml");
+    let picodata_conf_raw = fs::read_to_string(picodata_conf_path).unwrap_or_default();
+    let picodata_conf: HashMap<String, Value> =
+        serde_yaml::from_str(&picodata_conf_raw).unwrap_or_default();
+
+    let cluster_params = picodata_conf
+        .get("cluster")
+        .and_then(Value::as_mapping)
+        .cloned()
+        .unwrap_or_else(Mapping::new);
+
+    let mut tier_params = cluster_params
+        .get("tier")
+        .and_then(Value::as_mapping)
+        .cloned()
+        .unwrap_or_else(Mapping::new);
+
+    for value in tier_params.values_mut() {
+        if value.is_null() {
+            *value = Value::Mapping(Mapping::new());
+        }
+    }
+
+    for (tier_name, tier_value) in tiers {
+        tier_params
+            .entry(Value::String(tier_name.clone()))
+            .and_modify(|entry| {
+                if let Value::Mapping(ref mut map) = entry {
+                    map.insert(
+                        Value::String("replication_factor".into()),
+                        Value::Number(tier_value.replication_factor.into()),
+                    );
+                }
+            })
+            .or_insert_with(|| {
+                let mut map = Mapping::new();
+                map.insert(
+                    Value::String("replication_factor".into()),
+                    Value::Number(tier_value.replication_factor.into()),
+                );
+                Value::Mapping(map)
+            });
+    }
+
+    serde_json::to_string(&tier_params).unwrap()
+}
+
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Builder, Clone)]
 pub struct Params {
@@ -471,6 +520,8 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
     let mut picodata_processes = vec![];
 
+    let tiers_config = get_merged_cluster_tier_config(&params.plugin_path, &params.topology.tiers);
+
     let first_instance_bin_port = 3001;
     let mut instance_id = 0;
     for (tier_name, tier) in &params.topology.tiers {
@@ -483,10 +534,10 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
                 params.base_pg_port + instance_id,
                 first_instance_bin_port,
                 plugins_dir.as_deref(),
-                tier.replication_factor,
                 tier_name,
                 &params,
                 &params.topology.enviroment,
+                &tiers_config,
             )?;
 
             picodata_processes.push(pico_instance);

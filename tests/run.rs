@@ -666,3 +666,86 @@ fn test_run_without_plugin_directory() {
 
     assert!(cluster_started);
 }
+
+#[test]
+fn test_run_with_several_tiers() {
+    let run_params = CmdArguments {
+        run_args: vec![
+            "-d".into(),
+            "--topology".into(),
+            "../../assets/topology_several_tiers.toml".into(),
+        ],
+        ..Default::default()
+    };
+
+    let _cluster_handle = run_cluster(Duration::from_secs(120), 6, run_params).unwrap();
+
+    let start = Instant::now();
+    let mut cluster_started = false;
+    while Instant::now().duration_since(start) < Duration::from_secs(60) {
+        thread::sleep(Duration::from_secs(1));
+
+        // example value:
+        // +-------------+--------------------------------------+---------+-----------------+--------------------------------------+---------------+---------------+----------------+---------+--------------------+
+        // | name        | uuid                                 | raft_id | replicaset_name | replicaset_uuid                      | current_state | target_state  | failure_domain | tier    | picodata_version   |
+        // +=======================================================================================================================================================================================================+
+        // | default_1_1 | 4d607252-4603-42bf-88fa-c4b1bb4fab23 | 1       | default_1       | 25d1dfd1-bbb4-4fd0-880f-77b7512b07b6 | ["Online", 1] | ["Online", 1] | {}             | default | 25.1.1-0-g38230552 |
+        // |-------------+--------------------------------------+---------+-----------------+--------------------------------------+---------------+---------------+----------------+---------+--------------------|
+        // | default_1_2 | ef6ccfee-c855-479b-a15a-a050a6493d08 | 2       | default_1       | 25d1dfd1-bbb4-4fd0-880f-77b7512b07b6 | ["Online", 1] | ["Online", 1] | {}             | default | 25.1.1-0-g38230552 |
+        // |-------------+--------------------------------------+---------+-----------------+--------------------------------------+---------------+---------------+----------------+---------+--------------------|
+        let pico_instance =
+            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_instance");
+
+        // Tier default == 1 replicaset and replication_factor is 3 => "default" must be met 9 times
+        if pico_instance.matches("default").count() != 9 {
+            dbg!(pico_instance);
+            continue;
+        }
+        // Tier second == 1 replicaset and replication_factor is 1 => "second" must be met 3 times
+        if pico_instance.matches("second").count() != 3 {
+            dbg!(pico_instance);
+            continue;
+        }
+        // Tier third == 1 replicaset and replication_factor is 2 => "third" must be met 6 times
+        if pico_instance.matches("third").count() != 6 {
+            dbg!(pico_instance);
+            continue;
+        }
+        // Total instances is 6 => "Online" must be meet 12 times
+        if pico_instance.matches("Online").count() != 12 {
+            dbg!(pico_instance);
+            continue;
+        }
+
+        // example value:
+        // +-------------+---------+----------+---------+-----------------------+------------------------------+
+        // | name        | enabled | services | version | description           | migration_list               |
+        // +===================================================================================================+
+        // | test-plugin | true    | ["main"] | 0.1.0   | A plugin for picodata | ["migrations/0001_init.sql"] |
+        // +-------------+---------+----------+---------+-----------------------+------------------------------+
+        let pico_plugin =
+            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_plugin");
+        if !pico_plugin.contains("true") {
+            dbg!(pico_plugin);
+            continue;
+        }
+
+        // example value:
+        // +-------------+------+---------+---------------------+-----------------+
+        // | plugin_name | name | version | tiers               | description     |
+        // +======================================================================+
+        // | test-plugin | main | 0.1.0   | ["second", "third"] | default service |
+        // +-------------+------+---------+---------------------+-----------------+
+        let pico_service =
+            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_service");
+
+        if !(pico_service.contains("second") && pico_service.contains("third")) {
+            dbg!(pico_service);
+            continue;
+        }
+
+        cluster_started = true;
+    }
+
+    assert!(cluster_started);
+}
