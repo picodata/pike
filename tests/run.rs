@@ -104,11 +104,7 @@ fn test_topology_struct_run() {
         fs::remove_dir_all(PLUGIN_DIR).unwrap();
     }
 
-    assert!(
-        exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![])
-            .unwrap()
-            .success()
-    );
+    exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]);
 
     let plugins = BTreeMap::from([(
         "test-plugin".to_string(),
@@ -174,13 +170,11 @@ fn test_topology_struct_run() {
         }
     }
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["stop"],
         PLUGIN_DIR,
         &vec!["--data-dir".to_string(), "./tmp".to_string()],
-    )
-    .unwrap()
-    .success());
+    );
 
     assert!(cluster_started);
 }
@@ -192,11 +186,7 @@ fn test_topology_struct_one_tier() {
         fs::remove_dir_all(PLUGIN_DIR).unwrap();
     }
 
-    assert!(
-        exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![])
-            .unwrap()
-            .success()
-    );
+    exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]);
 
     let tiers = BTreeMap::from([(
         "default".to_string(),
@@ -246,13 +236,11 @@ fn test_topology_struct_one_tier() {
         }
     }
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["stop"],
         PLUGIN_DIR,
         &vec!["--data-dir".to_string(), "./tmp".to_string()],
-    )
-    .unwrap()
-    .success());
+    );
 
     assert!(cluster_started);
 }
@@ -264,11 +252,7 @@ fn test_topology_struct_run_no_plugin() {
         fs::remove_dir_all(PLUGIN_DIR).unwrap();
     }
 
-    assert!(
-        exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![])
-            .unwrap()
-            .success()
-    );
+    exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]);
 
     let tiers = BTreeMap::from([(
         "default".to_string(),
@@ -314,13 +298,11 @@ fn test_topology_struct_run_no_plugin() {
         }
     }
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["stop"],
         PLUGIN_DIR,
         &vec!["--data-dir".to_string(), "./tmp".to_string()],
-    )
-    .unwrap()
-    .success());
+    );
 
     assert!(cluster_started);
 }
@@ -351,13 +333,11 @@ fn test_quickstart_pipeline() {
     }
 
     fs::create_dir(&quickstart_path).unwrap();
-    assert!(exec_pike(
+    exec_pike(
         vec!["plugin", "new", "test-plugin"],
         quickstart_path,
-        &vec![]
-    )
-    .unwrap()
-    .success());
+        &vec![],
+    );
 
     let plugins = BTreeMap::from([("test-plugin".to_string(), Plugin::default())]);
     let tiers = BTreeMap::from([(
@@ -409,33 +389,29 @@ fn test_quickstart_pipeline() {
         }
     }
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["stop"],
         TESTS_DIR,
         &vec![
             "--data-dir".to_string(),
             "./tmp".to_string(),
             "--plugin-path".to_string(),
-            "./quickstart/test-plugin".to_string()
+            "./quickstart/test-plugin".to_string(),
         ],
-    )
-    .unwrap()
-    .success());
+    );
 
     assert!(cluster_started);
 
     // Quickly test pack command
-    assert!(exec_pike(
+    exec_pike(
         vec!["plugin", "pack"],
         TESTS_DIR,
         &vec![
             "--debug".to_string(),
             "--plugin-path".to_string(),
-            "./quickstart/test-plugin".to_string()
+            "./quickstart/test-plugin".to_string(),
         ],
-    )
-    .unwrap()
-    .success());
+    );
 
     assert!(quickstart_plugin_dir
         .join("target/debug/test_plugin-0.1.0.tar.gz")
@@ -453,24 +429,20 @@ fn test_workspace_pipeline() {
         fs::remove_dir_all(&workspace_path).unwrap();
     }
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["plugin", "new", "workspace_plugin"],
         tests_dir,
-        &vec!["--workspace".to_string()]
-    )
-    .unwrap()
-    .success());
+        &vec!["--workspace".to_string()],
+    );
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["plugin", "add", "sub_plugin"],
         tests_dir,
         &vec![
             "--plugin-path".to_string(),
-            "./workspace_plugin".to_string()
-        ]
-    )
-    .unwrap()
-    .success());
+            "./workspace_plugin".to_string(),
+        ],
+    );
 
     let plugins = BTreeMap::from([
         ("workspace_plugin".to_string(), Plugin::default()),
@@ -532,34 +504,30 @@ fn test_workspace_pipeline() {
         }
     }
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["stop"],
         TESTS_DIR,
         &vec![
             "--data-dir".to_string(),
             "./tmp".to_string(),
             "--plugin-path".to_string(),
-            "./workspace_plugin".to_string()
+            "./workspace_plugin".to_string(),
         ],
-    )
-    .unwrap()
-    .success());
+    );
 
     assert!(cluster_started);
 
     // Fully test pack command for proper artefacts inside archives
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["plugin", "pack"],
         TESTS_DIR,
         &vec![
             "--debug".to_string(),
             "--plugin-path".to_string(),
-            "./workspace_plugin".to_string()
+            "./workspace_plugin".to_string(),
         ],
-    )
-    .unwrap()
-    .success());
+    );
 
     assert!(workspace_path
         .join("target/debug/workspace_plugin-0.1.0.tar.gz")
@@ -653,16 +621,14 @@ fn test_run_without_plugin_directory() {
         thread::sleep(Duration::from_secs(1));
     }
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["stop"],
         env::current_dir().unwrap(),
         &vec![
             "--data-dir".to_string(),
-            run_dir.join(&data_dir).to_str().unwrap().to_string()
+            run_dir.join(&data_dir).to_str().unwrap().to_string(),
         ],
-    )
-    .unwrap()
-    .success());
+    );
 
     assert!(cluster_started);
 }

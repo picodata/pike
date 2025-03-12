@@ -14,11 +14,7 @@ fn test_cargo_build() {
         fs::remove_dir_all(PLUGIN_DIR).unwrap();
     }
 
-    assert!(
-        exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![])
-            .unwrap()
-            .success()
-    );
+    exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]);
 
     build_plugin(&helpers::BuildType::Debug, "0.1.0");
     build_plugin(&helpers::BuildType::Debug, "0.1.1");

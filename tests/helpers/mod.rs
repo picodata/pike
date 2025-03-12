@@ -40,11 +40,7 @@ pub struct Cluster {
 
 impl Drop for Cluster {
     fn drop(&mut self) {
-        assert!(
-            exec_pike(vec!["stop"], PLUGIN_DIR, &self.cmd_args.stop_args)
-                .unwrap()
-                .success()
-        );
+        exec_pike(vec!["stop"], PLUGIN_DIR, &self.cmd_args.stop_args);
 
         if let Some(ref mut run_handler) = self.run_handler {
             run_handler.wait().unwrap();
@@ -170,19 +166,11 @@ pub fn run_cluster(
     let mut cluster_handle = Cluster::new(cmd_args);
 
     // Create plugin from template
-    let exec_status = exec_pike(
+    exec_pike(
         vec!["plugin", "new", "test-plugin"],
         TESTS_DIR,
         &cluster_handle.cmd_args.plugin_args,
-    )
-    .unwrap();
-
-    if !exec_status.success() {
-        return Err(std::io::Error::new(
-            ErrorKind::Other,
-            "Failed to execute `cargo pike plugin new` command",
-        ));
-    }
+    );
 
     // Build the plugin
     Command::new("cargo")
@@ -309,24 +297,38 @@ pub fn get_picodata_table(plugin_path: &Path, data_dir_path: &Path, table_name: 
 
 // Spawn child process where pike is executed
 // Funciton waits for child process to end
-pub fn exec_pike<A, P>(
-    args: Vec<A>,
-    current_dir: P,
-    cmd_args: &Vec<String>,
-) -> Result<ExitStatus, std::io::Error>
+pub fn exec_pike<A, P>(args: Vec<A>, current_dir: P, cmd_args: &Vec<String>)
 where
     A: AsRef<OsStr>,
     P: AsRef<Path>,
 {
     let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    Command::new(format!("{root_dir}/target/debug/cargo-pike"))
+
+    let mut pike_child = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
         .arg("pike")
         .args(args)
         .args(cmd_args)
         .current_dir(current_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .status()
+        .spawn()
+        .expect("failed to execute pike");
+
+    let status = pike_child.wait().unwrap();
+
+    let outputs: [Box<dyn Read + Send>; 2] = [
+        Box::new(pike_child.stdout.unwrap()),
+        Box::new(pike_child.stderr.unwrap()),
+    ];
+    for output in outputs {
+        let reader = BufReader::new(output);
+        for line in reader.lines() {
+            let line = line.expect("failed to read picodata admin output");
+            println!("{line}");
+        }
+    }
+
+    assert!(status.success(), "pike run failed");
 }
 
 pub fn wait_for_proc(proc: &mut Child, timeout: Duration) {
@@ -370,6 +372,7 @@ pub fn await_picodata_admin(
             )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn();
 
         match picodata_admin {
