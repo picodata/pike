@@ -3,7 +3,7 @@
 use constcat::concat;
 use log::info;
 use std::ffi::OsStr;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitStatus;
 use std::thread;
@@ -273,10 +273,6 @@ pub fn run_cluster(
 pub fn get_picodata_table(plugin_path: &Path, data_dir_path: &Path, table_name: &str) -> String {
     let mut picodata_admin =
         await_picodata_admin(Duration::from_secs(60), plugin_path, data_dir_path).unwrap();
-    let stdout = picodata_admin
-        .stdout
-        .take()
-        .expect("Failed to capture stdout");
 
     // New scope to avoid infinite cycle while reading picodata stdout
     {
@@ -285,6 +281,23 @@ pub fn get_picodata_table(plugin_path: &Path, data_dir_path: &Path, table_name: 
         picodata_stdin.write_all(query.as_bytes()).unwrap();
         picodata_admin.wait().unwrap();
     }
+
+    let mut stderr = picodata_admin
+        .stderr
+        .take()
+        .expect("Failed to capture stderr");
+
+    let mut error_message = String::new();
+    stderr.read_to_string(&mut error_message).unwrap();
+    assert!(
+        error_message.is_empty(),
+        "Error in picodata: {error_message}"
+    );
+
+    let stdout = picodata_admin
+        .stdout
+        .take()
+        .expect("Failed to capture stdout");
 
     let reader = BufReader::new(stdout);
     reader
