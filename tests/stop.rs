@@ -23,9 +23,7 @@ fn test_cargo_stop() {
     .unwrap();
 
     // Stop picodata cluster
-    assert!(exec_pike(vec!["stop"], PLUGIN_DIR, &vec![])
-        .unwrap()
-        .success());
+    exec_pike(vec!["stop"], PLUGIN_DIR, &vec![]);
 
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {

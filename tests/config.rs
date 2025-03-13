@@ -89,24 +89,20 @@ fn test_workspace_config_apply() {
         fs::remove_dir_all(&workspace_path).unwrap();
     }
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["plugin", "new", "workspace_plugin"],
         tests_dir,
-        &vec!["--workspace".to_string()]
-    )
-    .unwrap()
-    .success());
+        &vec!["--workspace".to_string()],
+    );
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["plugin", "add", "sub_plugin"],
         tests_dir,
         &vec![
             "--plugin-path".to_string(),
-            "./workspace_plugin".to_string()
-        ]
-    )
-    .unwrap()
-    .success());
+            "./workspace_plugin".to_string(),
+        ],
+    );
 
     let plugins = BTreeMap::from([
         ("workspace_plugin".to_string(), Plugin::default()),
@@ -173,16 +169,14 @@ fn test_workspace_config_apply() {
     )
     .unwrap();
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["config", "apply"],
         TESTS_DIR,
         &vec![
             "--plugin-path".to_string(),
-            "./workspace_plugin".to_string()
-        ]
-    )
-    .unwrap()
-    .success());
+            "./workspace_plugin".to_string(),
+        ],
+    );
     is_cluster_valid = false;
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
@@ -212,7 +206,7 @@ fn test_workspace_config_apply() {
     )
     .unwrap();
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["config", "apply"],
         TESTS_DIR,
         &vec![
@@ -221,11 +215,9 @@ fn test_workspace_config_apply() {
             "--config-path".to_string(),
             "./modified_config.yaml".to_string(),
             "--plugin-name".to_string(),
-            "sub_plugin".to_string()
-        ]
-    )
-    .unwrap()
-    .success());
+            "sub_plugin".to_string(),
+        ],
+    );
 
     is_cluster_valid = false;
     let start = Instant::now();
@@ -244,18 +236,16 @@ fn test_workspace_config_apply() {
 
     assert!(is_cluster_valid, "Failed to apply config for one plugin");
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["stop"],
         TESTS_DIR,
         &vec![
             "--data-dir".to_string(),
             "./tmp".to_string(),
             "--plugin-path".to_string(),
-            "./workspace_plugin".to_string()
+            "./workspace_plugin".to_string(),
         ],
-    )
-    .unwrap()
-    .success());
+    );
 }
 
 #[test]
@@ -268,24 +258,20 @@ fn test_plugin_apply_wrong_cmd_combination() {
         fs::remove_dir_all(&workspace_path).unwrap();
     }
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["plugin", "new", "workspace_plugin"],
         tests_dir,
-        &vec!["--workspace".to_string()]
-    )
-    .unwrap()
-    .success());
+        &vec!["--workspace".to_string()],
+    );
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["plugin", "add", "sub_plugin"],
         tests_dir,
         &vec![
             "--plugin-path".to_string(),
-            "./workspace_plugin".to_string()
-        ]
-    )
-    .unwrap()
-    .success());
+            "./workspace_plugin".to_string(),
+        ],
+    );
 
     // Test uncle Pike wise advice's
     // Forced to call Command manually instead of exec_pike to read output

@@ -16,19 +16,13 @@ pub const PACK_PLUGIN_NAME: &str = "test-pack-plugin";
 fn test_cargo_pack() {
     cleanup_dir(&Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME));
 
-    assert!(
-        exec_pike(vec!["plugin", "new", PACK_PLUGIN_NAME], TESTS_DIR, &vec![])
-            .unwrap()
-            .success()
-    );
+    exec_pike(vec!["plugin", "new", PACK_PLUGIN_NAME], TESTS_DIR, &vec![]);
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["plugin", "pack"],
         Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME),
         &vec!["--target-dir".to_string(), "tmp_target".to_string()],
-    )
-    .unwrap()
-    .success());
+    );
 
     // Hail for archive handling in Rust
     let plugin_path = Path::new(TESTS_DIR)
@@ -51,11 +45,7 @@ fn test_cargo_pack() {
 fn test_cargo_plugin_new() {
     cleanup_dir(&Path::new(PLUGIN_DIR).to_path_buf());
 
-    assert!(
-        exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![])
-            .unwrap()
-            .success()
-    );
+    exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]);
 
     assert!(Path::new(PLUGIN_DIR).join("picodata.yaml").exists());
     assert!(Path::new(PLUGIN_DIR).join(".git").exists());
@@ -66,13 +56,11 @@ fn test_cargo_plugin_new() {
 
     cleanup_dir(&Path::new(PLUGIN_DIR).to_path_buf());
 
-    assert!(exec_pike(
+    exec_pike(
         vec!["plugin", "new", "test-plugin", "--without-git"],
         TESTS_DIR,
         &vec![],
-    )
-    .unwrap()
-    .success());
+    );
 
     assert!(!Path::new(PLUGIN_DIR).join(".git").exists());
 
@@ -83,8 +71,7 @@ fn test_cargo_plugin_new() {
         vec!["plugin", "new", "test-plugin", "--workspace"],
         TESTS_DIR,
         &vec![],
-    )
-    .unwrap();
+    );
 
     assert!(Path::new(PLUGIN_DIR).join("test-plugin").exists());
 
