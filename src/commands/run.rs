@@ -11,12 +11,13 @@ use serde_yaml::{Mapping, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::str;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{fs, path::PathBuf};
 
 use crate::commands::lib;
@@ -166,12 +167,62 @@ fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &PathBuf)
 
     for (plugin_name, plugin) in &topology.plugins {
         info!(
-            "Plugin {plugin_name}:{} is enabled",
+            "Plugin {plugin_name}:{} has been enabled",
             plugin.version.as_ref().unwrap()
         );
     }
 
     Ok(())
+}
+
+const GET_VERSION_LUA: &str = "\\lua\npico.instance_info().name\n";
+
+fn get_instance_name(picodata_path: &Path, instance_data_dir: &Path) -> Result<String> {
+    let admin_soket = instance_data_dir.join("admin.sock");
+    let mut picodata_admin = Command::new(picodata_path)
+        .arg("admin")
+        .arg(admin_soket.to_str().unwrap())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to spawn child proccess of picodata admin")?;
+
+    {
+        let picodata_stdin = picodata_admin.stdin.as_mut().unwrap();
+        picodata_stdin
+            .write_all(GET_VERSION_LUA.as_bytes())
+            .context("failed to send plugin installation queries")?;
+    }
+
+    let exit_code = picodata_admin
+        .wait()
+        .context("failed to wait for picodata admin")?;
+
+    if !exit_code.success() {
+        let mut stderr = String::new();
+        picodata_admin
+            .stderr
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .unwrap();
+        bail!("get version error: {stderr}");
+    }
+
+    let mut stdout = String::new();
+    picodata_admin
+        .stdout
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+
+    for line in stdout.split('\n') {
+        if line.starts_with("- ") {
+            return Ok(line.strip_prefix("- ").unwrap().to_string());
+        }
+    }
+
+    bail!("get version error: {stdout}");
 }
 
 fn is_plugin_dir(path: &Path) -> bool {
@@ -196,7 +247,6 @@ fn is_plugin_dir(path: &Path) -> bool {
 
 pub struct PicodataInstance {
     instance_name: String,
-    tier: String,
     log_threads: Option<Vec<JoinHandle<()>>>,
     child: Child,
     daemon: bool,
@@ -218,8 +268,9 @@ impl PicodataInstance {
         run_params: &Params,
         env_templates: &BTreeMap<String, String>,
         tiers_config: &str,
+        picodata_path: &Path,
     ) -> Result<Self> {
-        let instance_name = format!("i{instance_id}");
+        let mut instance_name = format!("i{instance_id}");
         let instance_data_dir = run_params.data_dir.join("cluster").join(&instance_name);
         let log_file_path = instance_data_dir.join("picodata.log");
 
@@ -285,9 +336,29 @@ impl PicodataInstance {
             .spawn()
             .context(format!("failed to start picodata instance: {instance_id}"))?;
 
+        let start = Instant::now();
+        while Instant::now().duration_since(start) < Duration::from_secs(10) {
+            thread::sleep(Duration::from_millis(100));
+            let new_instance_name = match get_instance_name(picodata_path, &instance_data_dir) {
+                Ok(name) => name,
+                Err(e) => {
+                    log::debug!("{e}");
+                    continue;
+                }
+            };
+
+            // create symlink to real instance data dir
+            let symlink_name = run_params.data_dir.join("cluster").join(&new_instance_name);
+            let _ = fs::remove_file(&symlink_name);
+            symlink(&instance_name, symlink_name)
+                .context("failed create symlink to instance dir")?;
+
+            instance_name = new_instance_name;
+            break;
+        }
+
         let mut pico_instance = PicodataInstance {
             instance_name,
-            tier: tier.to_owned(),
             log_threads: None,
             child,
             daemon: run_params.daemon,
@@ -350,7 +421,7 @@ impl PicodataInstance {
         let stderr = self.child.stderr.take().expect("Failed to capture stderr");
         let outputs: [Box<dyn Read + Send>; 2] = [Box::new(stdout), Box::new(stderr)];
         for child_output in outputs {
-            let mut log_prefix = format!("{}-{}: ", self.tier, self.instance_name);
+            let mut log_prefix = format!("{}: ", self.instance_name);
             if !self.disable_colors {
                 log_prefix = log_prefix.custom_color(instance_name_color).to_string();
             }
@@ -515,8 +586,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
     }
 
     info!("Running the cluster...");
-
-    let is_clean_run = !params.data_dir.join("cluster").exists();
+    let start_cluster_run = Instant::now();
 
     let mut picodata_processes = vec![];
 
@@ -538,26 +608,20 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
                 &params,
                 &params.topology.enviroment,
                 &tiers_config,
+                &params.picodata_path,
             )?;
 
             picodata_processes.push(pico_instance);
-
-            if is_clean_run {
-                // TODO: check is started by logs or iproto
-                thread::sleep(Duration::from_secs(5));
-            }
 
             info!("i{instance_id} - started");
         }
     }
 
+    // TODO: check cluster is started by logs or iproto
+    thread::sleep(Duration::from_secs(3));
+
     if !params.disable_plugin_install {
         info!("Enabling plugins...");
-
-        if !is_clean_run {
-            // TODO: check is started by logs or iproto
-            thread::sleep(Duration::from_secs(5));
-        }
 
         if plugins_dir.is_some() {
             let result = enable_plugins(&params.topology, &params.data_dir, &params.picodata_path);
@@ -572,7 +636,10 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         }
     };
 
-    info!("Picodata cluster is started");
+    info!(
+        "Picodata cluster has started (launch time: {} sec, total instances: {instance_id})",
+        start_cluster_run.elapsed().as_secs()
+    );
 
     Ok(picodata_processes)
 }
