@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/) and this project adheres to [Semantic Versioning](http://semver.org/).
 
+
+## [Unreleased]
+
+### Changed
+
+- Add functionality of copying files to assets under provided names
+
+
 ## [2.1.1]
 
 ### Changed
