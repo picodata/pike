@@ -8,7 +8,7 @@ use pike::helpers::build;
 
 fn main() {
     let params = build::ParamsBuilder::default()
-        .custom_assets(vec!["../topology.toml"])
+        .custom_assets(vec!["Cargo.toml"])
         .build()
         .unwrap();
     build::main(&params);

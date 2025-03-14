@@ -85,7 +85,7 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
     let plugin_version = get_latest_plugin_version(plugin_dir)?;
     let plugin_build_dir = build_dir
         .join(plugin_dir.file_name().unwrap())
-        .join(plugin_version);
+        .join(&plugin_version);
 
     let cargo_manifest: CargoManifest = toml::from_str(
         &fs::read_to_string(plugin_dir.join("Cargo.toml")).context("failed to read Cargo.toml")?,
@@ -93,6 +93,8 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
     .context("failed to parse Cargo.toml")?;
 
     let normalized_package_name = cargo_manifest.package.name.replace('-', "_");
+
+    let root_in_zip = Path::new(&normalized_package_name).join(plugin_version);
 
     let compressed_file = File::create(format!(
         "{}/{}-{}.tar.gz",
@@ -109,9 +111,21 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
     {
         let mut tarball = Builder::new(&mut encoder);
 
-        archive_if_exists(&plugin_build_dir.join(&lib_name), &mut tarball)?;
-        archive_if_exists(&plugin_build_dir.join("manifest.yaml"), &mut tarball)?;
-        archive_if_exists(&plugin_build_dir.join("migrations"), &mut tarball)?;
+        archive_if_exists(
+            &root_in_zip,
+            &plugin_build_dir.join(&lib_name),
+            &mut tarball,
+        )?;
+        archive_if_exists(
+            &root_in_zip,
+            &plugin_build_dir.join("manifest.yaml"),
+            &mut tarball,
+        )?;
+        archive_if_exists(
+            &root_in_zip,
+            &plugin_build_dir.join("migrations"),
+            &mut tarball,
+        )?;
 
         let assets_path = &plugin_build_dir.join("assets");
         // no need to notify user if there is no assets folder
@@ -119,7 +133,7 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
             for entry in fs::read_dir(assets_path)? {
                 let entry = entry?;
                 let entry_name = entry.file_name();
-                archive_if_exists(&assets_path.join(entry_name), &mut tarball)?;
+                archive_if_exists(&root_in_zip, &assets_path.join(entry_name), &mut tarball)?;
             }
         }
     }
@@ -129,7 +143,11 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn archive_if_exists(file_path: &Path, tarball: &mut Builder<&mut GzEncoder<File>>) -> Result<()> {
+fn archive_if_exists(
+    root_in_zip: &Path,
+    file_path: &Path,
+    tarball: &mut Builder<&mut GzEncoder<File>>,
+) -> Result<()> {
     if !file_path.exists() {
         log::info!(
             "Couldn't find {} while packing plugin - skipping.",
@@ -139,9 +157,11 @@ fn archive_if_exists(file_path: &Path, tarball: &mut Builder<&mut GzEncoder<File
         return Ok(());
     }
 
+    let archived_file_name = root_in_zip.join(file_path.file_name().unwrap());
+
     if file_path.is_dir() {
         tarball
-            .append_dir_all(file_path.file_name().unwrap(), file_path)
+            .append_dir_all(archived_file_name, file_path)
             .context(format!(
                 "failed to append directory: {} to archive",
                 file_path.display()
@@ -151,7 +171,7 @@ fn archive_if_exists(file_path: &Path, tarball: &mut Builder<&mut GzEncoder<File
             .context(format!("failed to open file {}", &file_path.display()))?;
 
         tarball
-            .append_file(file_path.file_name().unwrap(), &mut opened_file)
+            .append_file(archived_file_name, &mut opened_file)
             .context(format!(
                 "failed to append file: {} to archive",
                 file_path.display()

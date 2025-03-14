@@ -1,14 +1,7 @@
 mod helpers;
 
-use flate2::bufread::GzDecoder;
 use helpers::{cleanup_dir, exec_pike, PLUGIN_DIR, TESTS_DIR};
-use std::{
-    fs::{self, File},
-    io::BufReader,
-    path::Path,
-    vec,
-};
-use tar::Archive;
+use std::{fs, path::Path, vec};
 
 pub const PACK_PLUGIN_NAME: &str = "test-pack-plugin";
 
@@ -28,17 +21,84 @@ fn test_cargo_pack() {
     let plugin_path = Path::new(TESTS_DIR)
         .join(PACK_PLUGIN_NAME)
         .join("tmp_target");
-    let tar_archive =
-        File::open(plugin_path.join("release/test_pack_plugin-0.1.0.tar.gz")).unwrap();
-    let buf_reader = BufReader::new(tar_archive);
-    let decompressor = GzDecoder::new(buf_reader);
-    let mut archive = Archive::new(decompressor);
+    helpers::unpack_archive(
+        &plugin_path
+            .join("release")
+            .join("test_pack_plugin-0.1.0.tar.gz"),
+        &plugin_path,
+    );
 
-    archive.unpack(&plugin_path).unwrap();
+    let base_file_path = plugin_path.join("test_pack_plugin").join("0.1.0");
+    assert!(base_file_path.join("libtest_pack_plugin.so").exists());
+    assert!(base_file_path.join("manifest.yaml").exists());
+    assert!(base_file_path.join("migrations").is_dir());
+}
 
-    assert!(plugin_path.join("libtest_pack_plugin.so").exists());
-    assert!(plugin_path.join("manifest.yaml").exists());
-    assert!(plugin_path.join("migrations").is_dir());
+#[test]
+fn test_cargo_pack_assets() {
+    let pack_plugin_path = Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME);
+    cleanup_dir(&pack_plugin_path);
+
+    exec_pike(vec!["plugin", "new", PACK_PLUGIN_NAME], TESTS_DIR, &vec![]);
+
+    // Change build script for sub plugin to test custom assets
+    fs::copy(
+        Path::new(TESTS_DIR)
+            .parent()
+            .unwrap()
+            .join("assets")
+            .join("custom_assets_build.rs"),
+        pack_plugin_path.join("build.rs"),
+    )
+    .unwrap();
+
+    // release build
+    exec_pike(
+        vec!["plugin", "pack"],
+        Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME),
+        &vec![],
+    );
+
+    // check release archive
+    let unzipped_dir = pack_plugin_path.join("unzipped_release");
+    let base_file_path = unzipped_dir.join("test_pack_plugin").join("0.1.0");
+
+    helpers::unpack_archive(
+        &pack_plugin_path
+            .join("target")
+            .join("release")
+            .join("test_pack_plugin-0.1.0.tar.gz"),
+        &unzipped_dir,
+    );
+
+    assert!(base_file_path.join("libtest_pack_plugin.so").exists());
+    assert!(base_file_path.join("manifest.yaml").exists());
+    assert!(base_file_path.join("migrations").is_dir());
+    assert!(base_file_path.join("Cargo.toml").exists());
+
+    // debug build
+    exec_pike(
+        vec!["plugin", "pack"],
+        Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME),
+        &vec!["--debug".into()],
+    );
+
+    // check debug archive
+    let unzipped_dir = pack_plugin_path.join("unzipped_debug");
+    let base_file_path = unzipped_dir.join("test_pack_plugin").join("0.1.0");
+
+    helpers::unpack_archive(
+        &pack_plugin_path
+            .join("target")
+            .join("debug")
+            .join("test_pack_plugin-0.1.0.tar.gz"),
+        &unzipped_dir,
+    );
+
+    assert!(base_file_path.join("libtest_pack_plugin.so").exists());
+    assert!(base_file_path.join("manifest.yaml").exists());
+    assert!(base_file_path.join("migrations").is_dir());
+    assert!(base_file_path.join("Cargo.toml").exists());
 }
 
 #[test]

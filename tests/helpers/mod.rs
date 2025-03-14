@@ -1,8 +1,10 @@
 #![allow(unused)]
 
 use constcat::concat;
+use flate2::bufread::GzDecoder;
 use log::info;
 use std::ffi::OsStr;
+use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
 use std::process::ExitStatus;
@@ -14,6 +16,7 @@ use std::{
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
+use tar::Archive;
 use toml_edit::{DocumentMut, Item};
 
 pub const TESTS_DIR: &str = "./tests/tmp/";
@@ -395,4 +398,13 @@ pub fn cleanup_dir(path: &PathBuf) {
         }
         Err(e) => panic!("failed to delete plugin_dir: {e}"),
     }
+}
+
+pub fn unpack_archive(path: &Path, unpack_to: &Path) {
+    let tar_archive = File::open(path).unwrap();
+    let buf_reader = BufReader::new(tar_archive);
+    let decompressor = GzDecoder::new(buf_reader);
+    let mut archive = Archive::new(decompressor);
+
+    archive.unpack(unpack_to).unwrap();
 }

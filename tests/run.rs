@@ -19,10 +19,6 @@ use std::{
     vec,
 };
 
-use flate2::bufread::GzDecoder;
-use std::{fs::File, io::BufReader};
-use tar::Archive;
-
 const TOTAL_INSTANCES: i32 = 4;
 
 #[test]
@@ -540,39 +536,35 @@ fn test_workspace_pipeline() {
 
     // Check first plugin
     let _ = fs::create_dir(build_dir.join("tmp_workspace_plugin"));
-    unpack_archive(
+    helpers::unpack_archive(
         &build_dir.join("workspace_plugin-0.1.0.tar.gz"),
         &build_dir.join("tmp_workspace_plugin"),
     );
 
-    assert!(build_dir
-        .join("tmp_workspace_plugin/libworkspace_plugin.so")
-        .exists());
-    assert!(build_dir
-        .join("tmp_workspace_plugin/manifest.yaml")
-        .exists());
-    assert!(build_dir.join("tmp_workspace_plugin/migrations").is_dir());
+    let base_file_path = build_dir
+        .join("tmp_workspace_plugin")
+        .join("workspace_plugin")
+        .join("0.1.0");
+    assert!(base_file_path.join("libworkspace_plugin.so").exists());
+    assert!(base_file_path.join("manifest.yaml").exists());
+    assert!(base_file_path.join("migrations").is_dir());
 
     // Check second plugin with custom assets
     let _ = fs::create_dir(build_dir.join("tmp_sub_plugin"));
-    unpack_archive(
+    helpers::unpack_archive(
         &build_dir.join("sub_plugin-0.1.0.tar.gz"),
         &build_dir.join("tmp_sub_plugin"),
     );
 
-    assert!(build_dir.join("tmp_sub_plugin/libsub_plugin.so").exists());
-    assert!(build_dir.join("tmp_sub_plugin/manifest.yaml").exists());
-    assert!(build_dir.join("tmp_sub_plugin/migrations").is_dir());
-    assert!(build_dir.join("tmp_sub_plugin/topology.toml").exists());
-}
+    let base_file_path = build_dir
+        .join("tmp_sub_plugin")
+        .join("sub_plugin")
+        .join("0.1.0");
 
-fn unpack_archive(path: &Path, unpack_to: &Path) {
-    let tar_archive = File::open(path).unwrap();
-    let buf_reader = BufReader::new(tar_archive);
-    let decompressor = GzDecoder::new(buf_reader);
-    let mut archive = Archive::new(decompressor);
-
-    archive.unpack(unpack_to).unwrap();
+    assert!(base_file_path.join("libsub_plugin.so").exists());
+    assert!(base_file_path.join("manifest.yaml").exists());
+    assert!(base_file_path.join("migrations").is_dir());
+    assert!(base_file_path.join("Cargo.toml").exists());
 }
 
 #[test]
