@@ -285,19 +285,19 @@ impl PicodataInstance {
         child.envs(&env_vars);
 
         let picodata_version = Self::get_picodata_version(&run_params.picodata_path)?;
-        let data_dir_flag = if picodata_version.contains("picodata 25.1") {
-            "--instance-dir"
-        } else {
+        let data_dir_flag = if picodata_version.contains("picodata 24.6") {
             log::warn!(
                 "You are using old version of picodata: {picodata_version} In the next major release it WILL NOT BE SUPPORTED"
             );
             "--data-dir"
+        } else {
+            "--instance-dir"
         };
 
-        let listen_flag = if picodata_version.contains("picodata 25.1") {
-            "--iproto-listen"
-        } else {
+        let listen_flag = if picodata_version.contains("picodata 24.6") {
             "--listen"
+        } else {
+            "--iproto-listen"
         };
 
         child.args([
