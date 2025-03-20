@@ -9,6 +9,7 @@ use pike::cluster::Tier;
 use pike::cluster::Topology;
 use pike::cluster::{run, MigrationContextVar};
 use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader, Write};
 use std::process::Command;
 use std::time::Instant;
 use std::{env, thread};
@@ -706,4 +707,82 @@ fn test_run_with_several_tiers() {
     }
 
     assert!(cluster_started);
+}
+
+#[test]
+fn test_custom_assets_named() {
+    let tests_dir = Path::new(TESTS_DIR);
+    let plugin_path = tests_dir.join("test-plugin");
+
+    // Cleaning up metadata from past run
+    if plugin_path.exists() {
+        fs::remove_dir_all(&plugin_path).unwrap();
+    }
+
+    exec_pike(vec!["plugin", "new", "test-plugin"], tests_dir, &vec![]);
+
+    // Change build script for plugin to test custom assets
+    fs::copy(
+        tests_dir.join("../assets/custom_assets_named_build.rs"),
+        plugin_path.join("build.rs"),
+    )
+    .unwrap();
+
+    // Substitute with the current version of pike
+    let cargo_toml = plugin_path.join("Cargo.toml");
+    let file = fs::File::open(&cargo_toml).unwrap();
+    let reader = BufReader::new(file);
+
+    let new_content: Vec<String> = reader
+        .lines()
+        .map(|line| {
+            let line = line.unwrap();
+            if line.starts_with("picodata-pike") {
+                "picodata-pike = { path = \"../../..\" }".to_string()
+            } else {
+                line
+            }
+        })
+        .collect();
+
+    // Write the modified content back to the file
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(cargo_toml)
+        .unwrap();
+    for line in new_content {
+        writeln!(&file, "{line}").unwrap();
+    }
+
+    // Fully test pack command for proper artifacts inside archives
+    exec_pike(
+        vec!["plugin", "pack"],
+        TESTS_DIR,
+        &vec![
+            "--debug".to_string(),
+            "--plugin-path".to_string(),
+            "./test-plugin".to_string(),
+        ],
+    );
+
+    let assets_file_path = plugin_path
+        .join("target")
+        .join("debug")
+        .join("test-plugin")
+        .join("0.1.0")
+        .join("assets");
+
+    assert!(assets_file_path.join("Cargo.toml").exists());
+    assert!(assets_file_path.join("not.cargo").exists());
+    assert!(assets_file_path
+        .join("no")
+        .join("src")
+        .join("Cargo.unlock")
+        .exists());
+    assert!(assets_file_path
+        .join("no")
+        .join("src")
+        .join("lib.rs")
+        .exists());
 }
