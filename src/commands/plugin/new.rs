@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use fs_extra::{dir, file};
 use std::{
     env,
     ffi::OsStr,
@@ -17,6 +18,15 @@ members = [
     "{{ project_name }}",
 ]
 "#;
+
+static WS_PATHS_TO_MOVE: [&str; 6] = [
+    "topology.toml",
+    "picodata.yaml",
+    ".gitignore",
+    "rust-toolchain.toml",
+    ".cargo/",
+    "tmp/",
+];
 
 fn place_file(target_path: &Path, t_ctx: &liquid::Object, entries: &[DirEntry<'_>]) -> Result<()> {
     for entry in entries {
@@ -91,20 +101,41 @@ fn workspace_init(root_path: &Path, project_name: &str, t_ctx: &liquid::Object) 
 
     cargo_toml.write_all(ws_template.render(&t_ctx).unwrap().as_bytes())?;
 
-    fs::copy(
-        root_path.join(project_name).join("topology.toml"),
-        root_path.join("topology.toml"),
-    )
-    .context("failed to move topology.toml to workspace dir")?;
+    let subcrate_path = root_path.join(project_name);
 
-    fs::copy(
-        root_path.join(project_name).join("picodata.yaml"),
-        root_path.join("picodata.yaml"),
-    )
-    .context("failed to move picodata.yaml to workspace dir")?;
+    let move_file = |path: &Path| -> Result<u64> {
+        let opts = file::CopyOptions {
+            overwrite: true,
+            ..Default::default()
+        };
+        let target = root_path.join(path.file_name().unwrap());
+        file::move_file(path, target, &opts).context(format!(
+            "failed to move {} to workspace dir",
+            path.display()
+        ))
+    };
 
-    fs::remove_file(root_path.join(project_name).join("picodata.yaml"))?;
-    fs::remove_file(root_path.join(project_name).join("topology.toml"))?;
+    let move_dir = |path: &Path| -> Result<u64> {
+        let opts = dir::CopyOptions {
+            overwrite: true,
+            ..Default::default()
+        };
+        dir::move_dir(path, root_path, &opts).context(format!(
+            "failed to move {} to workspace dir",
+            path.display()
+        ))
+    };
+
+    for path in WS_PATHS_TO_MOVE {
+        let path = subcrate_path.join(path);
+        if path.is_dir() {
+            move_dir(&path)?;
+        } else if path.is_file() {
+            move_file(&path)?;
+        } else {
+            panic!("unsupported file type for moving")
+        }
+    }
 
     Ok(())
 }
