@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- Support adding custom assets under desired names (921dec0)
+
 ### Fixed
 
 - Move all necessary files to the root folder of the workspace (fa293fc9)
