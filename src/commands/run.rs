@@ -309,7 +309,7 @@ impl PicodataInstance {
             "--peer",
             &format!("127.0.0.1:{first_instance_bin_port}"),
             "--http-listen",
-            &format!("127.0.0.1:{http_port}"),
+            &format!("0.0.0.0:{http_port}"),
             "--pg-listen",
             &format!("127.0.0.1:{pg_port}"),
             "--tier",
