@@ -25,7 +25,7 @@ fn get_output_path() -> PathBuf {
 pub struct Params {
     #[builder(default)]
     #[builder(setter(custom))]
-    custom_assets: Vec<PathBuf>,
+    custom_assets: Vec<(PathBuf, PathBuf)>,
 }
 
 impl ParamsBuilder {
@@ -34,14 +34,81 @@ impl ParamsBuilder {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        let custom_assets: Vec<std::path::PathBuf> = assets
+        self.custom_assets_with_targets(assets.into_iter().map(|asset| {
+            (
+                asset.as_ref().to_string(),
+                Path::new(asset.as_ref())
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string(),
+            )
+        }))
+    }
+
+    pub fn custom_assets_with_targets<I, S>(&mut self, assets: I) -> &mut Self
+    where
+        I: IntoIterator<Item = (S, S)>,
+        S: AsRef<str>,
+    {
+        let custom_assets_with_targets: Vec<(PathBuf, PathBuf)> = assets
             .into_iter()
-            .map(|asset| asset.as_ref().into())
+            .map(|(from, to)| (from.as_ref().into(), to.as_ref().into()))
             .collect();
 
-        self.custom_assets = Some(custom_assets);
+        let mut t = self.custom_assets.take().unwrap_or_default();
+        t.extend(custom_assets_with_targets);
+        self.custom_assets = Some(t);
 
         self
+    }
+}
+
+fn add_custom_assets(custom_assets: &Vec<(PathBuf, PathBuf)>, plugin_path: &Path) {
+    for (from_asset_path, to_asset_path) in custom_assets {
+        if !from_asset_path.exists() {
+            println!(
+                "cargo::warning=Couldn't find custom asset {} - skipping",
+                from_asset_path.display(),
+            );
+
+            continue;
+        }
+
+        // Check if `to_asset_path` is out of bounds of the `assets` folder
+        if to_asset_path.components().any(|comp| {
+            matches!(comp, std::path::Component::ParentDir)
+                || matches!(comp, std::path::Component::RootDir)
+        }) {
+            println!(
+                "cargo::warning=Path to a custom asset destination {} goes out of the assets folder - skipping",
+                to_asset_path.display()
+            );
+
+            continue;
+        }
+
+        let destination = plugin_path.join("assets").join(to_asset_path);
+
+        if from_asset_path.is_dir() {
+            if !destination.exists() {
+                fs::create_dir_all(&destination).unwrap();
+            }
+
+            let mut options = fs_extra::dir::CopyOptions::new();
+            options.overwrite = true;
+            options.copy_inside = true;
+            options.content_only = true;
+            fs_extra::dir::copy(from_asset_path, &destination, &options).unwrap();
+        } else {
+            // Create a directory into which a file should be copied
+            let parent_destination_directory = destination.parent().unwrap();
+            if !parent_destination_directory.exists() {
+                fs::create_dir_all(parent_destination_directory).unwrap();
+            }
+            fs::copy(from_asset_path, destination).unwrap();
+        }
     }
 }
 
@@ -138,28 +205,7 @@ pub fn main(params: &Params) {
     // Create symlinks for newest plugin version, which would be created after build.rs script
     std::os::unix::fs::symlink(out_dir.join(&lib_name), plugin_path.join(lib_name)).unwrap();
 
-    // Move custom assets into plugin folder
-    for asset_path in &params.custom_assets {
-        if !asset_path.exists() {
-            println!(
-                "cargo::warning=Couldn't find custom asset {} - skipping",
-                asset_path.display(),
-            );
-
-            continue;
-        }
-        if asset_path.is_dir() {
-            dir::copy(asset_path, plugin_path.join("assets"), &CopyOptions::new()).unwrap();
-        } else {
-            fs::copy(
-                asset_path,
-                plugin_path
-                    .join("assets")
-                    .join(asset_path.file_name().unwrap()),
-            )
-            .unwrap();
-        }
-    }
+    add_custom_assets(&params.custom_assets, &plugin_path);
 
     // Trigger on Cargo.toml change in order not to run cargo update each time
     // version is changed

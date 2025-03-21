@@ -3,6 +3,7 @@ mod helpers;
 use helpers::{cleanup_dir, exec_pike, PLUGIN_DIR, TESTS_DIR};
 use std::{
     fs,
+    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     vec,
 };
@@ -164,4 +165,120 @@ fn test_cargo_plugin_new() {
 
     let contents = fs::read_to_string(root_dir.join("Cargo.toml")).unwrap();
     assert!(contents.contains("[workspace]"));
+}
+
+#[test]
+fn test_custom_assets_with_targets() {
+    let tests_dir = Path::new(TESTS_DIR);
+    let plugin_path = tests_dir.join("test-plugin");
+
+    // Cleaning up metadata from past run
+    if plugin_path.exists() {
+        fs::remove_dir_all(&plugin_path).unwrap();
+    }
+
+    exec_pike(vec!["plugin", "new", "test-plugin"], tests_dir, &vec![]);
+
+    // Change build script for plugin to test custom assets
+    fs::copy(
+        tests_dir.join("../assets/custom_assets_with_targets_build.rs"),
+        plugin_path.join("build.rs"),
+    )
+    .unwrap();
+
+    // Substitute with the current version of pike
+    // TODO: #107 move it to pike_exec
+    let cargo_toml = plugin_path.join("Cargo.toml");
+    let file = fs::File::open(&cargo_toml).unwrap();
+    let reader = BufReader::new(file);
+
+    let new_content: Vec<String> = reader
+        .lines()
+        .map(|line| {
+            let line = line.unwrap();
+            if line.starts_with("picodata-pike") {
+                "picodata-pike = { path = \"../../..\" }".to_string()
+            } else {
+                line
+            }
+        })
+        .collect();
+
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(cargo_toml)
+        .unwrap();
+    for line in new_content {
+        writeln!(&file, "{line}").unwrap();
+    }
+
+    // Fully test pack command for proper artifacts inside archives
+    exec_pike(
+        vec!["plugin", "pack"],
+        TESTS_DIR,
+        &vec![
+            "--debug".to_string(),
+            "--plugin-path".to_string(),
+            "./test-plugin".to_string(),
+        ],
+    );
+
+    // Check the debug archive
+    let unzipped_dir = plugin_path.join("unzipped_debug");
+
+    helpers::unpack_archive(
+        &plugin_path
+            .join("target")
+            .join("debug")
+            .join("test_plugin-0.1.0.tar.gz"),
+        &unzipped_dir,
+    );
+
+    let assets_file_path = unzipped_dir.join("test_plugin").join("0.1.0");
+
+    assert!(assets_file_path.join("Cargo.toml").exists());
+    assert!(assets_file_path.join("not.cargo").exists());
+    assert!(assets_file_path
+        .join("other")
+        .join("name")
+        .join("Cargo.unlock")
+        .exists());
+    assert!(assets_file_path
+        .join("other")
+        .join("name")
+        .join("lib.rs")
+        .exists());
+
+    exec_pike(
+        vec!["plugin", "pack"],
+        TESTS_DIR,
+        &vec!["--plugin-path".to_string(), "./test-plugin".to_string()],
+    );
+
+    // Check the release archive
+    let unzipped_dir = plugin_path.join("unzipped_release");
+
+    helpers::unpack_archive(
+        &plugin_path
+            .join("target")
+            .join("release")
+            .join("test_plugin-0.1.0.tar.gz"),
+        &unzipped_dir,
+    );
+
+    let assets_file_path = unzipped_dir.join("test_plugin").join("0.1.0");
+
+    assert!(assets_file_path.join("Cargo.toml").exists());
+    assert!(assets_file_path.join("not.cargo").exists());
+    assert!(assets_file_path
+        .join("other")
+        .join("name")
+        .join("Cargo.unlock")
+        .exists());
+    assert!(assets_file_path
+        .join("other")
+        .join("name")
+        .join("lib.rs")
+        .exists());
 }
