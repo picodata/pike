@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 - Support adding custom assets under desired names (921dec0)
 
+### Changed
+
+- Bind http port on 0.0.0.0 (4b92057a)
+
 ### Fixed
 
 - Move all necessary files to the root folder of the workspace (fa293fc9)
