@@ -628,7 +628,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             if let Err(e) = result {
                 for process in &mut picodata_processes {
                     process.kill().unwrap_or_else(|e| {
-                        error!("failed to kill picodata instances: {:#}", e);
+                        error!("failed to kill picodata instances: {e:#}");
                     });
                 }
                 return Err(e.context("failed to enable plugins"));

@@ -195,7 +195,7 @@ pub fn cmd(params: &Params) -> Result<()> {
     // If plugin name flag was specified, apply config only for
     // this exact plugin
     if let Some(plugin_name) = &params.plugin_name {
-        info!("Applying plugin config for plugin {}", plugin_name);
+        info!("Applying plugin config for plugin {plugin_name}");
         apply_plugin_config(params, plugin_name)?;
         return Ok(());
     }

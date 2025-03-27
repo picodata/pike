@@ -39,6 +39,7 @@ fn test_cargo_pack() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn test_cargo_pack_assets() {
     let pack_plugin_path = Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME);
     cleanup_dir(&pack_plugin_path);
