@@ -564,7 +564,7 @@ fn test_workspace_pipeline() {
     assert!(base_file_path.join("libsub_plugin.so").exists());
     assert!(base_file_path.join("manifest.yaml").exists());
     assert!(base_file_path.join("migrations").is_dir());
-    assert!(base_file_path.join("Cargo.toml").exists());
+    assert!(base_file_path.join("plugin_config.yaml").exists());
 }
 
 #[test]

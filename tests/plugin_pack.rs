@@ -1,11 +1,10 @@
 mod helpers;
 
-use helpers::{cleanup_dir, exec_pike, PLUGIN_DIR, TESTS_DIR};
+use helpers::{cleanup_dir, exec_pike, TESTS_DIR};
 use std::{
-    fs,
+    fs::{self, OpenOptions},
     io::{BufRead, BufReader, Write},
-    path::{Path, PathBuf},
-    vec,
+    path::Path,
 };
 
 pub const PACK_PLUGIN_NAME: &str = "test-pack-plugin";
@@ -78,8 +77,10 @@ fn test_cargo_pack_assets() {
 
     assert!(base_file_path.join("libtest_pack_plugin.so").exists());
     assert!(base_file_path.join("manifest.yaml").exists());
-    assert!(base_file_path.join("migrations").is_dir());
-    assert!(base_file_path.join("Cargo.toml").exists());
+    assert!(base_file_path.join("plugin_config.yaml").exists());
+    let mig_file = base_file_path.join("migrations").join("0001_init.sql");
+    let mig_file_content = fs::read_to_string(&mig_file).unwrap();
+    assert!(!mig_file_content.contains("-- test"));
 
     // debug build
     exec_pike(
@@ -102,69 +103,72 @@ fn test_cargo_pack_assets() {
 
     assert!(base_file_path.join("libtest_pack_plugin.so").exists());
     assert!(base_file_path.join("manifest.yaml").exists());
-    assert!(base_file_path.join("migrations").is_dir());
-    assert!(base_file_path.join("Cargo.toml").exists());
-}
+    assert!(base_file_path.join("plugin_config.yaml").exists());
+    let mig_file = base_file_path.join("migrations").join("0001_init.sql");
+    let mig_file_content = fs::read_to_string(&mig_file).unwrap();
+    assert!(!mig_file_content.contains("-- test"));
 
-#[test]
-fn test_cargo_plugin_new() {
-    let root_dir = PathBuf::new().join(PLUGIN_DIR);
-    cleanup_dir(&root_dir);
+    // check update assets
+    let mut source_mig_file = OpenOptions::new()
+        .append(true)
+        .open(pack_plugin_path.join("migrations").join("0001_init.sql"))
+        .unwrap();
+    writeln!(source_mig_file, "-- test").unwrap();
+    let mut source_config_file = OpenOptions::new()
+        .append(true)
+        .open(pack_plugin_path.join("plugin_config.yaml"))
+        .unwrap();
+    writeln!(source_config_file, "# test").unwrap();
 
-    // Test creating simple plugin
-    exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]);
+    // Substitute with the current version of pike
+    // TODO: #107 move it to pike_exec
+    let cargo_toml = pack_plugin_path.join("Cargo.toml");
+    let file = fs::File::open(&cargo_toml).unwrap();
+    let reader = BufReader::new(file);
 
-    assert!(root_dir.join("picodata.yaml").exists());
-    assert!(root_dir.join(".git").exists());
-    assert!(root_dir.join("topology.toml").exists());
-    assert!(root_dir.join("manifest.yaml.template").exists());
+    let new_content: Vec<String> = reader
+        .lines()
+        .map(|line| {
+            let line = line.unwrap();
+            if line.starts_with("picodata-pike") {
+                "picodata-pike = { path = \"../../..\" }".to_string()
+            } else {
+                line
+            }
+        })
+        .collect();
 
-    cleanup_dir(&root_dir);
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(cargo_toml)
+        .unwrap();
+    for line in new_content {
+        writeln!(&file, "{line}").unwrap();
+    }
 
-    // Test creating plugin without git
     exec_pike(
-        vec!["plugin", "new", "test-plugin", "--without-git"],
-        TESTS_DIR,
+        vec!["plugin", "pack"],
+        Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME),
         &vec![],
     );
 
-    assert!(!root_dir.join(".git").exists());
+    let unzipped_dir = pack_plugin_path.join("unzipped_release_with_changed_assets");
+    let base_file_path = unzipped_dir.join("test_pack_plugin").join("0.1.0");
 
-    cleanup_dir(&Path::new(PLUGIN_DIR).to_path_buf());
-
-    // Test creating plugin as workspace
-    exec_pike(
-        vec!["plugin", "new", "test-plugin", "--workspace"],
-        TESTS_DIR,
-        &vec![],
+    helpers::unpack_archive(
+        &pack_plugin_path
+            .join("target")
+            .join("release")
+            .join("test_pack_plugin-0.1.0.tar.gz"),
+        &unzipped_dir,
     );
-
-    let subcrate_path = Path::new(PLUGIN_DIR).join("test-plugin");
-    assert!(subcrate_path.exists());
-
-    assert!(root_dir.join(".cargo").join("config.toml").exists());
-    assert!(!subcrate_path.join(".cargo").exists());
-
-    assert!(root_dir.join("picodata.yaml").exists());
-    assert!(!subcrate_path.join("picodata.yaml").exists());
-
-    assert!(root_dir.join("topology.toml").exists());
-    assert!(!subcrate_path.join("topology.toml").exists());
-
-    assert!(root_dir.join(".git").exists());
-    assert!(!subcrate_path.join(".git").exists());
-
-    assert!(root_dir.join(".gitignore").exists());
-    assert!(!subcrate_path.join(".gitignore").exists());
-
-    assert!(root_dir.join("rust-toolchain.toml").exists());
-    assert!(!subcrate_path.join("rust-toolchain.toml").exists());
-
-    assert!(root_dir.join("tmp").exists());
-    assert!(!subcrate_path.join("tmp").exists());
-
-    let contents = fs::read_to_string(root_dir.join("Cargo.toml")).unwrap();
-    assert!(contents.contains("[workspace]"));
+    let mig_file = base_file_path.join("migrations").join("0001_init.sql");
+    let mig_file_content = fs::read_to_string(&mig_file).unwrap();
+    assert!(mig_file_content.contains("-- test"));
+    let config_file = base_file_path.join("plugin_config.yaml");
+    let config_content = fs::read_to_string(&config_file).unwrap();
+    assert!(config_content.contains("# test"));
 }
 
 #[test]
@@ -237,7 +241,7 @@ fn test_custom_assets_with_targets() {
 
     let assets_file_path = unzipped_dir.join("test_plugin").join("0.1.0");
 
-    assert!(assets_file_path.join("Cargo.toml").exists());
+    assert!(assets_file_path.join("plugin_config.yaml").exists());
     assert!(assets_file_path.join("not.cargo").exists());
     assert!(assets_file_path
         .join("other")
@@ -269,7 +273,7 @@ fn test_custom_assets_with_targets() {
 
     let assets_file_path = unzipped_dir.join("test_plugin").join("0.1.0");
 
-    assert!(assets_file_path.join("Cargo.toml").exists());
+    assert!(assets_file_path.join("plugin_config.yaml").exists());
     assert!(assets_file_path.join("not.cargo").exists());
     assert!(assets_file_path
         .join("other")

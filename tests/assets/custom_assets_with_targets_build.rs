@@ -7,7 +7,7 @@ fn main() {
             ("src", "other/name"),
             ("Cargo.lock", "other/name/Cargo.unlock"),
         ])
-        .custom_assets(vec!["Cargo.toml"])
+        .custom_assets(vec!["plugin_config.yaml"])
         .build()
         .unwrap();
     build::main(&params);
