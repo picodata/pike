@@ -91,6 +91,8 @@ fn add_custom_assets(custom_assets: &Vec<(PathBuf, PathBuf)>, plugin_path: &Path
 
         let destination = plugin_path.join("assets").join(to_asset_path);
 
+        println!("cargo::rerun-if-changed={}", from_asset_path.display());
+
         if from_asset_path.is_dir() {
             if !destination.exists() {
                 fs::create_dir_all(&destination).unwrap();
@@ -174,6 +176,7 @@ pub fn main(params: &Params) {
 
     // Copy migrations directory and manifest into newest plugin version
     if !migrations.is_empty() {
+        println!("cargo::rerun-if-changed={}", migrations_dir.display());
         let mut cp_opts = CopyOptions::new();
         cp_opts.overwrite = true;
         dir::copy(&migrations_dir, &plugin_path, &cp_opts).unwrap();

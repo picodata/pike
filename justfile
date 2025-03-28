@@ -1,4 +1,3 @@
-.PHONY: style-check
 style-check:
 	cargo check --all --bins --tests --benches
 	cargo fmt -- --check --config use_try_shorthand=true

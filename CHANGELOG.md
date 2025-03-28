@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/) and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Run build if assets or migrations were changed (a5d4b8ab)
+
 ## [2.2.0]
 
 ### Added

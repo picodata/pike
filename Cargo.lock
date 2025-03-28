@@ -767,6 +767,7 @@ dependencies = [
  "log",
  "nix",
  "rand",
+ "regex",
  "rstest",
  "serde",
  "serde_json",
