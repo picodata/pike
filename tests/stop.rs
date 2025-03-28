@@ -1,6 +1,6 @@
 mod helpers;
 
-use helpers::{exec_pike, run_cluster, CmdArguments, PLUGIN_DIR};
+use helpers::{exec_pike, run_cluster, CmdArguments, PLUGIN_DIR, PLUGIN_NAME};
 use nix::sys::signal::kill;
 use nix::unistd::Pid;
 use std::{
@@ -8,7 +8,6 @@ use std::{
     path::Path,
     thread,
     time::{Duration, Instant},
-    vec,
 };
 
 const TOTAL_INSTANCES: i32 = 4;
@@ -23,7 +22,7 @@ fn test_cargo_stop() {
     .unwrap();
 
     // Stop picodata cluster
-    exec_pike(vec!["stop"], PLUGIN_DIR, &vec![]);
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {

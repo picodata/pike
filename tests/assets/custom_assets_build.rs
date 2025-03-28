@@ -8,7 +8,7 @@ use pike::helpers::build;
 
 fn main() {
     let params = build::ParamsBuilder::default()
-        .custom_assets(vec!["plugin_config.yaml"])
+        .custom_assets(["plugin_config.yaml"])
         .build()
         .unwrap();
     build::main(&params);

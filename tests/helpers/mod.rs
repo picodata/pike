@@ -3,11 +3,11 @@
 use constcat::concat;
 use flate2::bufread::GzDecoder;
 use log::info;
+use regex::Regex;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
-use std::process::ExitStatus;
 use std::thread;
 use std::{
     fs::{self},
@@ -20,7 +20,8 @@ use tar::Archive;
 use toml_edit::{DocumentMut, Item};
 
 pub const TESTS_DIR: &str = "./tests/tmp/";
-pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, "test-plugin/");
+pub const PLUGIN_NAME: &str = "test-plugin";
+pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, PLUGIN_NAME);
 
 pub enum BuildType {
     Release,
@@ -43,7 +44,9 @@ pub struct Cluster {
 
 impl Drop for Cluster {
     fn drop(&mut self) {
-        exec_pike(vec!["stop"], PLUGIN_DIR, &self.cmd_args.stop_args);
+        let mut args = vec!["stop", "--plugin-path", PLUGIN_NAME];
+        args.extend(self.cmd_args.stop_args.iter().map(String::as_str));
+        exec_pike(args);
 
         if let Some(ref mut run_handler) = self.run_handler {
             run_handler.wait().unwrap();
@@ -63,13 +66,7 @@ impl Cluster {
             Err(e) => panic!("failed to delete instance.log: {e}"),
         }
 
-        match fs::remove_dir_all(PLUGIN_DIR) {
-            Ok(()) => info!("clearing test plugin dir."),
-            Err(e) if e.kind() == ErrorKind::NotFound => {
-                info!("plugin dir not found, skipping cleanup");
-            }
-            Err(e) => panic!("failed to delete plugin_dir: {e}"),
-        }
+        cleanup_dir(Path::new(PLUGIN_DIR));
 
         Cluster {
             run_handler: None,
@@ -140,12 +137,12 @@ pub fn build_plugin(build_type: &BuildType, new_version: &str) {
     // Build according version
     let output = match build_type {
         BuildType::Debug => Command::new("cargo")
-            .args(vec!["build"])
+            .arg("build")
             .current_dir(PLUGIN_DIR)
             .output()
             .unwrap(),
         BuildType::Release => Command::new("cargo")
-            .args(vec!["build"])
+            .arg("build")
             .arg("--release")
             .current_dir(PLUGIN_DIR)
             .output()
@@ -169,15 +166,19 @@ pub fn run_cluster(
     let mut cluster_handle = Cluster::new(cmd_args);
 
     // Create plugin from template
-    exec_pike(
-        vec!["plugin", "new", "test-plugin"],
-        TESTS_DIR,
-        &cluster_handle.cmd_args.plugin_args,
+    let mut args = vec!["plugin", "new", "test-plugin"];
+    args.extend(
+        cluster_handle
+            .cmd_args
+            .plugin_args
+            .iter()
+            .map(String::as_str),
     );
+    exec_pike(args);
 
     // Build the plugin
     Command::new("cargo")
-        .args(vec!["build"])
+        .arg("build")
         .args(&cluster_handle.cmd_args.build_args)
         .current_dir(PLUGIN_DIR)
         .output()?;
@@ -298,20 +299,43 @@ pub fn get_picodata_table(plugin_path: &Path, data_dir_path: &Path, table_name: 
         .join("\n")
 }
 
+fn set_current_version_of_pike(plugin_path: &OsStr) {
+    let cargo_path = Path::new(TESTS_DIR).join(plugin_path).join("Cargo.toml");
+    let Ok(cargo_content) = fs::read_to_string(&cargo_path) else {
+        return;
+    };
+    let re = Regex::new(r"picodata-pike =.*").unwrap();
+    let cargo_with_fixed_pike =
+        re.replace_all(&cargo_content, r#"picodata-pike = { path = "../../.." }"#);
+    let file = fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(cargo_path)
+        .unwrap();
+    writeln!(&file, "{cargo_with_fixed_pike}").unwrap();
+}
+
 // Spawn child process where pike is executed
 // Funciton waits for child process to end
-pub fn exec_pike<A, P>(args: Vec<A>, current_dir: P, cmd_args: &Vec<String>)
+pub fn exec_pike<I, S>(args: I)
 where
-    A: AsRef<OsStr>,
-    P: AsRef<Path>,
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr> + std::fmt::Debug,
 {
     let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let args: Vec<S> = args.into_iter().collect();
+
+    dbg!(&args);
+    dbg!(TESTS_DIR);
+
+    if let Some(plugin_path_pos) = args.iter().position(|a| a.as_ref() == "--plugin-path") {
+        set_current_version_of_pike(args[plugin_path_pos + 1].as_ref());
+    };
 
     let mut pike_child = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
         .arg("pike")
         .args(args)
-        .args(cmd_args)
-        .current_dir(current_dir)
+        .current_dir(TESTS_DIR)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -390,7 +414,7 @@ pub fn await_picodata_admin(
     }
 }
 
-pub fn cleanup_dir(path: &PathBuf) {
+pub fn cleanup_dir(path: &Path) {
     match fs::remove_dir_all(path) {
         Ok(()) => info!("clearing test plugin dir."),
         Err(e) if e.kind() == ErrorKind::NotFound => {

@@ -1,22 +1,17 @@
 mod helpers;
 
-use helpers::{exec_pike, run_cluster, CmdArguments, PLUGIN_DIR};
-use helpers::{get_picodata_table, TESTS_DIR};
-use pike::cluster::Plugin;
-use pike::cluster::RunParamsBuilder;
-use pike::cluster::Service;
-use pike::cluster::Tier;
-use pike::cluster::Topology;
-use pike::cluster::{run, MigrationContextVar};
+use helpers::{
+    cleanup_dir, exec_pike, get_picodata_table, run_cluster, CmdArguments, PLUGIN_DIR, PLUGIN_NAME,
+    TESTS_DIR,
+};
+use pike::cluster::{run, MigrationContextVar, Plugin, RunParamsBuilder, Service, Tier, Topology};
 use std::collections::BTreeMap;
 use std::process::Command;
-use std::time::Instant;
-use std::{env, thread};
 use std::{
     fs::{self},
     path::Path,
-    time::Duration,
-    vec,
+    thread,
+    time::{Duration, Instant},
 };
 
 const TOTAL_INSTANCES: i32 = 4;
@@ -95,15 +90,13 @@ fn test_cluster_daemon_and_arguments() {
 // Any changes are potential BREAKING changes.
 #[test]
 fn test_topology_struct_run() {
-    // Cleaning up metadata from past run
-    if Path::new(PLUGIN_DIR).exists() {
-        fs::remove_dir_all(PLUGIN_DIR).unwrap();
-    }
+    let plugin_path = Path::new(PLUGIN_DIR);
+    cleanup_dir(plugin_path);
 
-    exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]);
+    exec_pike(["plugin", "new", PLUGIN_NAME]);
 
     let plugins = BTreeMap::from([(
-        "test-plugin".to_string(),
+        PLUGIN_NAME.to_string(),
         Plugin {
             migration_context: vec![MigrationContextVar {
                 name: "name".to_string(),
@@ -135,16 +128,8 @@ fn test_topology_struct_run() {
 
     let params = RunParamsBuilder::default()
         .topology(topology)
-        .data_dir(Path::new("./tmp").to_path_buf())
-        .disable_plugin_install(false)
-        .base_http_port(8000)
-        .picodata_path(Path::new("picodata").to_path_buf())
-        .base_pg_port(5432)
-        .use_release(false)
-        .target_dir(Path::new("./target").to_path_buf())
         .daemon(true)
-        .disable_colors(false)
-        .plugin_path(Path::new(PLUGIN_DIR).to_path_buf())
+        .plugin_path(plugin_path.into())
         .build()
         .unwrap();
 
@@ -153,10 +138,8 @@ fn test_topology_struct_run() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance =
-            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_instance");
-        let pico_plugin =
-            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_plugin");
+        let pico_instance = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_instance");
+        let pico_plugin = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_plugin");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -166,23 +149,17 @@ fn test_topology_struct_run() {
         }
     }
 
-    exec_pike(
-        vec!["stop"],
-        PLUGIN_DIR,
-        &vec!["--data-dir".to_string(), "./tmp".to_string()],
-    );
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
 }
 
 #[test]
 fn test_topology_struct_one_tier() {
-    // Cleaning up metadata from past run
-    if Path::new(PLUGIN_DIR).exists() {
-        fs::remove_dir_all(PLUGIN_DIR).unwrap();
-    }
+    let plugin_path = Path::new(PLUGIN_DIR);
+    cleanup_dir(plugin_path);
 
-    exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]);
+    exec_pike(["plugin", "new", PLUGIN_NAME]);
 
     let tiers = BTreeMap::from([(
         "default".to_string(),
@@ -191,7 +168,7 @@ fn test_topology_struct_one_tier() {
             replication_factor: 2,
         },
     )]);
-    let plugins = BTreeMap::from([("test-plugin".to_string(), Plugin::default())]);
+    let plugins = BTreeMap::from([(PLUGIN_NAME.to_string(), Plugin::default())]);
 
     let topology = Topology {
         tiers,
@@ -201,16 +178,8 @@ fn test_topology_struct_one_tier() {
 
     let params = RunParamsBuilder::default()
         .topology(topology)
-        .data_dir(Path::new("./tmp").to_path_buf())
-        .disable_plugin_install(false)
-        .base_http_port(8000)
-        .picodata_path(Path::new("picodata").to_path_buf())
-        .base_pg_port(5432)
-        .use_release(false)
-        .target_dir(Path::new("./target").to_path_buf())
         .daemon(true)
-        .disable_colors(false)
-        .plugin_path(Path::new(PLUGIN_DIR).to_path_buf())
+        .plugin_path(plugin_path.into())
         .build()
         .unwrap();
 
@@ -219,10 +188,8 @@ fn test_topology_struct_one_tier() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance =
-            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_instance");
-        let pico_plugin =
-            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_plugin");
+        let pico_instance = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_instance");
+        let pico_plugin = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_plugin");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -232,23 +199,17 @@ fn test_topology_struct_one_tier() {
         }
     }
 
-    exec_pike(
-        vec!["stop"],
-        PLUGIN_DIR,
-        &vec!["--data-dir".to_string(), "./tmp".to_string()],
-    );
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
 }
 
 #[test]
 fn test_topology_struct_run_no_plugin() {
-    // Cleaning up metadata from past run
-    if Path::new(PLUGIN_DIR).exists() {
-        fs::remove_dir_all(PLUGIN_DIR).unwrap();
-    }
+    let plugin_path = Path::new(PLUGIN_DIR);
+    cleanup_dir(plugin_path);
 
-    exec_pike(vec!["plugin", "new", "test-plugin"], TESTS_DIR, &vec![]);
+    exec_pike(["plugin", "new", PLUGIN_NAME]);
 
     let tiers = BTreeMap::from([(
         "default".to_string(),
@@ -265,16 +226,8 @@ fn test_topology_struct_run_no_plugin() {
 
     let params = RunParamsBuilder::default()
         .topology(topology)
-        .data_dir(Path::new("./tmp").to_path_buf())
-        .disable_plugin_install(false)
-        .base_http_port(8000)
-        .picodata_path(Path::new("picodata").to_path_buf())
-        .base_pg_port(5432)
-        .use_release(false)
-        .target_dir(Path::new("./target").to_path_buf())
         .daemon(true)
-        .disable_colors(false)
-        .plugin_path(Path::new(PLUGIN_DIR).to_path_buf())
+        .plugin_path(plugin_path.into())
         .build()
         .unwrap();
 
@@ -283,8 +236,7 @@ fn test_topology_struct_run_no_plugin() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance =
-            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_instance");
+        let pico_instance = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_instance");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -294,11 +246,7 @@ fn test_topology_struct_run_no_plugin() {
         }
     }
 
-    exec_pike(
-        vec!["stop"],
-        PLUGIN_DIR,
-        &vec!["--data-dir".to_string(), "./tmp".to_string()],
-    );
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
 }
@@ -306,7 +254,6 @@ fn test_topology_struct_run_no_plugin() {
 #[test]
 fn test_quickstart_pipeline() {
     let quickstart_path = Path::new(TESTS_DIR).join("quickstart");
-    let quickstart_plugin_dir = quickstart_path.join("test-plugin");
 
     // Test uncle Pike wise advice's
     // Forced to call Command manually instead of exec_pike to read output
@@ -323,19 +270,11 @@ fn test_quickstart_pipeline() {
         "Recieved unexpected output, while trying to run pike in wrong directory, where is the fish? Output: {stdout}"
     );
 
-    // Cleaning up metadata from past run
-    if quickstart_path.exists() {
-        fs::remove_dir_all(&quickstart_path).unwrap();
-    }
+    cleanup_dir(&quickstart_path);
 
-    fs::create_dir(&quickstart_path).unwrap();
-    exec_pike(
-        vec!["plugin", "new", "test-plugin"],
-        quickstart_path,
-        &vec![],
-    );
+    exec_pike(["plugin", "new", "quickstart"]);
 
-    let plugins = BTreeMap::from([("test-plugin".to_string(), Plugin::default())]);
+    let plugins = BTreeMap::from([("quickstart".to_string(), Plugin::default())]);
     let tiers = BTreeMap::from([(
         "default".to_string(),
         Tier {
@@ -352,16 +291,8 @@ fn test_quickstart_pipeline() {
 
     let params = RunParamsBuilder::default()
         .topology(topology)
-        .data_dir(Path::new("./tmp").to_path_buf())
-        .disable_plugin_install(false)
-        .base_http_port(8000)
-        .picodata_path(Path::new("picodata").to_path_buf())
-        .base_pg_port(5432)
-        .use_release(false)
-        .target_dir(Path::new("./target").to_path_buf())
         .daemon(true)
-        .disable_colors(false)
-        .plugin_path(Path::new(&quickstart_plugin_dir).to_path_buf())
+        .plugin_path(quickstart_path.clone())
         .build()
         .unwrap();
 
@@ -371,11 +302,8 @@ fn test_quickstart_pipeline() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_plugin_config = get_picodata_table(
-            &Path::new(TESTS_DIR).join("quickstart/test-plugin"),
-            Path::new("tmp"),
-            "_pico_instance",
-        );
+        let pico_plugin_config =
+            get_picodata_table(&quickstart_path, Path::new("tmp"), "_pico_instance");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -385,32 +313,15 @@ fn test_quickstart_pipeline() {
         }
     }
 
-    exec_pike(
-        vec!["stop"],
-        TESTS_DIR,
-        &vec![
-            "--data-dir".to_string(),
-            "./tmp".to_string(),
-            "--plugin-path".to_string(),
-            "./quickstart/test-plugin".to_string(),
-        ],
-    );
+    exec_pike(["stop", "--plugin-path", "quickstart"]);
 
     assert!(cluster_started);
 
     // Quickly test pack command
-    exec_pike(
-        vec!["plugin", "pack"],
-        TESTS_DIR,
-        &vec![
-            "--debug".to_string(),
-            "--plugin-path".to_string(),
-            "./quickstart/test-plugin".to_string(),
-        ],
-    );
+    exec_pike(["plugin", "pack", "--debug", "--plugin-path", "quickstart"]);
 
-    assert!(quickstart_plugin_dir
-        .join("target/debug/test_plugin-0.1.0.tar.gz")
+    assert!(quickstart_path
+        .join("target/debug/quickstart-0.1.0.tar.gz")
         .exists());
 }
 
@@ -420,25 +331,17 @@ fn test_workspace_pipeline() {
     let tests_dir = Path::new(TESTS_DIR);
     let workspace_path = tests_dir.join("workspace_plugin");
 
-    // Cleaning up metadata from past run
-    if workspace_path.exists() {
-        fs::remove_dir_all(&workspace_path).unwrap();
-    }
+    cleanup_dir(&workspace_path);
 
-    exec_pike(
-        vec!["plugin", "new", "workspace_plugin"],
-        tests_dir,
-        &vec!["--workspace".to_string()],
-    );
+    exec_pike(["plugin", "new", "workspace_plugin", "--workspace"]);
 
-    exec_pike(
-        vec!["plugin", "add", "sub_plugin"],
-        tests_dir,
-        &vec![
-            "--plugin-path".to_string(),
-            "./workspace_plugin".to_string(),
-        ],
-    );
+    exec_pike([
+        "plugin",
+        "add",
+        "sub_plugin",
+        "--plugin-path",
+        "workspace_plugin",
+    ]);
 
     let plugins = BTreeMap::from([
         ("workspace_plugin".to_string(), Plugin::default()),
@@ -500,30 +403,19 @@ fn test_workspace_pipeline() {
         }
     }
 
-    exec_pike(
-        vec!["stop"],
-        TESTS_DIR,
-        &vec![
-            "--data-dir".to_string(),
-            "./tmp".to_string(),
-            "--plugin-path".to_string(),
-            "./workspace_plugin".to_string(),
-        ],
-    );
+    exec_pike(["stop", "--plugin-path", "workspace_plugin"]);
 
     assert!(cluster_started);
 
     // Fully test pack command for proper artefacts inside archives
 
-    exec_pike(
-        vec!["plugin", "pack"],
-        TESTS_DIR,
-        &vec![
-            "--debug".to_string(),
-            "--plugin-path".to_string(),
-            "./workspace_plugin".to_string(),
-        ],
-    );
+    exec_pike([
+        "plugin",
+        "pack",
+        "--debug",
+        "--plugin-path",
+        "workspace_plugin",
+    ]);
 
     assert!(workspace_path
         .join("target/debug/workspace_plugin-0.1.0.tar.gz")
@@ -569,12 +461,9 @@ fn test_workspace_pipeline() {
 
 #[test]
 fn test_run_without_plugin_directory() {
-    let run_dir = Path::new(TESTS_DIR);
-    let plugin_dir = Path::new("test_run_without_plugin_directory");
-    let data_dir = plugin_dir.join("tmp");
+    let plugin_dir = Path::new(TESTS_DIR).join("test_run_without_plugin_directory");
 
-    // Cleaning up metadata from past run
-    let _ = fs::remove_dir_all(run_dir.join(plugin_dir));
+    cleanup_dir(&plugin_dir);
 
     let tiers = BTreeMap::from([(
         "default".to_string(),
@@ -591,7 +480,7 @@ fn test_run_without_plugin_directory() {
 
     let params = RunParamsBuilder::default()
         .topology(topology)
-        .data_dir(run_dir.join(&data_dir))
+        .plugin_path(plugin_dir.clone())
         .daemon(true)
         .build()
         .unwrap();
@@ -601,7 +490,7 @@ fn test_run_without_plugin_directory() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(run_dir, &data_dir, "_pico_instance");
+        let pico_instance = get_picodata_table(&plugin_dir, Path::new("tmp"), "_pico_instance");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -613,14 +502,7 @@ fn test_run_without_plugin_directory() {
         thread::sleep(Duration::from_secs(1));
     }
 
-    exec_pike(
-        vec!["stop"],
-        env::current_dir().unwrap(),
-        &vec![
-            "--data-dir".to_string(),
-            run_dir.join(&data_dir).to_str().unwrap().to_string(),
-        ],
-    );
+    exec_pike(["stop", "--plugin-path", "test_run_without_plugin_directory"]);
 
     assert!(cluster_started);
 }

@@ -1,6 +1,8 @@
 mod helpers;
 
-use helpers::{exec_pike, get_picodata_table, run_cluster, CmdArguments, PLUGIN_DIR, TESTS_DIR};
+use helpers::{
+    cleanup_dir, exec_pike, get_picodata_table, run_cluster, CmdArguments, PLUGIN_DIR, TESTS_DIR,
+};
 use rstest::rstest;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -84,25 +86,17 @@ fn test_workspace_config_apply() {
     let tests_dir = Path::new(TESTS_DIR);
     let workspace_path = tests_dir.join("workspace_plugin");
 
-    // Cleaning up metadata from past run
-    if workspace_path.exists() {
-        fs::remove_dir_all(&workspace_path).unwrap();
-    }
+    cleanup_dir(&workspace_path);
 
-    exec_pike(
-        vec!["plugin", "new", "workspace_plugin"],
-        tests_dir,
-        &vec!["--workspace".to_string()],
-    );
+    exec_pike(["plugin", "new", "workspace_plugin", "--workspace"]);
 
-    exec_pike(
-        vec!["plugin", "add", "sub_plugin"],
-        tests_dir,
-        &vec![
-            "--plugin-path".to_string(),
-            "./workspace_plugin".to_string(),
-        ],
-    );
+    exec_pike([
+        "plugin",
+        "add",
+        "sub_plugin",
+        "--plugin-path",
+        "workspace_plugin",
+    ]);
 
     let plugins = BTreeMap::from([
         ("workspace_plugin".to_string(), Plugin::default()),
@@ -125,15 +119,7 @@ fn test_workspace_config_apply() {
 
     let params = RunParamsBuilder::default()
         .topology(topology)
-        .data_dir(Path::new("./tmp").to_path_buf())
-        .disable_plugin_install(false)
-        .base_http_port(8000)
-        .picodata_path(Path::new("picodata").to_path_buf())
-        .base_pg_port(5432)
-        .use_release(false)
-        .target_dir(Path::new("./target").to_path_buf())
         .daemon(true)
-        .disable_colors(false)
         .plugin_path(Path::new(&workspace_path).to_path_buf())
         .build()
         .unwrap();
@@ -169,14 +155,7 @@ fn test_workspace_config_apply() {
     )
     .unwrap();
 
-    exec_pike(
-        vec!["config", "apply"],
-        TESTS_DIR,
-        &vec![
-            "--plugin-path".to_string(),
-            "./workspace_plugin".to_string(),
-        ],
-    );
+    exec_pike(["config", "apply", "--plugin-path", "workspace_plugin"]);
     is_cluster_valid = false;
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
@@ -206,18 +185,16 @@ fn test_workspace_config_apply() {
     )
     .unwrap();
 
-    exec_pike(
-        vec!["config", "apply"],
-        TESTS_DIR,
-        &vec![
-            "--plugin-path".to_string(),
-            "./workspace_plugin".to_string(),
-            "--config-path".to_string(),
-            "./modified_config.yaml".to_string(),
-            "--plugin-name".to_string(),
-            "sub_plugin".to_string(),
-        ],
-    );
+    exec_pike(vec![
+        "config",
+        "apply",
+        "--plugin-path",
+        "workspace_plugin",
+        "--config-path",
+        "modified_config.yaml",
+        "--plugin-name",
+        "sub_plugin",
+    ]);
 
     is_cluster_valid = false;
     let start = Instant::now();
@@ -236,16 +213,7 @@ fn test_workspace_config_apply() {
 
     assert!(is_cluster_valid, "Failed to apply config for one plugin");
 
-    exec_pike(
-        vec!["stop"],
-        TESTS_DIR,
-        &vec![
-            "--data-dir".to_string(),
-            "./tmp".to_string(),
-            "--plugin-path".to_string(),
-            "./workspace_plugin".to_string(),
-        ],
-    );
+    exec_pike(["stop", "--plugin-path", "workspace_plugin"]);
 }
 
 #[test]
@@ -253,25 +221,17 @@ fn test_plugin_apply_wrong_cmd_combination() {
     let tests_dir = Path::new(TESTS_DIR);
     let workspace_path = tests_dir.join("workspace_plugin");
 
-    // Cleaning up metadata from past run
-    if workspace_path.exists() {
-        fs::remove_dir_all(&workspace_path).unwrap();
-    }
+    cleanup_dir(&workspace_path);
 
-    exec_pike(
-        vec!["plugin", "new", "workspace_plugin"],
-        tests_dir,
-        &vec!["--workspace".to_string()],
-    );
+    exec_pike(["plugin", "new", "workspace_plugin", "--workspace"]);
 
-    exec_pike(
-        vec!["plugin", "add", "sub_plugin"],
-        tests_dir,
-        &vec![
-            "--plugin-path".to_string(),
-            "./workspace_plugin".to_string(),
-        ],
-    );
+    exec_pike([
+        "plugin",
+        "add",
+        "sub_plugin",
+        "--plugin-path",
+        "workspace_plugin",
+    ]);
 
     // Test uncle Pike wise advice's
     // Forced to call Command manually instead of exec_pike to read output
@@ -282,9 +242,9 @@ fn test_plugin_apply_wrong_cmd_combination() {
             "config",
             "apply",
             "--config-path",
-            "./gangam_style",
+            "gangam_style",
             "--plugin-path",
-            "./workspace_plugin",
+            "workspace_plugin",
         ])
         .current_dir(TESTS_DIR)
         .stdout(Stdio::piped()) // Capture stdout

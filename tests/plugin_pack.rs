@@ -3,7 +3,7 @@ mod helpers;
 use helpers::{cleanup_dir, exec_pike, TESTS_DIR};
 use std::{
     fs::{self, OpenOptions},
-    io::{BufRead, BufReader, Write},
+    io::Write,
     path::Path,
 };
 
@@ -11,15 +11,18 @@ pub const PACK_PLUGIN_NAME: &str = "test-pack-plugin";
 
 #[test]
 fn test_cargo_pack() {
-    cleanup_dir(&Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME));
+    let plugin_path = Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME);
+    cleanup_dir(&plugin_path);
 
-    exec_pike(vec!["plugin", "new", PACK_PLUGIN_NAME], TESTS_DIR, &vec![]);
-
-    exec_pike(
-        vec!["plugin", "pack"],
-        Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME),
-        &vec!["--target-dir".to_string(), "tmp_target".to_string()],
-    );
+    exec_pike(["plugin", "new", PACK_PLUGIN_NAME]);
+    exec_pike([
+        "plugin",
+        "pack",
+        "--plugin-path",
+        PACK_PLUGIN_NAME,
+        "--target-dir",
+        "tmp_target",
+    ]);
 
     // Hail for archive handling in Rust
     let plugin_path = Path::new(TESTS_DIR)
@@ -39,12 +42,11 @@ fn test_cargo_pack() {
 }
 
 #[test]
-#[allow(clippy::too_many_lines)]
 fn test_cargo_pack_assets() {
     let pack_plugin_path = Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME);
     cleanup_dir(&pack_plugin_path);
 
-    exec_pike(vec!["plugin", "new", PACK_PLUGIN_NAME], TESTS_DIR, &vec![]);
+    exec_pike(["plugin", "new", PACK_PLUGIN_NAME]);
 
     // Change build script for sub plugin to test custom assets
     fs::copy(
@@ -58,11 +60,7 @@ fn test_cargo_pack_assets() {
     .unwrap();
 
     // release build
-    exec_pike(
-        vec!["plugin", "pack"],
-        Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME),
-        &vec![],
-    );
+    exec_pike(["plugin", "pack", "--plugin-path", PACK_PLUGIN_NAME]);
 
     // check release archive
     let unzipped_dir = pack_plugin_path.join("unzipped_release");
@@ -84,11 +82,13 @@ fn test_cargo_pack_assets() {
     assert!(!mig_file_content.contains("-- test"));
 
     // debug build
-    exec_pike(
-        vec!["plugin", "pack"],
-        Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME),
-        &vec!["--debug".into()],
-    );
+    exec_pike([
+        "plugin",
+        "pack",
+        "--plugin-path",
+        PACK_PLUGIN_NAME,
+        "--debug",
+    ]);
 
     // check debug archive
     let unzipped_dir = pack_plugin_path.join("unzipped_debug");
@@ -121,38 +121,7 @@ fn test_cargo_pack_assets() {
         .unwrap();
     writeln!(source_config_file, "# test").unwrap();
 
-    // Substitute with the current version of pike
-    // TODO: #107 move it to pike_exec
-    let cargo_toml = pack_plugin_path.join("Cargo.toml");
-    let file = fs::File::open(&cargo_toml).unwrap();
-    let reader = BufReader::new(file);
-
-    let new_content: Vec<String> = reader
-        .lines()
-        .map(|line| {
-            let line = line.unwrap();
-            if line.starts_with("picodata-pike") {
-                "picodata-pike = { path = \"../../..\" }".to_string()
-            } else {
-                line
-            }
-        })
-        .collect();
-
-    let file = fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(cargo_toml)
-        .unwrap();
-    for line in new_content {
-        writeln!(&file, "{line}").unwrap();
-    }
-
-    exec_pike(
-        vec!["plugin", "pack"],
-        Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME),
-        &vec![],
-    );
+    exec_pike(["plugin", "pack", "--plugin-path", PACK_PLUGIN_NAME]);
 
     let unzipped_dir = pack_plugin_path.join("unzipped_release_with_changed_assets");
     let base_file_path = unzipped_dir.join("test_pack_plugin").join("0.1.0");
@@ -177,12 +146,9 @@ fn test_custom_assets_with_targets() {
     let tests_dir = Path::new(TESTS_DIR);
     let plugin_path = tests_dir.join("test-plugin");
 
-    // Cleaning up metadata from past run
-    if plugin_path.exists() {
-        fs::remove_dir_all(&plugin_path).unwrap();
-    }
+    cleanup_dir(&plugin_path);
 
-    exec_pike(vec!["plugin", "new", "test-plugin"], tests_dir, &vec![]);
+    exec_pike(["plugin", "new", "test-plugin"]);
 
     // Change build script for plugin to test custom assets
     fs::copy(
@@ -191,43 +157,8 @@ fn test_custom_assets_with_targets() {
     )
     .unwrap();
 
-    // Substitute with the current version of pike
-    // TODO: #107 move it to pike_exec
-    let cargo_toml = plugin_path.join("Cargo.toml");
-    let file = fs::File::open(&cargo_toml).unwrap();
-    let reader = BufReader::new(file);
-
-    let new_content: Vec<String> = reader
-        .lines()
-        .map(|line| {
-            let line = line.unwrap();
-            if line.starts_with("picodata-pike") {
-                "picodata-pike = { path = \"../../..\" }".to_string()
-            } else {
-                line
-            }
-        })
-        .collect();
-
-    let file = fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(cargo_toml)
-        .unwrap();
-    for line in new_content {
-        writeln!(&file, "{line}").unwrap();
-    }
-
     // Fully test pack command for proper artifacts inside archives
-    exec_pike(
-        vec!["plugin", "pack"],
-        TESTS_DIR,
-        &vec![
-            "--debug".to_string(),
-            "--plugin-path".to_string(),
-            "./test-plugin".to_string(),
-        ],
-    );
+    exec_pike(["plugin", "pack", "--debug", "--plugin-path", "test-plugin"]);
 
     // Check the debug archive
     let unzipped_dir = plugin_path.join("unzipped_debug");
@@ -255,11 +186,7 @@ fn test_custom_assets_with_targets() {
         .join("lib.rs")
         .exists());
 
-    exec_pike(
-        vec!["plugin", "pack"],
-        TESTS_DIR,
-        &vec!["--plugin-path".to_string(), "./test-plugin".to_string()],
-    );
+    exec_pike(["plugin", "pack", "--plugin-path", "test-plugin"]);
 
     // Check the release archive
     let unzipped_dir = plugin_path.join("unzipped_release");
