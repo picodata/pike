@@ -31,11 +31,11 @@ fn test_cargo_pack() {
     helpers::unpack_archive(
         &plugin_path
             .join("release")
-            .join("test_pack_plugin-0.1.0.tar.gz"),
+            .join("test-pack-plugin-0.1.0.tar.gz"),
         &plugin_path,
     );
 
-    let base_file_path = plugin_path.join("test_pack_plugin").join("0.1.0");
+    let base_file_path = plugin_path.join("test-pack-plugin").join("0.1.0");
     assert!(base_file_path.join("libtest_pack_plugin.so").exists());
     assert!(base_file_path.join("manifest.yaml").exists());
     assert!(base_file_path.join("migrations").is_dir());
@@ -64,13 +64,13 @@ fn test_cargo_pack_assets() {
 
     // check release archive
     let unzipped_dir = pack_plugin_path.join("unzipped_release");
-    let base_file_path = unzipped_dir.join("test_pack_plugin").join("0.1.0");
+    let base_file_path = unzipped_dir.join("test-pack-plugin").join("0.1.0");
 
     helpers::unpack_archive(
         &pack_plugin_path
             .join("target")
             .join("release")
-            .join("test_pack_plugin-0.1.0.tar.gz"),
+            .join("test-pack-plugin-0.1.0.tar.gz"),
         &unzipped_dir,
     );
 
@@ -92,13 +92,13 @@ fn test_cargo_pack_assets() {
 
     // check debug archive
     let unzipped_dir = pack_plugin_path.join("unzipped_debug");
-    let base_file_path = unzipped_dir.join("test_pack_plugin").join("0.1.0");
+    let base_file_path = unzipped_dir.join("test-pack-plugin").join("0.1.0");
 
     helpers::unpack_archive(
         &pack_plugin_path
             .join("target")
             .join("debug")
-            .join("test_pack_plugin-0.1.0.tar.gz"),
+            .join("test-pack-plugin-0.1.0.tar.gz"),
         &unzipped_dir,
     );
 
@@ -124,13 +124,13 @@ fn test_cargo_pack_assets() {
     exec_pike(["plugin", "pack", "--plugin-path", PACK_PLUGIN_NAME]);
 
     let unzipped_dir = pack_plugin_path.join("unzipped_release_with_changed_assets");
-    let base_file_path = unzipped_dir.join("test_pack_plugin").join("0.1.0");
+    let base_file_path = unzipped_dir.join("test-pack-plugin").join("0.1.0");
 
     helpers::unpack_archive(
         &pack_plugin_path
             .join("target")
             .join("release")
-            .join("test_pack_plugin-0.1.0.tar.gz"),
+            .join("test-pack-plugin-0.1.0.tar.gz"),
         &unzipped_dir,
     );
     let mig_file = base_file_path.join("migrations").join("0001_init.sql");
@@ -167,11 +167,11 @@ fn test_custom_assets_with_targets() {
         &plugin_path
             .join("target")
             .join("debug")
-            .join("test_plugin-0.1.0.tar.gz"),
+            .join("test-plugin-0.1.0.tar.gz"),
         &unzipped_dir,
     );
 
-    let assets_file_path = unzipped_dir.join("test_plugin").join("0.1.0");
+    let assets_file_path = unzipped_dir.join("test-plugin").join("0.1.0");
 
     assert!(assets_file_path.join("plugin_config.yaml").exists());
     assert!(assets_file_path.join("not.cargo").exists());
@@ -195,11 +195,11 @@ fn test_custom_assets_with_targets() {
         &plugin_path
             .join("target")
             .join("release")
-            .join("test_plugin-0.1.0.tar.gz"),
+            .join("test-plugin-0.1.0.tar.gz"),
         &unzipped_dir,
     );
 
-    let assets_file_path = unzipped_dir.join("test_plugin").join("0.1.0");
+    let assets_file_path = unzipped_dir.join("test-plugin").join("0.1.0");
 
     assert!(assets_file_path.join("plugin_config.yaml").exists());
     assert!(assets_file_path.join("not.cargo").exists());

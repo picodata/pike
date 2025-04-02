@@ -92,14 +92,14 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
     )
     .context("failed to parse Cargo.toml")?;
 
-    let normalized_package_name = cargo_manifest.package.name.replace('-', "_");
+    let package_name = cargo_manifest.package.name;
+    let normalized_package_name = package_name.replace('-', "_");
 
-    let root_in_zip = Path::new(&normalized_package_name).join(plugin_version);
+    let root_in_zip = Path::new(&package_name).join(plugin_version);
 
     let compressed_file = File::create(format!(
-        "{}/{}-{}.tar.gz",
+        "{}/{package_name}-{}.tar.gz",
         build_dir.display(),
-        &normalized_package_name,
         cargo_manifest.package.version
     ))
     .context("failed to pack the plugin")?;
