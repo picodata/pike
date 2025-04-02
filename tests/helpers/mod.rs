@@ -66,7 +66,10 @@ impl Cluster {
             Err(e) => panic!("failed to delete instance.log: {e}"),
         }
 
-        cleanup_dir(Path::new(PLUGIN_DIR));
+        // cleanup_dir(Path::new(PLUGIN_DIR));
+        let mut clean_args = vec!["clean"];
+        clean_args.extend(run_params.stop_args.iter().map(String::as_str));
+        exec_pike(clean_args);
 
         Cluster {
             run_handler: None,
@@ -166,15 +169,13 @@ pub fn run_cluster(
     let mut cluster_handle = Cluster::new(cmd_args);
 
     // Create plugin from template
-    let mut args = vec!["plugin", "new", "test-plugin"];
-    args.extend(
-        cluster_handle
-            .cmd_args
-            .plugin_args
-            .iter()
-            .map(String::as_str),
-    );
-    exec_pike(args);
+    let mut args = cluster_handle
+        .cmd_args
+        .plugin_args
+        .iter()
+        .map(String::as_str);
+
+    init_plugin("test-plugin", args.collect());
 
     // Build the plugin
     Command::new("cargo")
@@ -431,4 +432,27 @@ pub fn unpack_archive(path: &Path, unpack_to: &Path) {
     let mut archive = Archive::new(decompressor);
 
     archive.unpack(unpack_to).unwrap();
+}
+
+pub fn init_plugin(plugin_name: &str, plugin_args: Vec<&str>) {
+    let plugin_path = Path::new(TESTS_DIR).join(plugin_name);
+
+    // If plugin hasn't been created before, create a new one
+    if !plugin_path.exists() {
+        let mut args = vec!["plugin", "new", plugin_name];
+        args.extend(plugin_args);
+        exec_pike(args);
+
+        return;
+    }
+
+    // Save build artefacts from previous run
+    let mut init_args = vec!["plugin", "init"];
+    init_args.extend(plugin_args);
+
+    let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let mut pike_child = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
+        .arg("pike")
+        .args(init_args)
+        .current_dir(Path::new(TESTS_DIR).join(plugin_name));
 }
