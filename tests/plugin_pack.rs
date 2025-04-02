@@ -1,6 +1,6 @@
 mod helpers;
 
-use helpers::{cleanup_dir, exec_pike, TESTS_DIR};
+use helpers::{exec_pike, init_plugin, TESTS_DIR};
 use std::{
     fs::{self, OpenOptions},
     io::Write,
@@ -11,10 +11,8 @@ pub const PACK_PLUGIN_NAME: &str = "test-pack-plugin";
 
 #[test]
 fn test_cargo_pack() {
-    let plugin_path = Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME);
-    cleanup_dir(&plugin_path);
+    init_plugin(PACK_PLUGIN_NAME);
 
-    exec_pike(["plugin", "new", PACK_PLUGIN_NAME]);
     exec_pike([
         "plugin",
         "pack",
@@ -44,9 +42,8 @@ fn test_cargo_pack() {
 #[test]
 fn test_cargo_pack_assets() {
     let pack_plugin_path = Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME);
-    cleanup_dir(&pack_plugin_path);
 
-    exec_pike(["plugin", "new", PACK_PLUGIN_NAME]);
+    init_plugin(PACK_PLUGIN_NAME);
 
     // Change build script for sub plugin to test custom assets
     fs::copy(
@@ -144,11 +141,9 @@ fn test_cargo_pack_assets() {
 #[test]
 fn test_custom_assets_with_targets() {
     let tests_dir = Path::new(TESTS_DIR);
-    let plugin_path = tests_dir.join("test-plugin");
+    let plugin_path = tests_dir.join(PACK_PLUGIN_NAME);
 
-    cleanup_dir(&plugin_path);
-
-    exec_pike(["plugin", "new", "test-plugin"]);
+    init_plugin(PACK_PLUGIN_NAME);
 
     // Change build script for plugin to test custom assets
     fs::copy(
@@ -158,7 +153,13 @@ fn test_custom_assets_with_targets() {
     .unwrap();
 
     // Fully test pack command for proper artifacts inside archives
-    exec_pike(["plugin", "pack", "--debug", "--plugin-path", "test-plugin"]);
+    exec_pike([
+        "plugin",
+        "pack",
+        "--debug",
+        "--plugin-path",
+        PACK_PLUGIN_NAME,
+    ]);
 
     // Check the debug archive
     let unzipped_dir = plugin_path.join("unzipped_debug");
@@ -167,11 +168,11 @@ fn test_custom_assets_with_targets() {
         &plugin_path
             .join("target")
             .join("debug")
-            .join("test-plugin-0.1.0.tar.gz"),
+            .join("test-pack-plugin-0.1.0.tar.gz"),
         &unzipped_dir,
     );
 
-    let assets_file_path = unzipped_dir.join("test-plugin").join("0.1.0");
+    let assets_file_path = unzipped_dir.join(PACK_PLUGIN_NAME).join("0.1.0");
 
     assert!(assets_file_path.join("plugin_config.yaml").exists());
     assert!(assets_file_path.join("not.cargo").exists());
@@ -186,7 +187,7 @@ fn test_custom_assets_with_targets() {
         .join("lib.rs")
         .exists());
 
-    exec_pike(["plugin", "pack", "--plugin-path", "test-plugin"]);
+    exec_pike(["plugin", "pack", "--plugin-path", PACK_PLUGIN_NAME]);
 
     // Check the release archive
     let unzipped_dir = plugin_path.join("unzipped_release");
@@ -195,11 +196,11 @@ fn test_custom_assets_with_targets() {
         &plugin_path
             .join("target")
             .join("release")
-            .join("test-plugin-0.1.0.tar.gz"),
+            .join("test-pack-plugin-0.1.0.tar.gz"),
         &unzipped_dir,
     );
 
-    let assets_file_path = unzipped_dir.join("test-plugin").join("0.1.0");
+    let assets_file_path = unzipped_dir.join(PACK_PLUGIN_NAME).join("0.1.0");
 
     assert!(assets_file_path.join("plugin_config.yaml").exists());
     assert!(assets_file_path.join("not.cargo").exists());

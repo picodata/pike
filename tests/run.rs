@@ -1,8 +1,8 @@
 mod helpers;
 
 use helpers::{
-    cleanup_dir, exec_pike, get_picodata_table, run_cluster, CmdArguments, PLUGIN_DIR, PLUGIN_NAME,
-    TESTS_DIR,
+    cleanup_dir, exec_pike, get_picodata_table, init_plugin, init_plugin_workspace, run_cluster,
+    CmdArguments, PLUGIN_DIR, PLUGIN_NAME, TESTS_DIR,
 };
 use pike::cluster::{run, MigrationContextVar, Plugin, RunParamsBuilder, Service, Tier, Topology};
 use std::collections::BTreeMap;
@@ -91,9 +91,8 @@ fn test_cluster_daemon_and_arguments() {
 #[test]
 fn test_topology_struct_run() {
     let plugin_path = Path::new(PLUGIN_DIR);
-    cleanup_dir(plugin_path);
 
-    exec_pike(["plugin", "new", PLUGIN_NAME]);
+    init_plugin(PLUGIN_NAME);
 
     let plugins = BTreeMap::from([(
         PLUGIN_NAME.to_string(),
@@ -157,9 +156,8 @@ fn test_topology_struct_run() {
 #[test]
 fn test_topology_struct_one_tier() {
     let plugin_path = Path::new(PLUGIN_DIR);
-    cleanup_dir(plugin_path);
 
-    exec_pike(["plugin", "new", PLUGIN_NAME]);
+    init_plugin(PLUGIN_NAME);
 
     let tiers = BTreeMap::from([(
         "default".to_string(),
@@ -207,9 +205,8 @@ fn test_topology_struct_one_tier() {
 #[test]
 fn test_topology_struct_run_no_plugin() {
     let plugin_path = Path::new(PLUGIN_DIR);
-    cleanup_dir(plugin_path);
 
-    exec_pike(["plugin", "new", PLUGIN_NAME]);
+    init_plugin(PLUGIN_NAME);
 
     let tiers = BTreeMap::from([(
         "default".to_string(),
@@ -270,9 +267,7 @@ fn test_quickstart_pipeline() {
         "Recieved unexpected output, while trying to run pike in wrong directory, where is the fish? Output: {stdout}"
     );
 
-    cleanup_dir(&quickstart_path);
-
-    exec_pike(["plugin", "new", "quickstart"]);
+    init_plugin("quickstart");
 
     let plugins = BTreeMap::from([("quickstart".to_string(), Plugin::default())]);
     let tiers = BTreeMap::from([(
@@ -331,9 +326,7 @@ fn test_workspace_pipeline() {
     let tests_dir = Path::new(TESTS_DIR);
     let workspace_path = tests_dir.join("workspace_plugin");
 
-    cleanup_dir(&workspace_path);
-
-    exec_pike(["plugin", "new", "workspace_plugin", "--workspace"]);
+    init_plugin_workspace("workspace_plugin");
 
     exec_pike([
         "plugin",

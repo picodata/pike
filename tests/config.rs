@@ -1,7 +1,8 @@
 mod helpers;
 
 use helpers::{
-    cleanup_dir, exec_pike, get_picodata_table, run_cluster, CmdArguments, PLUGIN_DIR, TESTS_DIR,
+    exec_pike, get_picodata_table, init_plugin_workspace, run_cluster, CmdArguments, PLUGIN_DIR,
+    TESTS_DIR,
 };
 use rstest::rstest;
 use std::{
@@ -86,9 +87,7 @@ fn test_workspace_config_apply() {
     let tests_dir = Path::new(TESTS_DIR);
     let workspace_path = tests_dir.join("workspace_plugin");
 
-    cleanup_dir(&workspace_path);
-
-    exec_pike(["plugin", "new", "workspace_plugin", "--workspace"]);
+    init_plugin_workspace("workspace_plugin");
 
     exec_pike([
         "plugin",
@@ -218,12 +217,7 @@ fn test_workspace_config_apply() {
 
 #[test]
 fn test_plugin_apply_wrong_cmd_combination() {
-    let tests_dir = Path::new(TESTS_DIR);
-    let workspace_path = tests_dir.join("workspace_plugin");
-
-    cleanup_dir(&workspace_path);
-
-    exec_pike(["plugin", "new", "workspace_plugin", "--workspace"]);
+    init_plugin_workspace("workspace_plugin");
 
     exec_pike([
         "plugin",

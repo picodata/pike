@@ -7,6 +7,7 @@ use regex::Regex;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
+use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 use std::thread;
 use std::{
@@ -22,6 +23,13 @@ use toml_edit::{DocumentMut, Item};
 pub const TESTS_DIR: &str = "./tests/tmp/";
 pub const PLUGIN_NAME: &str = "test-plugin";
 pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, PLUGIN_NAME);
+pub const SHARED_TARGET_NAME: &str = "shared_target";
+
+#[cfg(target_os = "linux")]
+pub const LIB_EXT: &str = "so";
+
+#[cfg(target_os = "macos")]
+pub const LIB_EXT: &str = "dylib";
 
 pub enum BuildType {
     Release,
@@ -66,8 +74,6 @@ impl Cluster {
             Err(e) => panic!("failed to delete instance.log: {e}"),
         }
 
-        cleanup_dir(Path::new(PLUGIN_DIR));
-
         Cluster {
             run_handler: None,
             cmd_args: run_params,
@@ -79,19 +85,89 @@ impl Cluster {
     }
 }
 
-pub fn assert_plugin_build_artefacts(plugin_path: &Path, must_be_symlinks: bool) {
-    let lib_path = plugin_path.join("libtest_plugin.so");
-
-    if must_be_symlinks {
-        assert!(validate_symlink(&lib_path));
-    }
-
-    assert_path_existance(&plugin_path.join("manifest.yaml"), false);
-    assert_path_existance(&lib_path, must_be_symlinks);
-    assert_path_existance(&plugin_path.join("migrations"), false);
+pub fn init_plugin(plugin_name: &str) {
+    init_plugin_with_args(plugin_name, vec![]);
 }
 
-fn validate_symlink(symlink_path: &PathBuf) -> bool {
+pub fn init_plugin_workspace(plugin_name: &str) {
+    init_plugin_with_args(plugin_name, vec!["--workspace"]);
+}
+
+fn init_plugin_with_args(plugin_name: &str, plugin_args: Vec<&str>) {
+    let plugin_path = Path::new(TESTS_DIR).join(plugin_name);
+    cleanup_dir(&plugin_path);
+
+    // Create new plugin and link target folder to shared target folder
+    let mut args = vec!["plugin", "new", plugin_name];
+    args.extend(plugin_args);
+    exec_pike(args);
+
+    let shared_target_path = &Path::new(TESTS_DIR).join(SHARED_TARGET_NAME);
+    if !shared_target_path.exists() {
+        fs::create_dir(shared_target_path).unwrap();
+    }
+
+    let normalized_package_name = plugin_name.replace('-', "_");
+    let lib_name = format!("lib{normalized_package_name}.{LIB_EXT}");
+    let lib_d_name = format!("lib{normalized_package_name}.d");
+
+    // Save build artefacts from previous run
+    clean_dir_with_exceptions(shared_target_path, vec!["debug", "release"]);
+
+    let build_exceptions = vec![
+        "build",
+        "deps",
+        "examples",
+        "incremental",
+        ".fingerprint",
+        &lib_name,
+        &lib_d_name,
+    ];
+
+    clean_dir_with_exceptions(&shared_target_path.join("debug"), &build_exceptions);
+    clean_dir_with_exceptions(&shared_target_path.join("release"), &build_exceptions);
+
+    // Link target dir to shared target dir
+    // Destination path for symlink is relative to plugin folder
+    symlink(
+        Path::new("../").join(SHARED_TARGET_NAME),
+        plugin_path.join("target"),
+    )
+    .unwrap();
+}
+
+pub fn clean_dir_with_exceptions<I, S>(path: &PathBuf, exceptions: I)
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr> + std::fmt::Debug,
+{
+    if !path.exists() {
+        return;
+    }
+
+    let exception_set: std::collections::HashSet<_> = exceptions
+        .into_iter()
+        .map(|s| s.as_ref().to_os_string())
+        .collect();
+
+    for entry in fs::read_dir(path).unwrap() {
+        let entry = entry.unwrap();
+        let file_name = entry.file_name();
+
+        if exception_set.contains(&file_name) {
+            continue;
+        }
+
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            fs::remove_dir_all(entry_path).unwrap();
+        } else {
+            fs::remove_file(entry_path).unwrap();
+        }
+    }
+}
+
+pub fn validate_symlink(symlink_path: &PathBuf) -> bool {
     if let Ok(metadata) = fs::symlink_metadata(symlink_path) {
         if metadata.file_type().is_symlink() {
             if let Ok(resolved_path) = fs::read_link(symlink_path) {
@@ -103,7 +179,7 @@ fn validate_symlink(symlink_path: &PathBuf) -> bool {
     false
 }
 
-fn assert_path_existance(path: &Path, must_be_symlink: bool) {
+pub fn assert_path_existance(path: &Path, must_be_symlink: bool) {
     assert!(path.exists());
 
     let is_symlink = path
@@ -118,9 +194,9 @@ fn assert_path_existance(path: &Path, must_be_symlink: bool) {
     }
 }
 
-pub fn build_plugin(build_type: &BuildType, new_version: &str) {
+pub fn build_plugin(build_type: &BuildType, new_version: &str, plugin_path: &Path) {
     // Change plugin version
-    let cargo_toml_path = Path::new(PLUGIN_DIR).join("Cargo.toml");
+    let cargo_toml_path = plugin_path.join("Cargo.toml");
     let toml_content = fs::read_to_string(&cargo_toml_path).unwrap();
 
     let mut doc = toml_content
@@ -138,13 +214,13 @@ pub fn build_plugin(build_type: &BuildType, new_version: &str) {
     let output = match build_type {
         BuildType::Debug => Command::new("cargo")
             .arg("build")
-            .current_dir(PLUGIN_DIR)
+            .current_dir(plugin_path)
             .output()
             .unwrap(),
         BuildType::Release => Command::new("cargo")
             .arg("build")
             .arg("--release")
-            .current_dir(PLUGIN_DIR)
+            .current_dir(plugin_path)
             .output()
             .unwrap(),
     };
@@ -166,15 +242,13 @@ pub fn run_cluster(
     let mut cluster_handle = Cluster::new(cmd_args);
 
     // Create plugin from template
-    let mut args = vec!["plugin", "new", "test-plugin"];
-    args.extend(
-        cluster_handle
-            .cmd_args
-            .plugin_args
-            .iter()
-            .map(String::as_str),
-    );
-    exec_pike(args);
+    let mut args = cluster_handle
+        .cmd_args
+        .plugin_args
+        .iter()
+        .map(String::as_str);
+
+    init_plugin_with_args("test-plugin", args.collect());
 
     // Build the plugin
     Command::new("cargo")
