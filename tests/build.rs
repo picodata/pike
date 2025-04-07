@@ -1,6 +1,6 @@
 mod helpers;
 
-use helpers::{assert_path_existance, build_plugin, init_plugin, validate_symlink};
+use helpers::{assert_path_existance, build_plugin, init_plugin, validate_symlink, LIB_EXT};
 use std::path::Path;
 
 #[test]
@@ -31,7 +31,7 @@ fn test_cargo_build() {
 }
 
 fn assert_plugin_build_artefacts(plugin_path: &Path, must_be_symlinks: bool) {
-    let lib_path = plugin_path.join("libtest_plugin_build.so");
+    let lib_path = plugin_path.join(format!("libtest_plugin_build.{LIB_EXT}"));
 
     if must_be_symlinks {
         assert!(validate_symlink(&lib_path));

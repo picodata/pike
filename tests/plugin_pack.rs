@@ -1,6 +1,6 @@
 mod helpers;
 
-use helpers::{exec_pike, init_plugin, TESTS_DIR};
+use helpers::{exec_pike, init_plugin, LIB_EXT, TESTS_DIR};
 use std::{
     fs::{self, OpenOptions},
     io::Write,
@@ -34,7 +34,9 @@ fn test_cargo_pack() {
     );
 
     let base_file_path = plugin_path.join("test-pack-plugin").join("0.1.0");
-    assert!(base_file_path.join("libtest_pack_plugin.so").exists());
+    assert!(base_file_path
+        .join(format!("libtest_pack_plugin.{LIB_EXT}"))
+        .exists());
     assert!(base_file_path.join("manifest.yaml").exists());
     assert!(base_file_path.join("migrations").is_dir());
 }
@@ -71,7 +73,9 @@ fn test_cargo_pack_assets() {
         &unzipped_dir,
     );
 
-    assert!(base_file_path.join("libtest_pack_plugin.so").exists());
+    assert!(base_file_path
+        .join(format!("libtest_pack_plugin.{LIB_EXT}"))
+        .exists());
     assert!(base_file_path.join("manifest.yaml").exists());
     assert!(base_file_path.join("plugin_config.yaml").exists());
     let mig_file = base_file_path.join("migrations").join("0001_init.sql");
@@ -99,7 +103,9 @@ fn test_cargo_pack_assets() {
         &unzipped_dir,
     );
 
-    assert!(base_file_path.join("libtest_pack_plugin.so").exists());
+    assert!(base_file_path
+        .join(format!("libtest_pack_plugin.{LIB_EXT}"))
+        .exists());
     assert!(base_file_path.join("manifest.yaml").exists());
     assert!(base_file_path.join("plugin_config.yaml").exists());
     let mig_file = base_file_path.join("migrations").join("0001_init.sql");

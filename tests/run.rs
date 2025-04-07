@@ -2,7 +2,7 @@ mod helpers;
 
 use helpers::{
     cleanup_dir, exec_pike, get_picodata_table, init_plugin, init_plugin_workspace, run_cluster,
-    CmdArguments, PLUGIN_DIR, PLUGIN_NAME, TESTS_DIR,
+    CmdArguments, LIB_EXT, PLUGIN_DIR, PLUGIN_NAME, TESTS_DIR,
 };
 use pike::cluster::{run, MigrationContextVar, Plugin, RunParamsBuilder, Service, Tier, Topology};
 use std::collections::BTreeMap;
@@ -430,7 +430,9 @@ fn test_workspace_pipeline() {
         .join("tmp_workspace_plugin")
         .join("workspace_plugin")
         .join("0.1.0");
-    assert!(base_file_path.join("libworkspace_plugin.so").exists());
+    assert!(base_file_path
+        .join(format!("libworkspace_plugin.{LIB_EXT}"))
+        .exists());
     assert!(base_file_path.join("manifest.yaml").exists());
     assert!(base_file_path.join("migrations").is_dir());
 
@@ -446,7 +448,9 @@ fn test_workspace_pipeline() {
         .join("sub_plugin")
         .join("0.1.0");
 
-    assert!(base_file_path.join("libsub_plugin.so").exists());
+    assert!(base_file_path
+        .join(format!("libsub_plugin.{LIB_EXT}"))
+        .exists());
     assert!(base_file_path.join("manifest.yaml").exists());
     assert!(base_file_path.join("migrations").is_dir());
     assert!(base_file_path.join("plugin_config.yaml").exists());
