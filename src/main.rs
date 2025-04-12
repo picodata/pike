@@ -102,6 +102,9 @@ enum Command {
     Clean {
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
     },
     /// Helpers for work with plugins
     Plugin {
@@ -350,9 +353,15 @@ fn main() -> Result<()> {
                 .unwrap();
             commands::stop::cmd(&params).context("failed to execute \"stop\" command")?;
         }
-        Command::Clean { data_dir } => {
+        Command::Clean {
+            data_dir,
+            plugin_path,
+        } => {
+            is_required_path_exists(&plugin_path, &data_dir);
+
             run_child_killer();
-            commands::clean::cmd(&data_dir).context("failed to execute \"clean\" command")?;
+            commands::clean::cmd(&data_dir, &plugin_path)
+                .context("failed to execute \"clean\" command")?;
         }
         Command::Plugin { command } => {
             run_child_killer();
