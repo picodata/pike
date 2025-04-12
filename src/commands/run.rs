@@ -556,6 +556,8 @@ pub struct Params {
     disable_colors: bool,
     #[builder(default = "PathBuf::from(\"./\")")]
     plugin_path: PathBuf,
+    #[builder(default = "false")]
+    no_build: bool,
 }
 
 pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
@@ -564,20 +566,15 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
     let mut plugins_dir = None;
     if is_plugin_dir(&params.plugin_path) {
-        plugins_dir = if params.use_release {
-            cargo_build(
-                lib::BuildType::Release,
-                &params.target_dir,
-                &params.plugin_path,
-            )?;
-            Some(params.plugin_path.join(params.target_dir.join("release")))
+        let build_type = if params.use_release {
+            plugins_dir = Some(params.plugin_path.join(params.target_dir.join("release")));
+            lib::BuildType::Release
         } else {
-            cargo_build(
-                lib::BuildType::Debug,
-                &params.target_dir,
-                &params.plugin_path,
-            )?;
-            Some(params.plugin_path.join(params.target_dir.join("debug")))
+            plugins_dir = Some(params.plugin_path.join(params.target_dir.join("debug")));
+            lib::BuildType::Debug
+        };
+        if !params.no_build {
+            cargo_build(build_type, &params.target_dir, &params.plugin_path)?;
         };
 
         params
