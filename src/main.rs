@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use log::warn;
 use nix::unistd::{fork, ForkResult};
 use std::{
     env, fs,
@@ -297,9 +298,17 @@ fn main() -> Result<()> {
             if !daemon {
                 run_child_killer();
             }
-            let topology: commands::run::Topology = toml::from_str(
-                &fs::read_to_string(plugin_path.join(&topology))
-                    .context(format!("failed to read {}", &topology.display()))?,
+
+            // Parse topology toml file and validate the fields
+            // Emit warning upon meeting alien fields
+            let topology: commands::run::Topology = serde_ignored::deserialize(
+                toml::de::Deserializer::new(
+                    &fs::read_to_string(plugin_path.join(&topology))
+                        .context(format!("failed to read {}", &topology.display()))?,
+                ),
+                |path| {
+                    warn!("Unknown field {path}");
+                },
             )
             .context(format!(
                 "failed to parse .toml file of {}",

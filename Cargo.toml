@@ -38,6 +38,7 @@ rand = "0.9"
 derive_builder = "0.20"
 toml_edit = "0.22.24"
 regex = "1.11.1"
+serde_ignored = "0.1.11"
 
 [lib]
 name = "pike"
