@@ -57,6 +57,7 @@ enum Command {
     Run {
         #[arg(short, long, value_name = "TOPOLOGY", default_value = "topology.toml")]
         topology: PathBuf,
+        /// Path to data directory of the cluster
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
         /// Disable the automatic installation of plugins
@@ -92,6 +93,7 @@ enum Command {
     },
     /// Stop Picodata cluster
     Stop {
+        /// Path to data directory of the cluster
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
         /// Path to plugin folder
@@ -100,11 +102,26 @@ enum Command {
     },
     /// Remove all data files of previous cluster run
     Clean {
+        /// Path to data directory of the cluster
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
         /// Path to plugin folder
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
+    },
+    /// Enter specific instance by name
+    Enter {
+        /// Name of the Picodata instance to enter. Example value: `default_1_1`
+        instance_name: String,
+        /// Path to data directory of the cluster
+        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
+        data_dir: PathBuf,
+        /// Path to plugin folder
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
+        /// Specify path to picodata binary
+        #[arg(long, value_name = "BINARY_PATH", default_value = "picodata")]
+        picodata_path: PathBuf,
     },
     /// Helpers for work with plugins
     Plugin {
@@ -362,6 +379,18 @@ fn main() -> Result<()> {
             run_child_killer();
             commands::clean::cmd(&data_dir, &plugin_path)
                 .context("failed to execute \"clean\" command")?;
+        }
+        Command::Enter {
+            instance_name,
+            data_dir,
+            plugin_path,
+            picodata_path,
+        } => {
+            is_required_path_exists(&plugin_path, &data_dir);
+
+            run_child_killer();
+            commands::enter::cmd(&instance_name, &data_dir, &plugin_path, &picodata_path)
+                .context("failed to execute \"enter\" command")?;
         }
         Command::Plugin { command } => {
             run_child_killer();
