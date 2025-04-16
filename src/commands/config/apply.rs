@@ -54,7 +54,7 @@ fn apply_service_config(
         let value = serde_json::to_string(&value)
             .context(format!("failed to serialize the string with key {key}"))?;
         queries.push(format!(
-            r#"ALTER PLUGIN "{plugin_name}" {plugin_version} SET {service_name}.{key}='{value}';"#
+            r#"ALTER PLUGIN "{plugin_name}" {plugin_version} SET "{service_name}"."{key}"='{value}';"#
         ));
     }
 
