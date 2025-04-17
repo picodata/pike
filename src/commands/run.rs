@@ -253,6 +253,7 @@ pub struct PicodataInstance {
     disable_colors: bool,
     data_dir: PathBuf,
     log_file_path: PathBuf,
+    pg_port: u16,
 }
 
 impl PicodataInstance {
@@ -365,6 +366,7 @@ impl PicodataInstance {
             disable_colors: run_params.disable_colors,
             data_dir: instance_data_dir,
             log_file_path,
+            pg_port,
         };
 
         if !run_params.daemon {
@@ -384,6 +386,11 @@ impl PicodataInstance {
             .expect("Failed to execute command");
 
         Ok(str::from_utf8(&picodata_output.stdout)?.to_string())
+    }
+
+    #[allow(dead_code)]
+    fn pg_port(&self) -> &u16 {
+        &self.pg_port
     }
 
     fn compute_env_vars(
