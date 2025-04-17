@@ -389,7 +389,8 @@ impl PicodataInstance {
     }
 
     #[allow(dead_code)]
-    fn pg_port(&self) -> &u16 {
+    #[allow(clippy::must_use_candidate)]
+    pub fn pg_port(&self) -> &u16 {
         &self.pg_port
     }
 
