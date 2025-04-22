@@ -254,6 +254,7 @@ pub struct PicodataInstance {
     data_dir: PathBuf,
     log_file_path: PathBuf,
     pg_port: u16,
+    bin_port: u16,
 }
 
 impl PicodataInstance {
@@ -367,6 +368,7 @@ impl PicodataInstance {
             data_dir: instance_data_dir,
             log_file_path,
             pg_port,
+            bin_port,
         };
 
         if !run_params.daemon {
@@ -392,6 +394,12 @@ impl PicodataInstance {
     #[allow(clippy::must_use_candidate)]
     pub fn pg_port(&self) -> &u16 {
         &self.pg_port
+    }
+
+    #[allow(dead_code)]
+    #[allow(clippy::must_use_candidate)]
+    pub fn bin_port(&self) -> &u16 {
+        &self.bin_port
     }
 
     fn compute_env_vars(
