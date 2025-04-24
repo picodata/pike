@@ -245,8 +245,21 @@ fn is_plugin_dir(path: &Path) -> bool {
         .any(|dir| dir.join("manifest.yaml.template").exists())
 }
 
+#[allow(dead_code)]
+pub struct PicodataInstanceProperties<'a> {
+    pub bin_port: &'a u16,
+    pub pg_port: &'a u16,
+    pub http_port: &'a u16,
+    pub data_dir: &'a Path,
+    pub instance_name: &'a str,
+    pub tier: &'a str,
+    pub instance_id: &'a u16,
+}
+
 pub struct PicodataInstance {
     instance_name: String,
+    instance_id: u16,
+    tier: String,
     log_threads: Option<Vec<JoinHandle<()>>>,
     child: Child,
     daemon: bool,
@@ -255,6 +268,7 @@ pub struct PicodataInstance {
     log_file_path: PathBuf,
     pg_port: u16,
     bin_port: u16,
+    http_port: u16,
 }
 
 impl PicodataInstance {
@@ -361,6 +375,7 @@ impl PicodataInstance {
 
         let mut pico_instance = PicodataInstance {
             instance_name,
+            tier: tier.to_string(),
             log_threads: None,
             child,
             daemon: run_params.daemon,
@@ -369,6 +384,8 @@ impl PicodataInstance {
             log_file_path,
             pg_port,
             bin_port,
+            http_port,
+            instance_id,
         };
 
         if !run_params.daemon {
@@ -392,14 +409,36 @@ impl PicodataInstance {
 
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
+    #[deprecated(
+        since = "2.3.2",
+        note = "Use properties() function to get all info about instance at once"
+    )]
     pub fn pg_port(&self) -> &u16 {
         &self.pg_port
     }
 
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
+    #[deprecated(
+        since = "2.3.2",
+        note = "Use properties() function to get all info about instance at once"
+    )]
     pub fn bin_port(&self) -> &u16 {
         &self.bin_port
+    }
+
+    #[allow(dead_code)]
+    #[allow(clippy::must_use_candidate)]
+    pub fn properties(&self) -> PicodataInstanceProperties<'_> {
+        PicodataInstanceProperties {
+            bin_port: &self.bin_port,
+            pg_port: &self.pg_port,
+            http_port: &self.http_port,
+            data_dir: &self.data_dir,
+            instance_name: &self.instance_name,
+            tier: &self.tier,
+            instance_id: &self.instance_id,
+        }
     }
 
     fn compute_env_vars(

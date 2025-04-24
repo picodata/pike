@@ -249,6 +249,67 @@ fn test_topology_struct_run_no_plugin() {
 }
 
 #[test]
+fn test_picodata_instance_interaction() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+
+    init_plugin(PLUGIN_NAME);
+
+    let plugins = BTreeMap::from([(
+        PLUGIN_NAME.to_string(),
+        Plugin {
+            migration_context: vec![MigrationContextVar {
+                name: "name".to_string(),
+                value: "value".to_string(),
+            }],
+            services: BTreeMap::from([(
+                "main".to_string(),
+                Service {
+                    tiers: vec!["default".to_string()],
+                },
+            )]),
+            ..Default::default()
+        },
+    )]);
+
+    let tiers = BTreeMap::from([(
+        "default".to_string(),
+        Tier {
+            replicasets: 2,
+            replication_factor: 2,
+        },
+    )]);
+
+    let topology = Topology {
+        tiers,
+        plugins,
+        ..Default::default()
+    };
+
+    let params = RunParamsBuilder::default()
+        .topology(topology)
+        .daemon(true)
+        .plugin_path(plugin_path.into())
+        .build()
+        .unwrap();
+
+    let pico_instances = run(&params).unwrap();
+    let properties = pico_instances.first().unwrap().properties();
+
+    assert_eq!(properties.bin_port, &3001);
+    assert_eq!(properties.http_port, &8001);
+    assert_eq!(properties.pg_port, &5433);
+    assert_eq!(properties.instance_id, &1);
+    assert_eq!(properties.tier, "default");
+    assert_eq!(properties.instance_name, "default_1_1");
+    assert_eq!(
+        properties.data_dir.to_str().unwrap(),
+        "./tests/tmp/test-plugin/./tmp/cluster/i1"
+    );
+
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+}
+
+#[test]
 fn test_quickstart_pipeline() {
     let quickstart_path = Path::new(TESTS_DIR).join("quickstart");
 
