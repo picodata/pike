@@ -2,17 +2,27 @@ use std::collections::HashMap;
 
 use crate::config;
 
-use anyhow;
 use once_cell::sync::Lazy;
 use picodata_plugin::plugin::prelude::*;
+use picodata_plugin::system::tarantool::log as t_log;
 use shors::transport::{
+    Context,
     http::{
+        Request, Response,
         route::{Builder, Route},
         server::Server,
-        Request, Response,
     },
-    Context,
 };
+use std::sync::LazyLock;
+
+static LOGGER: LazyLock<t_log::TarantoolLogger> = LazyLock::new(t_log::TarantoolLogger::default);
+
+fn init_logger() {
+    log::set_logger(&*LOGGER).map_or_else(
+        |e| println!("failed to setup logger: {e:?}"),
+        |()| log::set_max_level(log::LevelFilter::Trace),
+    );
+}
 
 thread_local! {
     static HTTP_SERVER: Lazy<Server> = Lazy::new(Server::new);
@@ -46,6 +56,9 @@ impl Service for PluginService {
         _ = context;
         _ = config.unwrap_or_default();
 
+        init_logger();
+        log::warn!("Registering HTTP handle /hello");
+
         HTTP_SERVER.with(|srv| {
             routes()
                 .into_iter()
@@ -74,28 +87,7 @@ impl Service for PluginService {
 pub fn routes() -> Vec<Route<anyhow::Error>> {
     let hello_route = Builder::new().with_method("GET").with_path("/hello").build(
         |_: &mut Context, _: Request| -> anyhow::Result<_> {
-            let message: &str = r"
-     _________________________________
-    / Hello there! I see that you've  \
-    | successfully deployed picodata  |
-    | app using pike. Congrats! Type  |
-    \ cargo pike --help for more tips /
-     ---------------------------------
-                    |
-                    |
-                   ,|.
-                  ,\|/.
-                ,' .V. `.
-               / .     . \
-              /_`       '_\
-             ,' .:     ;, `.
-             |@)|  . .  |(@|
-        ,-._ `._';  .  :`_,' _,-.
-       '--  `-\ /,-===-.\ /-'  --`
-      (----  _|  ||___||  |_  ----)
-       `._,-'  \  `-.-'  /  `-._,'
-                `-.___,-'
-     ";
+            let message: &str = "Hello there! This is pike. Use cargo pike --help for more tips.";
             Ok(Response {
                 status: 200,
                 headers: HashMap::from([(
