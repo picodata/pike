@@ -7,6 +7,7 @@ pub mod cluster {
 
     pub use crate::commands::run::MigrationContextVar;
     pub use crate::commands::run::PicodataInstance;
+    pub use crate::commands::run::PicodataInstanceProperties;
     pub use crate::commands::run::Plugin;
     pub use crate::commands::run::Service;
     pub use crate::commands::run::Tier;
