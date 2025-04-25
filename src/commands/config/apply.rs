@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use derive_builder::Builder;
 use log::info;
 use serde::Deserialize;
@@ -84,9 +84,15 @@ fn apply_service_config(
                 .context("failed to push queries into picodata admin")?;
         }
 
-        picodata_admin
+        let exit_status = picodata_admin
             .wait()
-            .context("failed to wait for picodata admin")?;
+            .context("failed to wait for picodata admin")?
+            .code()
+            .unwrap();
+
+        if exit_status == 1 {
+            bail!("failed to execute picodata query {query}");
+        }
 
         let outputs: [Box<dyn Read + Send>; 2] = [
             Box::new(picodata_admin.stdout.unwrap()),

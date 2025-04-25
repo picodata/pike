@@ -148,20 +148,36 @@ fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &PathBuf)
                 .context("failed to send plugin installation queries")?;
         }
 
-        picodata_admin
+        let exit_code = picodata_admin
             .wait()
-            .context("failed to wait for picodata admin")?;
+            .context("failed to wait for picodata admin")?
+            .code()
+            .unwrap();
 
         let outputs: [Box<dyn Read + Send>; 2] = [
             Box::new(picodata_admin.stdout.unwrap()),
             Box::new(picodata_admin.stderr.unwrap()),
         ];
+
+        let mut ignore_errors = false;
         for output in outputs {
             let reader = BufReader::new(output);
             for line in reader.lines() {
                 let line = line.expect("failed to read picodata admin output");
                 log::info!("picodata admin: {line}");
+
+                // Ignore some types of error messages like re-enabling the plugin
+                let err_messages_to_ignore: Vec<&str> = vec!["already enabled", "already exists"];
+                for err_message in err_messages_to_ignore {
+                    if line.contains(err_message) {
+                        ignore_errors = true;
+                    }
+                }
             }
+        }
+
+        if exit_code == 1 && !ignore_errors {
+            bail!("failed to execute picodata query {query}");
         }
     }
 
@@ -256,6 +272,7 @@ pub struct PicodataInstanceProperties<'a> {
     pub instance_id: &'a u16,
 }
 
+#[derive(Debug)]
 pub struct PicodataInstance {
     instance_name: String,
     instance_id: u16,

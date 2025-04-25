@@ -6,6 +6,8 @@ use helpers::{
 };
 use pike::cluster::{run, MigrationContextVar, Plugin, RunParamsBuilder, Service, Tier, Topology};
 use std::collections::BTreeMap;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::process::Command;
 use std::{
     fs::{self},
@@ -151,6 +153,58 @@ fn test_topology_struct_run() {
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
+}
+
+#[test]
+fn test_cluster_failure() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+
+    init_plugin(PLUGIN_NAME);
+
+    // Write trash inside migraions file
+    let mut file = OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(plugin_path.join("migrations/0001_init.sql"))
+        .unwrap();
+
+    writeln!(file, "Scooby do be do, where are you?").unwrap();
+    writeln!(file, "We got some work to do nooow!").unwrap();
+
+    let tiers = BTreeMap::from([(
+        "default".to_string(),
+        Tier {
+            replicasets: 2,
+            replication_factor: 2,
+        },
+    )]);
+    let plugins = BTreeMap::from([(PLUGIN_NAME.to_string(), Plugin::default())]);
+
+    let topology = Topology {
+        tiers,
+        plugins,
+        ..Default::default()
+    };
+
+    let params = RunParamsBuilder::default()
+        .topology(topology)
+        .daemon(true)
+        .plugin_path(plugin_path.into())
+        .build()
+        .unwrap();
+
+    let cluster_status = run(&params);
+    assert!(cluster_status.is_err(), "Expected migration error");
+
+    // Unwrap anyhow error chain and search for the error, containing MIGRATE keyword
+    let err = cluster_status.unwrap_err();
+    let contains_migration_error = err
+        .chain()
+        .next()
+        .and_then(|e| e.source())
+        .is_some_and(|src| src.to_string().contains("MIGRATE"));
+
+    assert!(contains_migration_error);
 }
 
 #[test]
