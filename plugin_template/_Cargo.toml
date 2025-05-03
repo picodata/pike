@@ -10,9 +10,7 @@ picodata-plugin = "25.1.1"
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
 anyhow = "1.0.98"
-once_cell = "1.21.3"
 rmpv = "1.0.0"
-tokio = "1.29.1"
 shors = "0.12.3"
 rmp-serde = "1.0.0"
 

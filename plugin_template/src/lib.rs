@@ -1,4 +1,6 @@
 mod config;
+mod handlers;
+mod models;
 mod service;
 
 use picodata_plugin::plugin::{interface::ServiceRegistry, prelude::service_registrar};
