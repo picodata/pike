@@ -36,7 +36,7 @@ nix = "0.29.0"
 colored = "3"
 rand = "0.9"
 derive_builder = "0.20"
-toml_edit = "0.22.24"
+toml_edit = "0.22.26"
 regex = "1.11.1"
 serde_ignored = "0.1.11"
 
@@ -49,6 +49,6 @@ name = "cargo-pike"
 path = "src/main.rs"
 
 [dev-dependencies]
-toml_edit = "0.22.24"
+toml_edit = "0.22.26"
 constcat = "0.6.0"
 rstest = "0.25.0"
