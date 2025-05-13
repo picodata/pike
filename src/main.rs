@@ -16,7 +16,7 @@ const CK_CHECK_PARRENT_INTERVAL_SEC: u64 = 3;
 
 // Translation of work Pike can also mean Щука.
 const CARING_PIKE: &str = r"
-  ________________________________________
+  _______________________________________
 / It seems to me, that you are trying to \
 | run pike outside Plugin directory, try |
 | using --plugin-dir flag or move into   |
