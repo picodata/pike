@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_yaml::{Mapping, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -21,6 +21,26 @@ use std::time::{Duration, Instant};
 use std::{fs, path::PathBuf};
 
 use crate::commands::lib;
+
+const BAFFLED_WHALE: &str = r"
+  __________________________________________________________
+/ Iiiiiiiiit seeeeeems Piiiiicooooodaaaaataaaaaa iiiiiiiiis \
+| noooooooot iiiiiinstaaaaaalleeeeed oooooon yyyyyooooouuur |
+\ syyyyyyysteeeeeeem.                                       /
+  ----------------------------------------------------------
+  |
+  |
+  |     .-------------'```'----....,,__                        _,
+  |    |                               `'`'`'`'-.,.__        .'(
+  |    |                                             `'--._.'   )
+  |    |                                                   `'-.<
+  |    \               .-'`'-.                            -.    `\
+   \    \               -.o_.     _                     _,-'`\    |
+    \_   ``````''--.._.-=-._    .'  \            _,,--'`      `-._(
+          (^^^^^^^^`___    '-. |    \  __,,..--'                 `
+           `````````   `'--..___\    |`
+                                 `-.,'
+ ";
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Tier {
@@ -416,10 +436,16 @@ impl PicodataInstance {
     }
 
     fn get_picodata_version(picodata_path: &PathBuf) -> Result<String> {
-        let picodata_output = Command::new(picodata_path)
-            .arg("--version")
-            .output()
-            .expect("Failed to execute command");
+        let picodata_output = Command::new(picodata_path).arg("--version").output();
+
+        let picodata_output = match picodata_output {
+            Ok(o) => o,
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                println!("{BAFFLED_WHALE}");
+                bail!("Picodata not found")
+            }
+            Err(err) => bail!("failed to get picodata version ({err})"),
+        };
 
         Ok(str::from_utf8(&picodata_output.stdout)?.to_string())
     }
