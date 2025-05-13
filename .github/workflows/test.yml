@@ -30,6 +30,8 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
       - name: Install toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -59,7 +61,7 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Install system dependencies
-        run: dnf install -y gcc git make
+        run: dnf install -y gcc git make openssl-devel pkgconfig
       - name: Install toolchain
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
