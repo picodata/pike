@@ -2,8 +2,8 @@ name: {{ project_name }}
 description: A plugin for picodata
 version: {{ "{{ version }}" }}
 services:
-  - name: main
-    description: default service
+  - name: example_service
+    description: example service
     default_configuration:
       value: example
 migration:

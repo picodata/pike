@@ -30,20 +30,17 @@ async fn test_rpc_handle() {
         name: "Dodo".to_string(),
     };
 
-    let tnt_response = cluster
+    let response = cluster
         .main()
         .execute_rpc::<User, ExampleResponse>(
             env!("CARGO_PKG_NAME"),
             "/greetings_rpc",
-            "main",
+            "example_service",
             env!("CARGO_PKG_VERSION"),
             &user_to_send,
         )
         .await
         .unwrap();
 
-    assert_eq!(
-        tnt_response.rpc_hello_response,
-        "Hello Dodo, long time no see."
-    );
+    assert_eq!(response.rpc_hello_response, "Hello Dodo, long time no see.");
 }

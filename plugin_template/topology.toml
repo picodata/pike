@@ -7,5 +7,5 @@ migration_context = [
     { name = "example_name", value = "example_value" },
 ]
 
-[plugin.{{ project_name }}.service.main]
+[plugin.{{ project_name }}.service.example_service]
 tiers = ["default"]

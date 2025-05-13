@@ -104,7 +104,7 @@ fn test_topology_struct_run() {
                 value: "value".to_string(),
             }],
             services: BTreeMap::from([(
-                "main".to_string(),
+                "example_service".to_string(),
                 Service {
                     tiers: vec!["default".to_string()],
                 },
@@ -316,7 +316,7 @@ fn test_picodata_instance_interaction() {
                 value: "value".to_string(),
             }],
             services: BTreeMap::from([(
-                "main".to_string(),
+                "example_service".to_string(),
                 Service {
                     tiers: vec!["default".to_string()],
                 },
@@ -670,11 +670,11 @@ fn test_run_with_several_tiers() {
         }
 
         // example value:
-        // +-------------+---------+----------+---------+-----------------------+------------------------------+
-        // | name        | enabled | services | version | description           | migration_list               |
-        // +===================================================================================================+
-        // | test-plugin | true    | ["main"] | 0.1.0   | A plugin for picodata | ["migrations/0001_init.sql"] |
-        // +-------------+---------+----------+---------+-----------------------+------------------------------+
+        // +-------------+---------+---------------------+---------+-----------------------+------------------------------+
+        // | name        | enabled | services            | version | description           | migration_list               |
+        // +==============================================================================================================+
+        // | test-plugin | true    | ["example_service"] | 0.1.0   | A plugin for picodata | ["migrations/0001_init.sql"] |
+        // +-------------+---------+---------------------+---------+-----------------------+------------------------------+
         let pico_plugin =
             get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_plugin");
         if !pico_plugin.contains("true") {
@@ -683,11 +683,11 @@ fn test_run_with_several_tiers() {
         }
 
         // example value:
-        // +-------------+------+---------+---------------------+-----------------+
-        // | plugin_name | name | version | tiers               | description     |
-        // +======================================================================+
-        // | test-plugin | main | 0.1.0   | ["second", "third"] | default service |
-        // +-------------+------+---------+---------------------+-----------------+
+        // +-------------+-----------------+---------+---------------------+-----------------+
+        // | plugin_name | name            | version | tiers               | description     |
+        // +=================================================================================+
+        // | test-plugin | example_service | 0.1.0   | ["second", "third"] | default service |
+        // +-------------+-----------------+---------+---------------------+-----------------+
         let pico_service =
             get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_service");
 

@@ -20,16 +20,10 @@ thread_local! {
     static HTTP_SERVER: LazyLock<Server> = LazyLock::new(Server::new);
 }
 
-#[derive(Debug)]
-pub struct PluginService {}
+#[derive(Debug, Default)]
+pub struct ExampleService {}
 
-impl Default for PluginService {
-    fn default() -> Self {
-        Self {}
-    }
-}
-
-impl Service for PluginService {
+impl Service for ExampleService {
     type Config = config::ExampleService;
 
     fn on_config_change(

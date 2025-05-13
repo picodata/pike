@@ -44,7 +44,7 @@ const TOTAL_INSTANCES: i32 = 4;
     ApplyParamsBuilder::default()
         .plugin_path(PathBuf::from(PLUGIN_DIR))
         .config_map(HashMap::from([(
-            "main".to_string(),
+            "example_service".to_string(),
             [(
                 "value".to_string(),
                 serde_yaml::to_value("changed").unwrap(),

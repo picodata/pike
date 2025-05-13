@@ -10,5 +10,5 @@ replication_factor = 1
 replicasets = 1
 replication_factor = 2
 
-[plugin.test-plugin.service.main]
+[plugin.test-plugin.service.example_service]
 tiers = ["second", "third"]

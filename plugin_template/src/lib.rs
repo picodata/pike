@@ -8,11 +8,11 @@ use picodata_plugin::plugin::{interface::ServiceRegistry, prelude::service_regis
 #[service_registrar]
 pub fn service_registrar(reg: &mut ServiceRegistry) {
     reg.add(
-        "main",
+        "example_service",
         env!("CARGO_PKG_VERSION"),
-        service::PluginService::default,
+        service::ExampleService::default,
     );
-    reg.add_config_validator::<service::PluginService>("main", env!("CARGO_PKG_VERSION"), |cfg| {
+    reg.add_config_validator::<service::ExampleService>("example_service", env!("CARGO_PKG_VERSION"), |cfg| {
         if let Some(cfg_value) = cfg.value {
             if cfg_value == "tarantool" {
                 return Err("Please call a pest control service!".into());
