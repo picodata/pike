@@ -13,7 +13,6 @@ pub fn service_registrar(reg: &mut ServiceRegistry) {
         service::PluginService::default,
     );
     reg.add_config_validator::<service::PluginService>("main", env!("CARGO_PKG_VERSION"), |cfg| {
-        let cfg = cfg.unwrap_or_default();
         if let Some(cfg_value) = cfg.value {
             if cfg_value == "tarantool" {
                 return Err("Please call a pest control service!".into());

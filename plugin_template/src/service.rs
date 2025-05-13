@@ -30,7 +30,7 @@ impl Default for PluginService {
 }
 
 impl Service for PluginService {
-    type Config = Option<config::Config>;
+    type Config = config::ExampleService;
 
     fn on_config_change(
         &mut self,
@@ -39,15 +39,15 @@ impl Service for PluginService {
         old_config: Self::Config,
     ) -> CallbackResult<()> {
         _ = ctx;
-        _ = new_config.unwrap_or_default();
-        _ = old_config.unwrap_or_default();
+        _ = new_config;
+        _ = old_config;
 
         Ok(())
     }
 
     fn on_start(&mut self, context: &PicoContext, config: Self::Config) -> CallbackResult<()> {
         _ = context;
-        _ = config.unwrap_or_default();
+        _ = config;
 
         init_logger();
 
