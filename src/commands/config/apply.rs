@@ -10,6 +10,40 @@ use std::{
     process::{self, Command, Stdio},
 };
 
+/// Mapping of plugin service names to their properties specified in
+/// [plugin configuration](https://github.com/picodata/pike?tab=readme-ov-file#config-apply).
+///
+/// ### Example:
+///
+/// Assume plugin configuration YAML has the following content:
+///
+/// **`plugin_config.yaml`:**
+/// ```yaml
+/// service_name:
+///   http_server:
+///     url: "www.example.com"
+/// ```
+/// Mapping for such config is supposed to look like:
+///
+/// ```rust,no_run
+/// use std::collections::HashMap;
+///
+/// let plugin_config = HashMap::from([(
+///     // Name of the service
+///     "service_name".to_string(),
+///
+///     // Mapping of properties corresponding to the service
+///     HashMap::from([(
+///         "http_server".to_string(),
+///         serde_yaml::to_value(HashMap::from([(
+///             "url".to_string(),
+///             // URL is overridden for testing.
+///             "localhost:29092".to_string(),
+///         )]))
+///         .unwrap(),
+///     )]),
+/// )]);
+/// ```
 pub type ConfigMap = HashMap<String, HashMap<String, serde_yaml::Value>>;
 
 const DEFAULT_PLUGIN_CONFIG_PATH: &str = "plugin_config.yaml";
