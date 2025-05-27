@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](http://keepachangelog.com/) and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## [UNRELEASED]
+
+### Changed
+
+- Bump Picodata version from 25.1.2 to 25.2.1
+
 ## [2.4.4]
 
 ### Changed
