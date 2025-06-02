@@ -124,10 +124,6 @@ fn apply_service_config(
             .code()
             .unwrap();
 
-        if exit_status == 1 {
-            bail!("failed to execute picodata query {query}");
-        }
-
         let outputs: [Box<dyn Read + Send>; 2] = [
             Box::new(picodata_admin.stdout.unwrap()),
             Box::new(picodata_admin.stderr.unwrap()),
@@ -138,6 +134,10 @@ fn apply_service_config(
                 let line = line.expect("failed to read picodata admin output");
                 log::info!("picodata admin: {line}");
             }
+        }
+
+        if exit_status == 1 {
+            bail!("failed to execute picodata query {query}");
         }
     }
 

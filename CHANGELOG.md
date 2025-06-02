@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Fixed
+
+- Fix log output in apply config command
+
 ## [2.4.5]
 
 ### Changed
