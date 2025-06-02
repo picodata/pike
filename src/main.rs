@@ -38,6 +38,24 @@ const CARING_PIKE: &str = r"
                 `-.___,-'
  ";
 
+const HUNGRY_SHARK: &str = r"
+ _________________________________
+/     Nothing to clean inside     \
+| given directory. Please provide |
+\    high quality food for me.    /
+ ---------------------------------
+       \  _________         .    .
+        (..       \_    ,  |\  /|
+         \       O  \  /|  \ \/ /
+          \______    \/ |   \  /
+             vvvv\    \ |   /  |
+             \^^^^  ==   \_/   |
+              `\_   ===    \.  |
+              / /\_   \ /      |
+              |/   \_  \|      /
+                     \________/
+";
+
 /// A helper utility to work with Picodata plugins.
 #[derive(Parser)]
 #[command(
@@ -248,15 +266,21 @@ fn run_child_killer() {
     process::exit(0)
 }
 
-fn is_required_path_exists(plugin_dir: &Path, required_path: &Path) {
+fn is_required_path_exists(
+    plugin_dir: &Path,
+    required_path: &Path,
+    error_message: &str,
+    exit_code: i32,
+) {
     if required_path.exists() {
         return;
     }
     if plugin_dir.join(required_path).exists() {
         return;
     }
-    println!("{CARING_PIKE}");
-    process::exit(1);
+
+    println!("{error_message}");
+    process::exit(exit_code);
 }
 
 // Add new member to Cargo.toml, additionally checks proper
@@ -317,7 +341,7 @@ fn main() -> Result<()> {
             plugin_path,
             no_build,
         } => {
-            is_required_path_exists(&plugin_path, &topology);
+            is_required_path_exists(&plugin_path, &topology, CARING_PIKE, 1);
 
             if !daemon {
                 run_child_killer();
@@ -360,7 +384,7 @@ fn main() -> Result<()> {
             data_dir,
             plugin_path,
         } => {
-            is_required_path_exists(&plugin_path, &data_dir);
+            is_required_path_exists(&plugin_path, &data_dir, CARING_PIKE, 1);
 
             run_child_killer();
             let params = commands::stop::ParamsBuilder::default()
@@ -374,7 +398,7 @@ fn main() -> Result<()> {
             data_dir,
             plugin_path,
         } => {
-            is_required_path_exists(&plugin_path, &data_dir);
+            is_required_path_exists(&plugin_path, &data_dir, HUNGRY_SHARK, 0);
 
             run_child_killer();
             commands::clean::cmd(&data_dir, &plugin_path)
@@ -386,7 +410,7 @@ fn main() -> Result<()> {
             plugin_path,
             picodata_path,
         } => {
-            is_required_path_exists(&plugin_path, &data_dir);
+            is_required_path_exists(&plugin_path, &data_dir, CARING_PIKE, 1);
 
             run_child_killer();
             commands::enter::cmd(&instance_name, &data_dir, &plugin_path, &picodata_path)
@@ -400,7 +424,7 @@ fn main() -> Result<()> {
                     target_dir,
                     plugin_path,
                 } => {
-                    is_required_path_exists(&plugin_path, Path::new("Cargo.toml"));
+                    is_required_path_exists(&plugin_path, Path::new("Cargo.toml"), CARING_PIKE, 1);
 
                     commands::plugin::pack::cmd(debug, &target_dir, &plugin_path)
                         .context("failed to execute \"pack\" command")?;
@@ -410,7 +434,7 @@ fn main() -> Result<()> {
                     target_dir,
                     plugin_path,
                 } => {
-                    is_required_path_exists(&plugin_path, Path::new("Cargo.toml"));
+                    is_required_path_exists(&plugin_path, Path::new("Cargo.toml"), CARING_PIKE, 1);
 
                     commands::plugin::build::cmd(release, &target_dir, &plugin_path)
                         .context("failed to execute \"build\" command")?;
@@ -427,7 +451,7 @@ fn main() -> Result<()> {
                 } => commands::plugin::new::cmd(None, without_git, workspace)
                     .context("failed to execute \"init\" command")?,
                 Plugin::Add { path, plugin_path } => {
-                    is_required_path_exists(&plugin_path, Path::new("Cargo.toml"));
+                    is_required_path_exists(&plugin_path, Path::new("Cargo.toml"), CARING_PIKE, 1);
 
                     modify_workspace(path.file_name().unwrap().to_str().unwrap(), &plugin_path)
                         .context("failed to add new plugin to workspace")?;
