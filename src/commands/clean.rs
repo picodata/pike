@@ -19,7 +19,7 @@ pub fn cmd(data_dir: &Path, plugin_path: &Path) -> Result<()> {
             plugin_data_dir.display()
         ))?;
         info!(
-            "Successfully removed : {}",
+            "Successfully cleaned: {}",
             plugin_data_dir.to_string_lossy()
         );
     } else {

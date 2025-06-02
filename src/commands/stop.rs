@@ -1,10 +1,13 @@
 use anyhow::{bail, Context, Result};
+use colored::Colorize;
 use derive_builder::Builder;
 use log::info;
 use std::fs::{self};
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use crate::commands::lib::get_active_socket_path;
 
 #[derive(Debug, Builder)]
 pub struct Params {
@@ -32,20 +35,18 @@ pub fn cmd(params: &Params) -> Result<()> {
     for current_dir in dirs {
         let instance_dir = current_dir?.path();
 
+        // To get the actual instance name, we look
+        // only on simlinks
+        if !fs::symlink_metadata(&instance_dir)?.is_symlink() {
+            continue;
+        }
+
         if !instance_dir.is_dir() {
             bail!("{} is not a directory", instance_dir.to_string_lossy());
         }
-        let Some(folder_name) = instance_dir.file_name() else {
+        let Some(link_name) = instance_dir.file_name() else {
             continue;
         };
-
-        if !folder_name
-            .to_str()
-            .context("invalid folder name")?
-            .starts_with('i')
-        {
-            continue;
-        }
 
         let pid_file_path = instance_dir.join("pid");
         if !pid_file_path.exists() {
@@ -57,13 +58,29 @@ pub fn cmd(params: &Params) -> Result<()> {
 
         let pid = read_pid_from_file(&pid_file_path).context("failed to read the PID file")?;
 
-        info!(
-            "stopping picodata instance: {}",
-            folder_name.to_string_lossy()
-        );
-        if let Err(e) = kill_process_by_pid(pid) {
-            log::debug!("{e}");
+        if get_active_socket_path(
+            &params.data_dir,
+            &params.plugin_path,
+            link_name.to_str().unwrap(),
+        )
+        .is_none()
+        {
+            info!(
+                "stopping picodata instance: {} - {}",
+                link_name.to_string_lossy(),
+                "SKIPPED".yellow()
+            );
+            continue;
         }
+
+        if let Err(e) = kill_process_by_pid(pid) {
+            bail!("failed to stop picodata instance with PID {pid}. Error: {e}");
+        }
+        info!(
+            "stopping picodata instance: {} - {}",
+            link_name.to_string_lossy(),
+            "OK".green()
+        );
     }
 
     Ok(())
