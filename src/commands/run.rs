@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 use std::{fs, path::PathBuf};
 
 use crate::commands::lib;
+use crate::commands::lib::check_running_instances;
 
 const BAFFLED_WHALE: &str = r"
   __________________________________________________________
@@ -649,6 +650,11 @@ pub struct Params {
 }
 
 pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
+    let cur_running_instance = check_running_instances(&params.data_dir, &params.plugin_path)?;
+    if let Some(sock_path) = cur_running_instance {
+        bail!("cluster has already started, can connect via {sock_path}");
+    }
+
     let mut params = params.clone();
     params.data_dir = params.plugin_path.join(&params.data_dir);
 

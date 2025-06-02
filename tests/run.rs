@@ -156,6 +156,84 @@ fn test_topology_struct_run() {
 }
 
 #[test]
+fn test_multiple_run_attempt() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+
+    init_plugin(PLUGIN_NAME);
+
+    let plugins = BTreeMap::from([(
+        PLUGIN_NAME.to_string(),
+        Plugin {
+            migration_context: vec![MigrationContextVar {
+                name: "name".to_string(),
+                value: "value".to_string(),
+            }],
+            services: BTreeMap::from([(
+                "example_service".to_string(),
+                Service {
+                    tiers: vec!["default".to_string()],
+                },
+            )]),
+            ..Default::default()
+        },
+    )]);
+
+    let tiers = BTreeMap::from([(
+        "default".to_string(),
+        Tier {
+            replicasets: 2,
+            replication_factor: 2,
+        },
+    )]);
+
+    let topology = Topology {
+        tiers,
+        plugins,
+        ..Default::default()
+    };
+
+    let params = RunParamsBuilder::default()
+        .topology(topology)
+        .daemon(true)
+        .plugin_path(plugin_path.into())
+        .build()
+        .unwrap();
+
+    run(&params).unwrap();
+
+    let start = Instant::now();
+    let mut cluster_started = false;
+    while Instant::now().duration_since(start) < Duration::from_secs(60) {
+        let pico_instance = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_instance");
+        let pico_plugin = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_plugin");
+
+        // Compare with 8, because table gives current state and target state
+        // both of them should be online
+        if pico_instance.matches("Online").count() == 8 && pico_plugin.contains("true") {
+            cluster_started = true;
+            break;
+        }
+    }
+
+    // Ensure that we stop picodata cluster before panicing
+    let res = run(&params);
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+
+    assert!(
+        res.is_err(),
+        "Expected to fail while trying to run multiple clusters"
+    );
+
+    let err_str = res.unwrap_err().to_string();
+    assert!(
+        err_str.contains("cluster has already started, can connect via"),
+        "Wrong error message while trying to run multiple clusters: {err_str}"
+    );
+
+    assert!(cluster_started);
+}
+
+#[test]
 fn test_cluster_failure() {
     let plugin_path = Path::new(PLUGIN_DIR);
 
