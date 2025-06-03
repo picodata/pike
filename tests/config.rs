@@ -82,6 +82,56 @@ fn test_config_apply(#[case] params_builder: ApplyParamsBuilder) {
 }
 
 #[test]
+fn test_corrupted_config() {
+    let _cluster_handle = run_cluster(
+        Duration::from_secs(120),
+        TOTAL_INSTANCES,
+        CmdArguments::default(),
+    )
+    .unwrap();
+
+    let _ = fs::remove_file(Path::new(PLUGIN_DIR).join("plugin_config.yaml"));
+    fs::copy(
+        Path::new(TESTS_DIR).join("../assets/corrupted_config.yaml"),
+        Path::new(PLUGIN_DIR).join("plugin_config.yaml"),
+    )
+    .unwrap();
+
+    let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let mut apply_wrong_config_cmd = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
+        .args(["pike", "config", "apply"])
+        .current_dir(PLUGIN_DIR)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to start command");
+    let status = apply_wrong_config_cmd.wait().unwrap();
+
+    assert!(
+        status.code().unwrap() == 1,
+        "expected the proccess to finish with code 1"
+    );
+
+    let mut found_err_msg = false;
+    if let Some(stderr) = apply_wrong_config_cmd.stderr.take() {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            if line
+                .unwrap()
+                .contains("could not find expected ':' at line")
+            {
+                found_err_msg = true;
+            }
+        }
+    }
+
+    assert!(
+        found_err_msg,
+        "expected to recieve error message when passing malformed config"
+    );
+}
+
+#[test]
 #[allow(clippy::too_many_lines)]
 fn test_workspace_config_apply() {
     let tests_dir = Path::new(TESTS_DIR);
