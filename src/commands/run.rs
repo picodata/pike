@@ -722,7 +722,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
                         error!("failed to kill picodata instances: {e:#}");
                     });
                 }
-                return Err(e.context("failed to enable plugins"));
+                bail!("failed to enable plugins: {}", e.to_string());
             }
         }
     };
