@@ -311,6 +311,7 @@ pub struct PicodataInstance {
 
 impl PicodataInstance {
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
     fn new(
         instance_id: u16,
         bin_port: u16,
@@ -323,6 +324,7 @@ impl PicodataInstance {
         env_templates: &BTreeMap<String, String>,
         tiers_config: &str,
         picodata_path: &Path,
+        config_path: &Path,
     ) -> Result<Self> {
         let mut instance_name = format!("i{instance_id}");
         let instance_data_dir = run_params.data_dir.join("cluster").join(&instance_name);
@@ -371,6 +373,18 @@ impl PicodataInstance {
             "--config-parameter",
             &format!("cluster.tier={tiers_config}",),
         ]);
+
+        if config_path.exists() {
+            child.args([
+                "--config",
+                config_path.to_str().unwrap_or("./picodata.yaml"),
+            ]);
+        } else {
+            log::info!(
+                "couldn't locate picodata config at {} - skipping.",
+                config_path.to_str().unwrap()
+            );
+        }
 
         if let Some(plugins_dir) = plugins_dir {
             child.args([
@@ -573,8 +587,12 @@ impl Drop for PicodataInstance {
     }
 }
 
-fn get_merged_cluster_tier_config(plugin_path: &Path, tiers: &BTreeMap<String, Tier>) -> String {
-    let picodata_conf_path = plugin_path.join("picodata.yaml");
+fn get_merged_cluster_tier_config(
+    plugin_path: &Path,
+    config_path: &Path,
+    tiers: &BTreeMap<String, Tier>,
+) -> String {
+    let picodata_conf_path = plugin_path.join(config_path);
     let picodata_conf_raw = fs::read_to_string(picodata_conf_path).unwrap_or_default();
     let picodata_conf: HashMap<String, Value> =
         serde_yaml::from_str(&picodata_conf_raw).unwrap_or_default();
@@ -647,6 +665,8 @@ pub struct Params {
     plugin_path: PathBuf,
     #[builder(default = "false")]
     no_build: bool,
+    #[builder(default = "PathBuf::from(\"./picodata.yaml\")")]
+    config_path: PathBuf,
 }
 
 pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
@@ -681,7 +701,11 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
     let mut picodata_processes = vec![];
 
-    let tiers_config = get_merged_cluster_tier_config(&params.plugin_path, &params.topology.tiers);
+    let tiers_config = get_merged_cluster_tier_config(
+        &params.plugin_path,
+        &params.config_path,
+        &params.topology.tiers,
+    );
 
     let first_instance_bin_port = 3001;
     let mut instance_id = 0;
@@ -700,6 +724,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
                 &params.topology.enviroment,
                 &tiers_config,
                 &params.picodata_path,
+                &params.config_path,
             )?;
 
             picodata_processes.push(pico_instance);

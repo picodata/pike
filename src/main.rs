@@ -109,6 +109,9 @@ enum Command {
         /// Disable plugin build before cluster start
         #[arg(long)]
         no_build: bool,
+        /// Path to picodata config file
+        #[arg(long, value_name = "CONFIG_PATH", default_value = "./picodata.yaml")]
+        config_path: PathBuf,
     },
     /// Stop Picodata cluster
     Stop {
@@ -341,6 +344,7 @@ fn main() -> Result<()> {
             disable_colors,
             plugin_path,
             no_build,
+            config_path,
         } => {
             is_required_path_exists(&plugin_path, &topology, CARING_PIKE, 1);
 
@@ -377,6 +381,7 @@ fn main() -> Result<()> {
                 .disable_colors(disable_colors)
                 .plugin_path(plugin_path)
                 .no_build(no_build)
+                .config_path(config_path)
                 .build()
                 .unwrap();
             commands::run::cmd(&params).context("failed to execute Run command")?;
