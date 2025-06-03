@@ -103,7 +103,7 @@ enum Command {
         /// Disable colors in stdout
         #[arg(long)]
         disable_colors: bool,
-        /// Path to plugin folder
+        /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
         /// Disable plugin build before cluster start
@@ -118,7 +118,7 @@ enum Command {
         /// Path to data directory of the cluster
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
-        /// Path to plugin folder
+        /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
     },
@@ -127,7 +127,7 @@ enum Command {
         /// Path to data directory of the cluster
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
-        /// Path to plugin folder
+        /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
     },
@@ -138,7 +138,7 @@ enum Command {
         /// Path to data directory of the cluster
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
-        /// Path to plugin folder
+        /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
         /// Specify path to picodata binary
@@ -167,7 +167,7 @@ enum Plugin {
         /// Change target folder
         #[arg(long, value_name = "TARGET_DIR", default_value = "target")]
         target_dir: PathBuf,
-        /// Path to plugin folder
+        /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
     },
@@ -179,7 +179,7 @@ enum Plugin {
         /// Build release version of plugin
         #[arg(long, short)]
         release: bool,
-        /// Path to plugin folder
+        /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
     },
@@ -198,7 +198,7 @@ enum Plugin {
     Add {
         #[arg(value_name = "path")]
         path: PathBuf,
-        /// Path to plugin folder
+        /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
     },
@@ -228,7 +228,7 @@ enum Config {
         /// Path to data directory of the cluster
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
         data_dir: PathBuf,
-        /// Path to plugin folder
+        /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
         /// Choose plugin which config should be applied
