@@ -72,6 +72,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Run Picodata cluster
+    #[clap(alias = "start")]
     Run {
         #[arg(short, long, value_name = "TOPOLOGY", default_value = "topology.toml")]
         topology: PathBuf,
