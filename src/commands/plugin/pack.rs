@@ -83,9 +83,6 @@ pub fn cmd(pack_debug: bool, target_dir: &PathBuf, pluging_path: &PathBuf) -> Re
 
 fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
     let plugin_version = get_latest_plugin_version(plugin_dir)?;
-    let plugin_build_dir = build_dir
-        .join(plugin_dir.file_name().unwrap())
-        .join(&plugin_version);
 
     let cargo_manifest: CargoManifest = toml::from_str(
         &fs::read_to_string(plugin_dir.join("Cargo.toml")).context("failed to read Cargo.toml")?,
@@ -94,6 +91,8 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
 
     let package_name = cargo_manifest.package.name;
     let normalized_package_name = package_name.replace('-', "_");
+
+    let plugin_build_dir = build_dir.join(&package_name).join(&plugin_version);
 
     let root_in_zip = Path::new(&package_name).join(plugin_version);
 
