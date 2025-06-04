@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Fixed
 
 - Fix log output in apply config command
+- Add feature signal for nix
 
 ## [2.4.5]
 
