@@ -380,7 +380,7 @@ impl PicodataInstance {
                 config_path.to_str().unwrap_or("./picodata.yaml"),
             ]);
         } else {
-            log::info!(
+            log::warn!(
                 "couldn't locate picodata config at {} - skipping.",
                 config_path.to_str().unwrap()
             );
