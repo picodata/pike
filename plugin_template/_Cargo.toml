@@ -21,7 +21,7 @@ rstest = "0.25.0"
 reqwest = { version = "0.12", features = ["blocking"] }
 
 [build-dependencies]
-picodata-pike = "2.4.5"
+picodata-pike = "2.5.0"
 
 [lib]
 crate-type = ["cdylib"]

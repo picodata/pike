@@ -6,10 +6,26 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [2.5.0]
+
+### Added
+
+- Add ability to pass config in run command
+- Add start alias for run command
+
+### Changed
+
+- Remove traceback print on run failure 
+- Better logs for clean and stop
+- Check if cluster is already up during run command
+- Improve error message for clean if there is no data dir
+- Consider plugin name from Cargo.toml while packing plugin
+
 ### Fixed
 
 - Fix log output in apply config command
 - Add feature signal for nix
+- Repair log output in apply config command
 
 ## [2.4.5]
 
