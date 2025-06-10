@@ -22,6 +22,8 @@ use std::{fs, path::PathBuf};
 
 use crate::commands::lib;
 use crate::commands::lib::check_running_instances;
+use crate::commands::plugin::build::{copy_directory_tree, is_plugin_shipping_dir};
+use crate::commands::plugin::pack::{is_plugin_archive, unpack_shipping_archive};
 
 const BAFFLED_WHALE: &str = r"
   __________________________________________________________
@@ -60,6 +62,17 @@ pub struct Service {
     pub tiers: Vec<String>,
 }
 
+/// Describes contents for provided plugin path
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PluginPathKind {
+    /// Cargo workspace or a standalone project
+    CrateOrWorkspaceDirectory,
+    /// Directory with versioned plugin contents
+    ShippingDirectory,
+    /// Archive with shipping directory inside
+    ShippingArchive,
+}
+
 #[derive(Default, Debug, Deserialize, Clone)]
 pub struct Plugin {
     #[serde(default)]
@@ -69,6 +82,16 @@ pub struct Plugin {
     pub services: BTreeMap<String, Service>,
     #[serde(skip)]
     pub version: Option<String>,
+    /// Relative path to plugin, if it is located outside of current directory.
+    ///
+    /// Path should conform to one of path kinds, see [`PluginPathKind`]
+    pub path: Option<PathBuf>,
+}
+
+impl Plugin {
+    fn is_external(&self) -> bool {
+        self.path.is_some()
+    }
 }
 
 #[derive(Default, Debug, Deserialize, Clone)]
@@ -108,6 +131,10 @@ impl Topology {
             plugin.version = Some(newest_version);
         }
         Ok(())
+    }
+
+    fn has_external_plugins(&self) -> bool {
+        self.plugins.values().any(Plugin::is_external)
     }
 }
 
@@ -621,6 +648,114 @@ fn get_merged_cluster_tier_config(plugin_path: &Path, tiers: &BTreeMap<String, T
     serde_json::to_string(&tier_params).unwrap()
 }
 
+fn get_external_plugin_path_kind(path: &Path) -> Result<PluginPathKind> {
+    if !path.is_relative() {
+        bail!("external plugin path must be relative");
+    }
+    let meta = path
+        .metadata()
+        .context("failed to query external plugin path metadata")?;
+    if meta.is_file() {
+        match is_plugin_archive(path) {
+            Ok(()) => return Ok(PluginPathKind::ShippingArchive),
+            Err(error) => return Err(error.context("external plugin path is an unknown file")),
+        }
+    }
+    if meta.is_dir() {
+        if is_plugin_dir(path) {
+            return Ok(PluginPathKind::CrateOrWorkspaceDirectory);
+        }
+        match is_plugin_shipping_dir(path) {
+            Ok(()) => return Ok(PluginPathKind::ShippingDirectory),
+            Err(error) => {
+                return Err(error.context("external plugin path directory has invalid structrure"))
+            }
+        }
+    }
+    if meta.is_symlink() {
+        bail!("symlink as external plugin path is not supported");
+    }
+    // should be unreachable
+    bail!("unknown external plugin path type");
+}
+
+/// Prepares plugin directory structure for external plugins from topology
+///
+/// Depending whether plugin path destination is plugin project directory,
+/// built plugin directory or zip-packed plugin directory, maybe invoke cargo build
+fn prepare_external_plugins(params: &Params, plugin_run_dir: &Path) -> Result<()> {
+    if !params.topology.has_external_plugins() {
+        return Ok(());
+    }
+    let topology_plugins = &params.topology.plugins;
+    let external_plugins = topology_plugins
+        .iter()
+        .filter(|(_name, plugin)| plugin.is_external())
+        .collect::<Vec<_>>();
+    let mut path_kind_mapping = HashMap::with_capacity(external_plugins.len());
+    for (name, plugin) in external_plugins {
+        let path = plugin
+            .path
+            .as_ref()
+            .expect("external plugins have path (checking kind)");
+        let path_kind = get_external_plugin_path_kind(path).with_context(|| {
+            let path_display = path.to_string_lossy();
+            format!("failed to validate external path {path_display} for plugin {name}")
+        })?;
+        path_kind_mapping.insert(name, path_kind);
+    }
+
+    // convert shipping archive to shipping directories at plugin run directory
+    let archived = topology_plugins.iter().filter(|(name, _plugin)| {
+        path_kind_mapping.get(name) == Some(&PluginPathKind::ShippingArchive)
+    });
+    for (name, plugin) in archived {
+        let path = plugin
+            .path
+            .as_ref()
+            .expect("external plugins must have path (shipping archive)");
+        unpack_shipping_archive(path, plugin_run_dir).with_context(|| {
+            let (path_as_str, kind) = (path.to_string_lossy(), "shipping archive");
+            format!("preparation for plugin {name} with external path {path_as_str} ({kind}) has failed")
+        })?;
+    }
+
+    // clone shipping directories content to plugin run directory
+    let foldered = topology_plugins.iter().filter(|(name, _plugin)| {
+        path_kind_mapping.get(name) == Some(&PluginPathKind::ShippingDirectory)
+    });
+    for (name, plugin) in foldered {
+        let path = plugin
+            .path
+            .as_ref()
+            .expect("external plugin must have path (shipping folder)");
+        copy_directory_tree(path, plugin_run_dir).with_context(|| {
+            let (path_as_str,kind) = (path.to_string_lossy(), "shipping directory");
+            format!("preparation for plugin {name} with external path {path_as_str} ({kind}) has failed")
+        })?;
+    }
+
+    // copy built plugins to plugin run directory
+    let cargoed = topology_plugins.iter().filter(|(name, _plugin)| {
+        path_kind_mapping.get(name) == Some(&PluginPathKind::CrateOrWorkspaceDirectory)
+    });
+    for (name, plugin) in cargoed {
+        let path = plugin
+            .path
+            .as_ref()
+            .expect("external plugin must have path (cargo project)");
+        if !params.no_build {
+            let (profile, target_dir) = (params.get_build_profile(), &params.target_dir);
+            cargo_build(profile, target_dir, path).with_context(|| {
+                let (path_as_str, kind) = (path.to_string_lossy(), "cargo project");
+                format!("preparation for plugin {name} with external path {path_as_str} ({kind}) has failed")
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Builder, Clone)]
 pub struct Params {
@@ -649,6 +784,16 @@ pub struct Params {
     no_build: bool,
 }
 
+impl Params {
+    pub fn get_build_profile(&self) -> lib::BuildType {
+        if self.use_release {
+            lib::BuildType::Release
+        } else {
+            lib::BuildType::Debug
+        }
+    }
+}
+
 pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
     let cur_running_instance = check_running_instances(&params.data_dir, &params.plugin_path)?;
     if let Some(sock_path) = cur_running_instance {
@@ -660,13 +805,14 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
     let mut plugins_dir = None;
     if is_plugin_dir(&params.plugin_path) {
-        let build_type = if params.use_release {
+        let build_type = params.get_build_profile();
+        if params.use_release {
             plugins_dir = Some(params.plugin_path.join(params.target_dir.join("release")));
-            lib::BuildType::Release
         } else {
             plugins_dir = Some(params.plugin_path.join(params.target_dir.join("debug")));
-            lib::BuildType::Debug
         };
+
+        prepare_external_plugins(&params, plugins_dir.as_ref().unwrap())?;
         if !params.no_build {
             cargo_build(build_type, &params.target_dir, &params.plugin_path)?;
         };
