@@ -1,12 +1,14 @@
 use anyhow::{bail, Context, Result};
+use flate2::bufread::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use lib::{cargo_build, BuildType};
 use serde::Deserialize;
 use std::fs::File;
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
-use tar::Builder;
+use tar::{Archive, Builder};
 use toml::Value;
 
 use crate::commands::lib;
@@ -81,6 +83,77 @@ pub fn cmd(pack_debug: bool, target_dir: &PathBuf, pluging_path: &PathBuf) -> Re
     create_plugin_archive(&build_dir, &plugin_dir)
 }
 
+/// Checks if provided path contains valid packed plugin archive
+pub(crate) fn is_plugin_archive(test_path: &Path) -> Result<()> {
+    if !test_path.is_file() {
+        bail!("plugin archive path must be a file");
+    }
+    let file = File::options()
+        .read(true)
+        .write(false)
+        .create(false)
+        .open(test_path)
+        .context("unable to open plugin archive candidate")?;
+    let mut archive = Archive::new(file);
+    let Ok(archive_entries) = archive.entries() else {
+        bail!("unable to read plugin archive candidate");
+    };
+    let mut has_manifest = false;
+    let mut has_lib = false;
+    let lib_suffix = format!(".{LIB_EXT}");
+    for entry in archive_entries.filter_map(Result::ok) {
+        if let Ok(entry_path) = entry.path() {
+            // plugin_name / plugin_version / root_file_name
+            if entry_path.components().count() == 3 {
+                if let Some(last_part) = entry_path.components().last() {
+                    has_manifest = has_manifest || last_part.as_os_str() == "manifest.yaml";
+                    has_lib = has_lib
+                        || last_part
+                            .as_os_str()
+                            .to_string_lossy()
+                            .ends_with(&lib_suffix);
+                }
+            }
+        }
+        if has_manifest && has_lib {
+            return Ok(());
+        }
+    }
+    if !has_manifest {
+        bail!("plugin archive candidate missing manifest");
+    }
+    if !has_lib {
+        bail!("plugin archive candidate missing plugin library");
+    }
+    bail!("plugin archive candidate has invalid structure");
+}
+
+/// Validates and unpacks plugin(s) from shipping archive into destination path,
+/// preserving archive structure. Does not creates destination path itself.
+pub(crate) fn unpack_shipping_archive(src_path: &Path, dst_path: &Path) -> Result<()> {
+    is_plugin_archive(src_path).with_context(|| {
+        let (from, to) = (src_path.to_string_lossy(), dst_path.to_string_lossy());
+        format!("can not unpack shipping archive at {from} to {to}")
+    })?;
+
+    let file = File::options()
+        .read(true)
+        .write(false)
+        .create(false)
+        .open(src_path)
+        .context("unable to open plugin archive")?;
+    let buf_reader = BufReader::new(file);
+    let decompressor = GzDecoder::new(buf_reader);
+
+    // by default - override existing, preserve mtime
+    let mut archive = Archive::new(decompressor);
+    archive.unpack(dst_path).with_context(|| {
+        let (from, to) = (src_path.to_string_lossy(), dst_path.to_string_lossy());
+        format!("failed to unpack shipping archive at {from} to {to}")
+    })?;
+    Ok(())
+}
+
 fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
     let plugin_version = get_latest_plugin_version(plugin_dir)?;
 
@@ -96,12 +169,13 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
 
     let root_in_zip = Path::new(&package_name).join(plugin_version);
 
-    let compressed_file = File::create(format!(
+    let compressed_file_path = format!(
         "{}/{package_name}-{}.tar.gz",
         build_dir.display(),
         cargo_manifest.package.version
-    ))
-    .context("failed to pack the plugin")?;
+    );
+    let compressed_file =
+        File::create(compressed_file_path).context("failed to pack the plugin")?;
 
     let mut encoder = GzEncoder::new(compressed_file, Compression::best());
 
