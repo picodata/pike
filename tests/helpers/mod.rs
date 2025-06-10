@@ -8,7 +8,7 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::symlink;
-use std::path::PathBuf;
+use std::path::{Component, PathBuf};
 use std::thread;
 use std::{
     fs::{self},
@@ -24,6 +24,7 @@ pub const TESTS_DIR: &str = "./tests/tmp/";
 pub const PLUGIN_NAME: &str = "test-plugin";
 pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, PLUGIN_NAME);
 pub const SHARED_TARGET_NAME: &str = "shared_target";
+pub const SHARED_TARGET_PATH: &str = concat!(TESTS_DIR, SHARED_TARGET_NAME);
 
 #[cfg(target_os = "linux")]
 pub const LIB_EXT: &str = "so";
@@ -85,36 +86,92 @@ impl Cluster {
     }
 }
 
+pub struct TestPluginInitParams<A = String>
+where
+    A: AsRef<OsStr> + std::fmt::Debug,
+{
+    /// Plugin name for new plugin
+    pub name: String,
+    /// Additional args for pike new command
+    pub init_args: Vec<A>,
+    /// Plugin project path
+    pub plugin_path: PathBuf,
+    /// Shared target directory to use as a cache
+    pub shared_target_path: PathBuf,
+    /// Current directory to run pike in
+    pub working_dir: PathBuf,
+}
+
+impl TestPluginInitParams {
+    pub fn new(plugin_name: &str) -> Self {
+        Self {
+            name: plugin_name.to_string(),
+            plugin_path: Path::new(TESTS_DIR).join(plugin_name),
+            ..Default::default()
+        }
+    }
+
+    pub fn new_workspace(plugin_name: &str) -> Self {
+        Self {
+            name: plugin_name.to_string(),
+            plugin_path: Path::new(TESTS_DIR).join(plugin_name),
+            init_args: vec!["--workspace".to_string()],
+            ..Default::default()
+        }
+    }
+}
+
+impl<A> Default for TestPluginInitParams<A>
+where
+    A: AsRef<OsStr> + std::fmt::Debug,
+{
+    fn default() -> Self {
+        Self {
+            name: String::from(PLUGIN_NAME),
+            init_args: vec![],
+            plugin_path: PathBuf::from(PLUGIN_DIR),
+            shared_target_path: PathBuf::from(SHARED_TARGET_PATH),
+            working_dir: PathBuf::from(TESTS_DIR),
+        }
+    }
+}
+
 pub fn init_plugin(plugin_name: &str) {
-    init_plugin_with_args(plugin_name, vec![]);
+    init_plugin_with_args(TestPluginInitParams::new(plugin_name));
 }
 
 pub fn init_plugin_workspace(plugin_name: &str) {
-    init_plugin_with_args(plugin_name, vec!["--workspace"]);
+    init_plugin_with_args(TestPluginInitParams::new_workspace(plugin_name));
 }
 
-fn init_plugin_with_args(plugin_name: &str, plugin_args: Vec<&str>) {
-    let plugin_path = Path::new(TESTS_DIR).join(plugin_name);
-    cleanup_dir(&plugin_path);
+pub fn init_plugin_with_args<A>(init_params: TestPluginInitParams<A>)
+where
+    A: AsRef<OsStr> + std::fmt::Debug,
+{
+    // Delete plugin project directory, if it exists from previous runs
+    cleanup_dir(&init_params.plugin_path);
 
     // Create new plugin and link target folder to shared target folder
-    let mut args = vec!["plugin", "new", plugin_name];
-    args.extend(plugin_args);
-    exec_pike(args);
+    let default_args = vec!["plugin", "new", &init_params.name];
+    let plugin_args = init_params.init_args.iter().map(A::as_ref);
+    let args = default_args
+        .into_iter()
+        .map(str::as_ref)
+        .chain(plugin_args)
+        .collect::<Vec<_>>();
+    exec_pike_in(args, init_params.working_dir);
 
-    let shared_target_path = &Path::new(TESTS_DIR).join(SHARED_TARGET_NAME);
+    // Ensure that directory for plugin build artifacts does exist
+    let shared_target_path = init_params.shared_target_path;
     if !shared_target_path.exists() {
-        fs::create_dir(shared_target_path).unwrap();
+        fs::create_dir(&shared_target_path).unwrap();
     }
+    let shared_target_path = shared_target_path.canonicalize().unwrap();
 
-    let normalized_package_name = plugin_name.replace('-', "_");
+    let normalized_package_name = init_params.name.replace('-', "_");
     let lib_name = format!("lib{normalized_package_name}.{LIB_EXT}");
     let lib_d_name = format!("lib{normalized_package_name}.d");
-
-    // Save build artefacts from previous run
-    clean_dir_with_exceptions(shared_target_path, vec!["debug", "release"]);
-
-    let build_exceptions = vec![
+    let profile_dir_whitelist = vec![
         "build",
         "deps",
         "examples",
@@ -124,16 +181,23 @@ fn init_plugin_with_args(plugin_name: &str, plugin_args: Vec<&str>) {
         &lib_d_name,
     ];
 
-    clean_dir_with_exceptions(&shared_target_path.join("debug"), &build_exceptions);
-    clean_dir_with_exceptions(&shared_target_path.join("release"), &build_exceptions);
+    // Preserve build artefacts from previous run, delete other content
+    clean_dir_with_exceptions(&shared_target_path, vec!["debug", "release"]);
+    clean_dir_with_exceptions(&shared_target_path.join("debug"), &profile_dir_whitelist);
+    clean_dir_with_exceptions(&shared_target_path.join("release"), &profile_dir_whitelist);
 
     // Link target dir to shared target dir
-    // Destination path for symlink is relative to plugin folder
-    symlink(
-        Path::new("../").join(SHARED_TARGET_NAME),
-        plugin_path.join("target"),
-    )
-    .unwrap();
+    let plugin_target_dir = init_params
+        .plugin_path
+        .canonicalize()
+        .unwrap()
+        .join("target");
+
+    // Compute relative path for shared target directory
+    let target_rel_symlink = compute_relative_symlink(&shared_target_path, &plugin_target_dir);
+    dbg!(target_rel_symlink);
+
+    symlink(shared_target_path, init_params.plugin_path.join("target")).unwrap();
 }
 
 pub fn clean_dir_with_exceptions<I, S>(path: &PathBuf, exceptions: I)
@@ -177,6 +241,29 @@ pub fn validate_symlink(symlink_path: &PathBuf) -> bool {
     }
 
     false
+}
+
+/// Computes relative symlink to path `src_path`. `dst_path` is future symlink placement.  
+/// Both paths must be absolute.
+pub fn compute_relative_symlink<SrcP, DstP>(src_path: SrcP, dst_path: DstP) -> PathBuf
+where
+    SrcP: AsRef<Path>,
+    DstP: AsRef<Path>,
+{
+    let (src_path, dst_path) = (src_path.as_ref(), dst_path.as_ref());
+    let common_prefix = src_path
+        .components()
+        .zip(dst_path.components())
+        .map_while(|(a, b)| Option::from(a).filter(|a| a == &b))
+        .collect::<PathBuf>();
+    let shared_target_part = src_path.strip_prefix(&common_prefix).unwrap().components();
+    dst_path
+        .strip_prefix(&common_prefix)
+        .unwrap()
+        .components()
+        .map(|_| PathBuf::from(".."))
+        .collect::<PathBuf>()
+        .join(shared_target_part)
 }
 
 pub fn assert_path_existance(path: &Path, must_be_symlink: bool) {
@@ -248,7 +335,11 @@ pub fn run_cluster(
         .iter()
         .map(String::as_str);
 
-    init_plugin_with_args("test-plugin", args.collect());
+    init_plugin_with_args(TestPluginInitParams {
+        name: "test-plugin".to_string(),
+        init_args: args.collect(),
+        ..Default::default()
+    });
 
     // Build the plugin
     Command::new("cargo")
@@ -336,6 +427,37 @@ pub fn run_cluster(
     }
 }
 
+pub struct ClusterStateToCheck<'a> {
+    pub pico_instance: &'a str,
+    pub pico_plugin: &'a str,
+}
+
+pub fn wait_cluster_start_completed<P, CheckFn>(plugin_path: P, state_check_fn: CheckFn) -> bool
+where
+    P: AsRef<Path>,
+    for<'a> CheckFn: Fn(ClusterStateToCheck<'a>) -> bool,
+{
+    let start = Instant::now();
+    let mut cluster_started = false;
+    while Instant::now().duration_since(start) < Duration::from_secs(60) {
+        let pico_instance =
+            get_picodata_table(plugin_path.as_ref(), Path::new("tmp"), "_pico_instance");
+        let pico_plugin =
+            get_picodata_table(plugin_path.as_ref(), Path::new("tmp"), "_pico_plugin");
+        let current_state = ClusterStateToCheck {
+            pico_instance: &pico_instance,
+            pico_plugin: &pico_plugin,
+        };
+        let check_fn = std::panic::AssertUnwindSafe(|| state_check_fn(current_state));
+        let check_result = std::panic::catch_unwind(check_fn);
+        if let Ok(value) = check_result {
+            cluster_started = value;
+            break;
+        }
+    }
+    cluster_started
+}
+
 pub fn get_picodata_table(plugin_path: &Path, data_dir_path: &Path, table_name: &str) -> String {
     let mut picodata_admin =
         await_picodata_admin(Duration::from_secs(60), plugin_path, data_dir_path).unwrap();
@@ -389,18 +511,26 @@ fn set_current_version_of_pike(plugin_path: &OsStr) {
     writeln!(&file, "{cargo_with_fixed_pike}").unwrap();
 }
 
-// Spawn child process where pike is executed
-// Funciton waits for child process to end
 pub fn exec_pike<I, S>(args: I)
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr> + std::fmt::Debug,
 {
+    exec_pike_in(args, TESTS_DIR);
+}
+
+// Spawn child process where pike is executed
+// Funciton waits for child process to end
+pub fn exec_pike_in<I, S, WD>(args: I, work_dir: WD)
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr> + std::fmt::Debug,
+    WD: AsRef<Path> + std::fmt::Debug,
+{
     let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let args: Vec<S> = args.into_iter().collect();
 
-    dbg!(&args);
-    dbg!(TESTS_DIR);
+    dbg!(&work_dir, &args);
 
     if let Some(plugin_path_pos) = args.iter().position(|a| a.as_ref() == "--plugin-path") {
         set_current_version_of_pike(args[plugin_path_pos + 1].as_ref());
@@ -409,7 +539,7 @@ where
     let mut pike_child = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
         .arg("pike")
         .args(args)
-        .current_dir(TESTS_DIR)
+        .current_dir(work_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -488,6 +618,8 @@ pub fn await_picodata_admin(
     }
 }
 
+/// Recursively deletes directory, if exists.  
+/// Does not follow symlinks.
 pub fn cleanup_dir(path: &Path) {
     match fs::remove_dir_all(path) {
         Ok(()) => info!("clearing test plugin dir."),
