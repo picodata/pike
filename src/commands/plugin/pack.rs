@@ -1,15 +1,13 @@
+use crate::commands::lib::{cargo_build, BuildType, LIB_EXT};
 use anyhow::{bail, Context, Result};
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use lib::{cargo_build, BuildType};
 use serde::Deserialize;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 use tar::Builder;
 use toml::Value;
-
-use crate::commands::lib;
 
 #[derive(Deserialize)]
 struct PackageInfo {
@@ -21,12 +19,6 @@ struct PackageInfo {
 struct CargoManifest {
     package: PackageInfo,
 }
-
-#[cfg(target_os = "linux")]
-const LIB_EXT: &str = "so";
-
-#[cfg(target_os = "macos")]
-const LIB_EXT: &str = "dylib";
 
 pub fn cmd(pack_debug: bool, target_dir: &PathBuf, pluging_path: &PathBuf) -> Result<()> {
     let root_dir = env::current_dir()?.join(pluging_path);
@@ -96,12 +88,13 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
 
     let root_in_zip = Path::new(&package_name).join(plugin_version);
 
-    let compressed_file = File::create(format!(
+    let compressed_file_path = format!(
         "{}/{package_name}-{}.tar.gz",
         build_dir.display(),
         cargo_manifest.package.version
-    ))
-    .context("failed to pack the plugin")?;
+    );
+    let compressed_file =
+        File::create(compressed_file_path).context("failed to pack the plugin")?;
 
     let mut encoder = GzEncoder::new(compressed_file, Compression::best());
 
