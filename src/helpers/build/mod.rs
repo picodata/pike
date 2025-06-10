@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 const MANIFEST_TEMPLATE_NAME: &str = "manifest.yaml.template";
 
 #[cfg(target_os = "linux")]
-const LIB_EXT: &str = "so";
+pub const LIB_EXT: &str = "so";
 
 #[cfg(target_os = "macos")]
-const LIB_EXT: &str = "dylib";
+pub const LIB_EXT: &str = "dylib";
 
 // Get output path from env variable to get path up until debug/ or release/ folder
 fn get_output_path() -> PathBuf {

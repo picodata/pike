@@ -1,9 +1,7 @@
 use std::path::PathBuf;
 
+use crate::commands::lib::{cargo_build, BuildType};
 use anyhow::{Context, Result};
-use lib::{cargo_build, BuildType};
-
-use crate::commands::lib;
 
 pub fn cmd(release: bool, target_dir: &PathBuf, plugin_path: &PathBuf) -> Result<()> {
     let build_type = if release {
