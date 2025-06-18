@@ -1,13 +1,15 @@
 mod helpers;
 
 use helpers::{
-    cleanup_dir, exec_pike, get_picodata_table, init_plugin, init_plugin_workspace, run_cluster,
-    CmdArguments, LIB_EXT, PLUGIN_DIR, PLUGIN_NAME, TESTS_DIR,
+    build_plugin, cleanup_dir, exec_pike, exec_pike_in, get_picodata_table, init_plugin,
+    init_plugin_with_args, init_plugin_workspace, run_cluster, wait_cluster_start_completed,
 };
+use helpers::{CmdArguments, TestPluginInitParams, LIB_EXT, PLUGIN_DIR, PLUGIN_NAME, TESTS_DIR};
 use pike::cluster::{run, MigrationContextVar, Plugin, RunParamsBuilder, Service, Tier, Topology};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::Command;
 use std::{
     fs::{self},
@@ -772,6 +774,220 @@ fn test_run_with_several_tiers() {
 
         cluster_started = true;
     }
+
+    assert!(cluster_started);
+}
+
+/// Create simple pike run parameters using provided plugins.
+fn make_ext_run_params(plugin_path: &Path, plugins: BTreeMap<String, Plugin>) -> RunParamsBuilder {
+    let tiers = BTreeMap::from([(
+        "default".to_string(),
+        Tier {
+            replicasets: 2,
+            replication_factor: 2,
+        },
+    )]);
+    let topology = Topology {
+        tiers,
+        plugins,
+        ..Default::default()
+    };
+
+    let mut builder = RunParamsBuilder::default();
+    builder
+        .topology(topology)
+        .daemon(true)
+        .plugin_path(plugin_path.into());
+    builder
+}
+
+#[test]
+fn run_with_external_plugin_directory() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+    init_plugin(PLUGIN_NAME);
+    build_plugin(&helpers::BuildType::Debug, "0.1.0", plugin_path);
+
+    let ext_plugin_path = PathBuf::from("./tests/tmp_ext/external-plugin-1");
+    init_plugin_with_args(TestPluginInitParams::<String> {
+        name: "external-plugin-1".to_string(),
+        plugin_path: ext_plugin_path.clone(),
+        shared_target_path: "./tests/tmp_ext/ext_shared_target".into(),
+        working_dir: "./tests/tmp_ext".into(),
+        ..Default::default()
+    });
+    build_plugin(&helpers::BuildType::Debug, "0.1.0", &ext_plugin_path);
+
+    let our_plugin_path = Path::new("./tests/tmp/test-plugin");
+    let ext_plugin_path =
+        Path::new("./tests/tmp_ext/external-plugin-1/target/debug/external-plugin-1");
+
+    let our_plugin = Plugin::default();
+    let external_plugin = Plugin {
+        path: Some(ext_plugin_path.into()),
+        ..Default::default()
+    };
+    let plugins = BTreeMap::from([
+        (PLUGIN_NAME.to_string(), our_plugin),
+        ("external-plugin-1".to_string(), external_plugin),
+    ]);
+    let params = make_ext_run_params(our_plugin_path, plugins)
+        .build()
+        .unwrap();
+
+    run(&params).unwrap();
+
+    let cluster_started = wait_cluster_start_completed(our_plugin_path, |state| {
+        assert_eq!(state.pico_instance.matches("Online").count(), 8);
+        assert_eq!(state.pico_plugin.matches("true").count(), 2);
+        true
+    });
+
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+
+    assert!(cluster_started);
+}
+
+#[test]
+fn run_with_external_plugin_archive() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+    init_plugin(PLUGIN_NAME);
+    build_plugin(&helpers::BuildType::Debug, "0.1.0", plugin_path);
+
+    // setup and pack external plugin
+    let ext_plugin_path = PathBuf::from("./tests/tmp_ext/external-plugin-1");
+    init_plugin_with_args(TestPluginInitParams::<String> {
+        name: "external-plugin-1".to_string(),
+        plugin_path: ext_plugin_path.join(""),
+        shared_target_path: "./tests/tmp_ext/ext_shared_target".into(),
+        working_dir: "./tests/tmp_ext".into(),
+        ..Default::default()
+    });
+    build_plugin(&helpers::BuildType::Release, "0.1.0", &ext_plugin_path);
+    let pack_args = ["plugin", "pack", "--plugin-path", "./external-plugin-1"];
+    exec_pike_in(pack_args, "./tests/tmp_ext");
+
+    let our_plugin_path = Path::new("./tests/tmp/test-plugin");
+    let ext_plugin_path = Path::new(
+        "./tests/tmp_ext/external-plugin-1/target/release/external-plugin-1-0.1.0.tar.gz",
+    );
+
+    let plugins = BTreeMap::from([
+        (PLUGIN_NAME.to_string(), Plugin::default()),
+        (
+            "external-plugin-1".to_string(),
+            Plugin {
+                path: Some(ext_plugin_path.into()),
+                ..Default::default()
+            },
+        ),
+    ]);
+    let params = make_ext_run_params(our_plugin_path, plugins)
+        .build()
+        .unwrap();
+
+    run(&params).unwrap();
+
+    let cluster_started = wait_cluster_start_completed(our_plugin_path, |state| {
+        assert_eq!(state.pico_instance.matches("Online").count(), 8);
+        assert_eq!(state.pico_plugin.matches("true").count(), 2);
+        true
+    });
+
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+
+    assert!(cluster_started);
+}
+
+#[test]
+fn run_with_external_plugin_project() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+    init_plugin(PLUGIN_NAME);
+    build_plugin(&helpers::BuildType::Debug, "0.1.0", plugin_path);
+
+    // init external plugin and do not build it - we'll check that run calls "cargo build"
+    let ext_plugin_path = PathBuf::from("./tests/tmp_ext/external-plugin-1");
+    init_plugin_with_args(TestPluginInitParams::<String> {
+        name: "external-plugin-1".to_string(),
+        plugin_path: ext_plugin_path,
+        shared_target_path: "./tests/tmp_ext/ext_shared_target".into(),
+        working_dir: "./tests/tmp_ext".into(),
+        ..Default::default()
+    });
+
+    let our_plugin_path = Path::new("./tests/tmp/test-plugin");
+    let ext_plugin_path = Path::new("./tests/tmp_ext/external-plugin-1");
+
+    let plugins = BTreeMap::from([
+        (PLUGIN_NAME.to_string(), Plugin::default()),
+        (
+            "external-plugin-1".to_string(),
+            Plugin {
+                path: Some(ext_plugin_path.into()),
+                ..Default::default()
+            },
+        ),
+    ]);
+    let params = make_ext_run_params(our_plugin_path, plugins)
+        .build()
+        .unwrap();
+
+    run(&params).unwrap();
+
+    let cluster_started = wait_cluster_start_completed(our_plugin_path, |state| {
+        assert_eq!(state.pico_instance.matches("Online").count(), 8);
+        assert_eq!(state.pico_plugin.matches("true").count(), 2);
+        true
+    });
+
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+
+    assert!(cluster_started);
+}
+
+#[test]
+fn run_with_external_plugin_workspace() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+    init_plugin(PLUGIN_NAME);
+    build_plugin(&helpers::BuildType::Debug, "0.1.0", plugin_path);
+
+    let ext_workspace_path = Path::new("./tests/tmp_ext/ext-workspace-plugin");
+    init_plugin_with_args(TestPluginInitParams {
+        name: "ext-workspace-plugin".to_string(),
+        plugin_path: ext_workspace_path.to_owned(),
+        init_args: vec!["--workspace"],
+        shared_target_path: "./tests/tmp_ext/ext_shared_target".into(),
+        working_dir: "./tests/tmp_ext".into(),
+    });
+    exec_pike_in(["plugin", "add", "ext-sub-plugin"], ext_workspace_path);
+
+    let plugins = BTreeMap::from([
+        (PLUGIN_NAME.to_string(), Plugin::default()),
+        (
+            "ext-workspace-plugin".to_string(),
+            Plugin {
+                path: Some(ext_workspace_path.into()),
+                ..Default::default()
+            },
+        ),
+        (
+            "ext-sub-plugin".to_string(),
+            Plugin {
+                path: Some(ext_workspace_path.into()),
+                ..Default::default()
+            },
+        ),
+    ]);
+    let params = make_ext_run_params(plugin_path, plugins).build().unwrap();
+
+    run(&params).unwrap();
+
+    let cluster_started = wait_cluster_start_completed(plugin_path, |state| {
+        assert_eq!(state.pico_instance.matches("Online").count(), 8);
+        assert_eq!(state.pico_plugin.matches("true").count(), 3);
+        true
+    });
+
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
 }

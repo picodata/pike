@@ -1,13 +1,24 @@
 use anyhow::{bail, Context, Result};
+use std::fmt::Display;
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[derive(Clone, Copy, Debug)]
 pub enum BuildType {
     Release,
     Debug,
+}
+
+impl Display for BuildType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            BuildType::Release => "release",
+            BuildType::Debug => "debug",
+        })
+    }
 }
 
 #[allow(clippy::needless_pass_by_value)]
