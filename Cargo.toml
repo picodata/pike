@@ -31,7 +31,7 @@ anyhow = "1.0"
 colog = "1.3.0"
 log = "0.4.25"
 fs_extra = "1"
-libc = "0.2.173"
+libc = "0.2.174"
 nix = { version = "0.30.1", features = ["signal"] }
 colored = "3"
 rand = "0.9"
