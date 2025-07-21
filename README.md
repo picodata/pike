@@ -196,10 +196,27 @@ cargo pike stop --data-dir ./tmp
 [*] stopping picodata instance: i4
 ```
 
+Для того, чтобы остановить только один инстанс в кластере, необходимо передать его название в опцию `--instance-name`.
+Пайк остановит только указанный инстанс, а остальные продолжат свое выполнение.
+
+Например,
+
+```bash
+cargo pike stop --data-dir ./tmp --instance-name i2
+```
+
+Вывод:
+
+```bash
+[*] stopping picodata cluster instance 'i2', data folder: ./tmp/i2
+[*] stopping picodata instance: i2 - OK
+```
+
 #### Доступные опции
 
 - `--data-dir <DATA_DIR>` - Путь к директории хранения файлов кластера. Значение по умолчанию: `./tmp`
 - `--plugin-path` - Путь до директории **проекта** плагина. Значение по умолчанию: `./`
+- `--instance-name <INSTANCE_NAME>` - Название инстанса Пикодаты. По умолчанию игнорируется.
 
 ### `enter`
 

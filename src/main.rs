@@ -113,7 +113,7 @@ enum Command {
         #[arg(long, value_name = "CONFIG_PATH", default_value = "./picodata.yaml")]
         config_path: PathBuf,
     },
-    /// Stop Picodata cluster
+    /// Stop Picodata cluster or a specific instance
     Stop {
         /// Path to data directory of the cluster
         #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
@@ -121,6 +121,10 @@ enum Command {
         /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
+        /// Name of the instance to stop. If not specified, this command
+        /// will stop all instances in the cluster.
+        #[arg(long, value_name = "INSTANCE_NAME", default_value = None)]
+        instance_name: Option<String>,
     },
     /// Remove all data files of previous cluster run
     Clean {
@@ -389,6 +393,7 @@ fn main() -> Result<()> {
         Command::Stop {
             data_dir,
             plugin_path,
+            instance_name,
         } => {
             is_required_path_exists(&plugin_path, &data_dir, CARING_PIKE, 1);
 
@@ -396,6 +401,7 @@ fn main() -> Result<()> {
             let params = commands::stop::ParamsBuilder::default()
                 .data_dir(data_dir)
                 .plugin_path(plugin_path)
+                .instance_name(instance_name)
                 .build()
                 .unwrap();
             commands::stop::cmd(&params).context("failed to execute \"stop\" command")?;
