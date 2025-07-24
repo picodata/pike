@@ -1,6 +1,6 @@
 [package]
 name = "picodata-pike"
-version = "2.5.0"
+version = "2.6.0"
 edition = "2021"
 license = "BSD-2-Clause"
 authors = [

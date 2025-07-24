@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [2.6.0]
+
+### Added
+
+- Add ability to stop individual cluster instances
+- Add external path specification for plugins
+
 ## [2.5.0]
 
 ### Added
