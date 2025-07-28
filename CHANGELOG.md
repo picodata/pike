@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [2.6.0]
+
+### Added
+
+- Add ability to set external path for plugins
+- support stopping of specific cluster instance
+
 ## [2.5.0]
 
 ### Added
@@ -15,7 +22,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Changed
 
-- Remove traceback print on run failure 
+- Remove traceback print on run failure
 - Better logs for clean and stop
 - Check if cluster is already up during run command
 - Improve error message for clean if there is no data dir
