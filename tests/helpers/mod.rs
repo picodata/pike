@@ -8,6 +8,7 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::fs::symlink;
+use std::os::unix::net::UnixStream;
 use std::path::{Component, PathBuf};
 use std::thread;
 use std::{
@@ -637,4 +638,9 @@ pub fn unpack_archive(path: &Path, unpack_to: &Path) {
     let mut archive = Archive::new(decompressor);
 
     archive.unpack(unpack_to).unwrap();
+}
+
+pub fn is_instance_running(instance_dir: &Path) -> bool {
+    let socket_path = instance_dir.join("admin.sock");
+    socket_path.exists() && UnixStream::connect(&socket_path).is_ok()
 }

@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+- Support running a specific cluster instance
+
 ## [2.6.0]
 
 ### Added

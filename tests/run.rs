@@ -18,6 +18,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::helpers::is_instance_running;
+
 const TOTAL_INSTANCES: i32 = 4;
 
 #[test]
@@ -984,6 +986,101 @@ fn run_with_external_plugin_workspace() {
     let cluster_started = wait_cluster_start_completed(plugin_path, |state| {
         assert_eq!(state.pico_instance.matches("Online").count(), 8);
         assert_eq!(state.pico_plugin.matches("true").count(), 3);
+        true
+    });
+
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+
+    assert!(cluster_started);
+}
+
+#[test]
+fn run_specific_instance() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+    let target_instance = "i2";
+
+    let _cluster_handle = run_cluster(
+        Duration::from_secs(120),
+        TOTAL_INSTANCES,
+        CmdArguments::default(),
+    )
+    .unwrap();
+
+    // Stop single instance in the cluster.
+    exec_pike([
+        "stop",
+        "--plugin-path",
+        PLUGIN_NAME,
+        "--instance-name",
+        target_instance,
+    ]);
+
+    let data_dir = plugin_path.join("tmp").join("cluster");
+    let instance_dir = data_dir.join(target_instance);
+
+    // Wait while stopping instance is not killed.
+    let start = Instant::now();
+    let timeout = Duration::from_secs(60);
+
+    while is_instance_running(&instance_dir) {
+        thread::sleep(Duration::from_secs(1));
+
+        assert!(
+            Instant::now().duration_since(start) < timeout,
+            "Timeout has reached. Instance was not stopped."
+        );
+    }
+
+    // Check that all other instances were not killed.
+    for entry in fs::read_dir(&data_dir).unwrap() {
+        let instance_dir = entry.unwrap().path();
+
+        // Skip symlinks.
+        if fs::symlink_metadata(&instance_dir).unwrap().is_symlink() {
+            continue;
+        }
+
+        // Skip target instance (it's stopped).
+        if instance_dir.file_name().unwrap() == target_instance {
+            continue;
+        }
+
+        // All other instances should be running.
+        assert!(
+            is_instance_running(&instance_dir),
+            "No any instance should be killed except passed in --instance-name"
+        );
+    }
+
+    // Start single instance
+    exec_pike([
+        "run",
+        "--plugin-path",
+        PLUGIN_NAME,
+        "--instance-name",
+        target_instance,
+        "--daemon",
+    ]);
+
+    let cluster_started = wait_cluster_start_completed(plugin_path, |state| {
+        assert_eq!(state.pico_instance.matches("Online").count(), 8);
+        true
+    });
+
+    assert!(cluster_started);
+
+    // Test skipping the start single instance
+    exec_pike([
+        "run",
+        "--plugin-path",
+        PLUGIN_NAME,
+        "--instance-name",
+        target_instance,
+        "--daemon",
+    ]);
+
+    let cluster_started = wait_cluster_start_completed(plugin_path, |state| {
+        assert_eq!(state.pico_instance.matches("Online").count(), 8);
         true
     });
 
