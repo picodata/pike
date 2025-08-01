@@ -112,6 +112,10 @@ enum Command {
         /// Path to picodata config file
         #[arg(long, value_name = "CONFIG_PATH", default_value = "./picodata.yaml")]
         config_path: PathBuf,
+        /// Name of the instance to run. If not specified, this command
+        /// will run all instances in the cluster.
+        #[arg(long, value_name = "INSTANCE_NAME", default_value = None)]
+        instance_name: Option<String>,
     },
     /// Stop Picodata cluster or a specific instance
     Stop {
@@ -349,6 +353,7 @@ fn main() -> Result<()> {
             plugin_path,
             no_build,
             config_path,
+            instance_name,
         } => {
             is_required_path_exists(&plugin_path, &topology, CARING_PIKE, 1);
 
@@ -386,6 +391,7 @@ fn main() -> Result<()> {
                 .plugin_path(plugin_path)
                 .no_build(no_build)
                 .config_path(config_path)
+                .instance_name(instance_name)
                 .build()
                 .unwrap();
             commands::run::cmd(&params).context("failed to execute Run command")?;
