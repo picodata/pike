@@ -19,10 +19,10 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use std::{fs, path::PathBuf};
 
-use crate::commands::lib::BuildType;
 use crate::commands::lib::{
     cargo_build, check_running_instances, copy_directory_tree, unpack_shipping_archive,
 };
+use crate::commands::lib::{get_active_socket_path, BuildType};
 use crate::commands::lib::{is_plugin_archive, is_plugin_dir, is_plugin_shipping_dir};
 
 const BAFFLED_WHALE: &str = r"
@@ -381,6 +381,7 @@ impl PicodataInstance {
             &format!("cluster.tier={tiers_config}",),
         ]);
 
+        let config_path = run_params.plugin_path.join(config_path);
         if config_path.exists() {
             child.args([
                 "--config",
@@ -789,6 +790,8 @@ pub struct Params {
     no_build: bool,
     #[builder(default = "PathBuf::from(\"./picodata.yaml\")")]
     config_path: PathBuf,
+    #[builder(default)]
+    instance_name: Option<String>,
 }
 
 impl Params {
@@ -801,10 +804,30 @@ impl Params {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
-    let cur_running_instance = check_running_instances(&params.data_dir, &params.plugin_path)?;
-    if let Some(sock_path) = cur_running_instance {
-        bail!("cluster has already started, can connect via {sock_path}");
+    let run_single_instance = params.instance_name.is_some();
+    let instance_name = params.instance_name.as_ref();
+
+    if run_single_instance
+        && get_active_socket_path(
+            &params.data_dir,
+            &params.plugin_path,
+            instance_name.unwrap(),
+        )
+        .is_some()
+    {
+        info!(
+            "running picodata instance {} - {}",
+            instance_name.unwrap(),
+            "SKIPPED".yellow()
+        );
+        return Ok(vec![]);
+    } else if !run_single_instance {
+        let cur_running_instance = check_running_instances(&params.data_dir, &params.plugin_path)?;
+        if let Some(sock_path) = cur_running_instance {
+            bail!("cluster has already started, can connect via {sock_path}");
+        }
     }
 
     let mut params = params.clone();
@@ -829,9 +852,6 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             .find_plugin_versions(plugins_dir.as_ref().unwrap())?;
     }
 
-    info!("Running the cluster...");
-    let start_cluster_run = Instant::now();
-
     let mut picodata_processes = vec![];
 
     let tiers_config = get_merged_cluster_tier_config(
@@ -842,53 +862,129 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
     let first_instance_bin_port = 3001;
     let mut instance_id = 0;
-    for (tier_name, tier) in &params.topology.tiers {
-        for _ in 0..(tier.replicasets * tier.replication_factor) {
-            instance_id += 1;
-            let pico_instance = PicodataInstance::new(
-                instance_id,
-                3000 + instance_id,
-                params.base_http_port + instance_id,
-                params.base_pg_port + instance_id,
-                first_instance_bin_port,
-                plugins_dir.as_deref(),
-                tier_name,
-                &params,
-                &params.topology.enviroment,
-                &tiers_config,
-                &params.picodata_path,
-                &params.config_path,
-            )?;
+    if run_single_instance {
+        let instance_name = instance_name.unwrap().as_str();
+        let instances_path = params.data_dir.join("cluster");
+        let dirs = fs::read_dir(&instances_path).context(format!(
+            "cluster data dir with path {} does not exist",
+            instances_path.to_string_lossy()
+        ))?;
 
-            picodata_processes.push(pico_instance);
+        info!(
+            "running picodata cluster instance '{instance_name}', data folder: {}",
+            instances_path.join(instance_name).to_string_lossy()
+        );
 
-            info!("i{instance_id} - started");
-        }
-    }
-
-    // TODO: check cluster is started by logs or iproto
-    thread::sleep(Duration::from_secs(3));
-
-    if !params.disable_plugin_install {
-        info!("Enabling plugins...");
-
-        if plugins_dir.is_some() {
-            let result = enable_plugins(&params.topology, &params.data_dir, &params.picodata_path);
-            if let Err(e) = result {
-                for process in &mut picodata_processes {
-                    process.kill().unwrap_or_else(|e| {
-                        error!("failed to kill picodata instances: {e:#}");
-                    });
+        // Find directory that belongs to instance.
+        let mut instance_dir = dirs
+            .into_iter()
+            .find_map(|result| {
+                let dir_entry = result.ok()?;
+                if dir_entry.file_name() != instance_name {
+                    return None;
                 }
-                bail!("failed to enable plugins: {}", e.to_string());
+
+                Some(dir_entry.path())
+            })
+            .ok_or({
+                anyhow::anyhow!("failed to locate directory of the instance '{instance_name}")
+            })?;
+
+        if instance_dir.is_symlink() {
+            instance_dir = fs::read_link(instance_dir)?;
+        }
+        let pico_instance_name = instance_dir
+            .file_name()
+            .expect("unreachable: canonicolized path cannot have .. as filename")
+            .to_str();
+        let instance_id = pico_instance_name
+            .expect("unreachable: instance path should be convertible to str")[1..]
+            .parse::<u16>()?;
+
+        let mut instance_id_counter = 0;
+        let mut instance_tier_name = &String::new();
+        for (tier_name, tier) in &params.topology.tiers {
+            instance_id_counter += u16::from(tier.replicasets * tier.replication_factor);
+            if instance_id <= instance_id_counter {
+                instance_tier_name = tier_name;
+                break;
             }
         }
-    };
 
-    info!(
-        "Picodata cluster has started (launch time: {} sec, total instances: {instance_id})",
-        start_cluster_run.elapsed().as_secs()
-    );
+        let pico_instance = PicodataInstance::new(
+            instance_id,
+            3000 + instance_id,
+            params.base_http_port + instance_id,
+            params.base_pg_port + instance_id,
+            first_instance_bin_port,
+            plugins_dir.as_deref(),
+            instance_tier_name,
+            &params,
+            &params.topology.enviroment,
+            &tiers_config,
+            &params.picodata_path,
+            &params.config_path,
+        )?;
+
+        picodata_processes.push(pico_instance);
+
+        info!(
+            "running picodata instance {instance_name} - {}",
+            "OK".green()
+        );
+    } else {
+        info!("Running the cluster...");
+        let start_cluster_run = Instant::now();
+
+        for (tier_name, tier) in &params.topology.tiers {
+            for _ in 0..(tier.replicasets * tier.replication_factor) {
+                instance_id += 1;
+                let pico_instance = PicodataInstance::new(
+                    instance_id,
+                    3000 + instance_id,
+                    params.base_http_port + instance_id,
+                    params.base_pg_port + instance_id,
+                    first_instance_bin_port,
+                    plugins_dir.as_deref(),
+                    tier_name,
+                    &params,
+                    &params.topology.enviroment,
+                    &tiers_config,
+                    &params.picodata_path,
+                    &params.config_path,
+                )?;
+
+                picodata_processes.push(pico_instance);
+
+                info!("i{instance_id} - started");
+            }
+        }
+
+        // TODO: check cluster is started by logs or iproto
+        thread::sleep(Duration::from_secs(3));
+
+        if !params.disable_plugin_install {
+            info!("Enabling plugins...");
+
+            if plugins_dir.is_some() {
+                let result =
+                    enable_plugins(&params.topology, &params.data_dir, &params.picodata_path);
+                if let Err(e) = result {
+                    for process in &mut picodata_processes {
+                        process.kill().unwrap_or_else(|e| {
+                            error!("failed to kill picodata instances: {e:#}");
+                        });
+                    }
+                    bail!("failed to enable plugins: {}", e.to_string());
+                }
+            }
+        };
+
+        info!(
+            "Picodata cluster has started (launch time: {} sec, total instances: {instance_id})",
+            start_cluster_run.elapsed().as_secs()
+        );
+    }
 
     Ok(picodata_processes)
 }

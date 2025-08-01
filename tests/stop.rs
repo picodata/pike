@@ -3,18 +3,14 @@ mod helpers;
 use helpers::{exec_pike, run_cluster, CmdArguments, PLUGIN_DIR, PLUGIN_NAME};
 use std::{
     fs::{self},
-    os::unix::net::UnixStream,
     path::Path,
     thread,
     time::{Duration, Instant},
 };
 
-const TOTAL_INSTANCES: i32 = 4;
+use crate::helpers::is_instance_running;
 
-fn is_instance_running(instance_dir: &Path) -> bool {
-    let socket_path = instance_dir.join("admin.sock");
-    socket_path.exists() && UnixStream::connect(&socket_path).is_ok()
-}
+const TOTAL_INSTANCES: i32 = 4;
 
 #[test]
 fn test_pike_stop() {
