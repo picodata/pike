@@ -6,8 +6,15 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [2.7.0]
+
 ### Added
-- Support running a specific cluster instance
+
+- Support running/stopping specific instance
+
+### Fixed
+
+- fix CI trigger
 
 ## [2.6.0]
 
