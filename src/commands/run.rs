@@ -20,7 +20,8 @@ use std::time::{Duration, Instant};
 use std::{fs, path::PathBuf};
 
 use crate::commands::lib::{
-    cargo_build, check_running_instances, copy_directory_tree, unpack_shipping_archive,
+    cargo_build, copy_directory_tree, find_active_socket, run_query_in_picodata_admin,
+    spawn_picodata_admin, unpack_shipping_archive,
 };
 use crate::commands::lib::{get_active_socket_path, BuildType};
 use crate::commands::lib::{is_plugin_archive, is_plugin_dir, is_plugin_shipping_dir};
@@ -138,7 +139,7 @@ impl Topology {
     }
 }
 
-fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &PathBuf) -> Result<()> {
+fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &Path) -> Result<()> {
     let mut queries: Vec<String> = Vec::new();
 
     for (plugin_name, plugin) in &topology.plugins {
@@ -180,14 +181,7 @@ fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &PathBuf)
     for query in queries {
         log::info!("picodata admin: {query}");
 
-        let mut picodata_admin = Command::new(picodata_path)
-            .arg("admin")
-            .arg(admin_soket.to_str().unwrap())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .context("failed to spawn child proccess of picodata admin")?;
+        let mut picodata_admin = spawn_picodata_admin(picodata_path, &admin_soket)?;
 
         {
             let picodata_stdin = picodata_admin.stdin.as_mut().unwrap();
@@ -242,43 +236,7 @@ fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &PathBuf)
 const GET_VERSION_LUA: &str = "\\lua\npico.instance_info().name\n";
 
 fn get_instance_name(picodata_path: &Path, instance_data_dir: &Path) -> Result<String> {
-    let admin_soket = instance_data_dir.join("admin.sock");
-    let mut picodata_admin = Command::new(picodata_path)
-        .arg("admin")
-        .arg(admin_soket.to_str().unwrap())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("failed to spawn child proccess of picodata admin")?;
-
-    {
-        let picodata_stdin = picodata_admin.stdin.as_mut().unwrap();
-        picodata_stdin
-            .write_all(GET_VERSION_LUA.as_bytes())
-            .context("failed to send plugin installation queries")?;
-    }
-
-    let exit_code = picodata_admin
-        .wait()
-        .context("failed to wait for picodata admin")?;
-
-    if !exit_code.success() {
-        let mut stderr = String::new();
-        picodata_admin
-            .stderr
-            .unwrap()
-            .read_to_string(&mut stderr)
-            .unwrap();
-        bail!("get version error: {stderr}");
-    }
-
-    let mut stdout = String::new();
-    picodata_admin
-        .stdout
-        .unwrap()
-        .read_to_string(&mut stdout)
-        .unwrap();
+    let stdout = run_query_in_picodata_admin(picodata_path, instance_data_dir, GET_VERSION_LUA)?;
 
     for line in stdout.split('\n') {
         if line.starts_with("- ") {
@@ -824,7 +782,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         );
         return Ok(vec![]);
     } else if !run_single_instance {
-        let cur_running_instance = check_running_instances(&params.data_dir, &params.plugin_path)?;
+        let cur_running_instance = find_active_socket(&params.data_dir, &params.plugin_path)?;
         if let Some(sock_path) = cur_running_instance {
             bail!("cluster has already started, can connect via {sock_path}");
         }

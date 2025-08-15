@@ -3,10 +3,10 @@ use flate2::bufread::GzDecoder;
 use fs_extra::dir;
 use std::fmt::Display;
 use std::fs::{self, File, FileType};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use tar::Archive;
 
 #[cfg(target_os = "linux")]
@@ -170,7 +170,7 @@ pub fn get_active_socket_path(
 }
 
 // Scan data directory and return the first active instance's socket path
-pub fn check_running_instances(data_dir: &Path, plugin_path: &Path) -> Result<Option<String>> {
+pub fn find_active_socket(data_dir: &Path, plugin_path: &Path) -> Result<Option<String>> {
     let instances_path = plugin_path.join(data_dir.join("cluster"));
     if !instances_path.exists() {
         return Ok(None);
@@ -184,9 +184,9 @@ pub fn check_running_instances(data_dir: &Path, plugin_path: &Path) -> Result<Op
     for current_dir in dirs {
         let dir_name = current_dir?.file_name();
         if let Some(name) = dir_name.to_str() {
-            let instance_name = get_active_socket_path(data_dir, plugin_path, name);
-            if instance_name.is_some() {
-                return Ok(instance_name);
+            let socket_path = get_active_socket_path(data_dir, plugin_path, name);
+            if socket_path.is_some() {
+                return Ok(socket_path);
             }
         }
     }
@@ -234,4 +234,56 @@ pub fn copy_directory_tree(src_path: &Path, dst_dir: &Path) -> Result<()> {
         format!("failed to copy directory tree from {src_path} to {dst_path}")
     })?;
     Ok(())
+}
+
+/// Spawns picodata admin in a new process.
+pub fn spawn_picodata_admin(picodata_path: &Path, socket_path: &PathBuf) -> Result<Child> {
+    Command::new(picodata_path)
+        .arg("admin")
+        .arg(socket_path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("failed to spawn child proccess of picodata admin")
+}
+
+/// Sends text to admin.sock and returns received stdout.
+pub fn run_query_in_picodata_admin(
+    picodata_path: &Path,
+    instance_data_dir: &Path,
+    query: &str,
+) -> Result<String> {
+    let admin_soket = instance_data_dir.join("admin.sock");
+    let mut picodata_admin = spawn_picodata_admin(picodata_path, &admin_soket)?;
+
+    {
+        let picodata_stdin = picodata_admin.stdin.as_mut().unwrap();
+        picodata_stdin
+            .write_all(query.as_bytes())
+            .context("failed to send text in admin socket")?;
+    }
+
+    let exit_code = picodata_admin
+        .wait()
+        .context("failed to wait for picodata admin")?;
+
+    if !exit_code.success() {
+        let mut stderr = String::new();
+        picodata_admin
+            .stderr
+            .unwrap()
+            .read_to_string(&mut stderr)
+            .context("failed to read stderr of picodata admin child")?;
+        bail!("failed to run query in picodata admin: {stderr}");
+    }
+
+    let mut stdout = String::new();
+    picodata_admin
+        .stdout
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .context("failed to read stdout of picodata admin child")?;
+
+    Ok(stdout)
 }
