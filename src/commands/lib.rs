@@ -287,3 +287,69 @@ pub fn run_query_in_picodata_admin(
 
     Ok(stdout)
 }
+
+pub mod instance_info {
+
+    use crate::commands::lib::run_query_in_picodata_admin;
+    use anyhow::{bail, Result};
+    use std::{path::Path, str::FromStr};
+
+    const GET_INSTANCE_NAME: &str = "\\lua\npico.instance_info().name\n";
+    const GET_INSTANCE_CURRENT_STATE: &str = "\\lua\npico.instance_info().current_state.variant\n";
+
+    #[derive(Clone, Copy, Debug)]
+    pub enum InstanceState {
+        Online,
+        Offline,
+        Expelled,
+    }
+
+    impl InstanceState {
+        pub fn is_online(&self) -> bool {
+            matches!(self, InstanceState::Online)
+        }
+    }
+
+    impl FromStr for InstanceState {
+        type Err = anyhow::Error;
+
+        fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+            let state = match s.to_ascii_lowercase().as_str() {
+                "online" => Self::Online,
+                "offline" => Self::Offline,
+                "expelled" => Self::Expelled,
+                unknown => bail!("Unknown instane state variant: '{unknown}'"),
+            };
+
+            Ok(state)
+        }
+    }
+
+    pub fn get_instance_name(picodata_path: &Path, instance_data_dir: &Path) -> Result<String> {
+        let stdout =
+            run_query_in_picodata_admin(picodata_path, instance_data_dir, GET_INSTANCE_NAME)?;
+
+        let Some(instance_name) = stdout.lines().find_map(|line| line.strip_prefix("- ")) else {
+            bail!("unable to extract instance name from Lua query output '{stdout}'");
+        };
+
+        Ok(instance_name.to_string())
+    }
+
+    pub fn get_instance_current_state(
+        picodata_path: &Path,
+        instance_data_dir: &Path,
+    ) -> Result<InstanceState> {
+        let stdout = run_query_in_picodata_admin(
+            picodata_path,
+            instance_data_dir,
+            GET_INSTANCE_CURRENT_STATE,
+        )?;
+
+        let Some(current_state) = stdout.lines().find_map(|line| line.strip_prefix("- ")) else {
+            bail!("unable to extract instance state from Lua query output '{stdout}'");
+        };
+
+        current_state.parse()
+    }
+}
