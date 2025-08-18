@@ -13,15 +13,16 @@ use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::str;
+use std::str::{self};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use std::{fs, path::PathBuf};
 
+use crate::commands::lib::instance_info::{get_instance_current_state, get_instance_name};
 use crate::commands::lib::{
-    cargo_build, copy_directory_tree, find_active_socket, run_query_in_picodata_admin,
-    spawn_picodata_admin, unpack_shipping_archive,
+    cargo_build, copy_directory_tree, find_active_socket, spawn_picodata_admin,
+    unpack_shipping_archive,
 };
 use crate::commands::lib::{get_active_socket_path, BuildType};
 use crate::commands::lib::{is_plugin_archive, is_plugin_dir, is_plugin_shipping_dir};
@@ -233,20 +234,6 @@ fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &Path) ->
     Ok(())
 }
 
-const GET_VERSION_LUA: &str = "\\lua\npico.instance_info().name\n";
-
-fn get_instance_name(picodata_path: &Path, instance_data_dir: &Path) -> Result<String> {
-    let stdout = run_query_in_picodata_admin(picodata_path, instance_data_dir, GET_VERSION_LUA)?;
-
-    for line in stdout.split('\n') {
-        if line.starts_with("- ") {
-            return Ok(line.strip_prefix("- ").unwrap().to_string());
-        }
-    }
-
-    bail!("get version error: {stdout}");
-}
-
 #[allow(dead_code)]
 pub struct PicodataInstanceProperties<'a> {
     pub bin_port: &'a u16,
@@ -373,13 +360,22 @@ impl PicodataInstance {
         let start = Instant::now();
         while Instant::now().duration_since(start) < Duration::from_secs(10) {
             thread::sleep(Duration::from_millis(100));
-            let new_instance_name = match get_instance_name(picodata_path, &instance_data_dir) {
-                Ok(name) => name,
-                Err(e) => {
-                    log::debug!("{e}");
-                    continue;
-                }
+            let Ok(new_instance_name) = get_instance_name(picodata_path, &instance_data_dir)
+                .inspect_err(|err| log::debug!("failed to get name of the instance: {err}"))
+            else {
+                continue;
             };
+
+            // If name is already known, then socket is ready, i.e. we assume 
+            // call below should return without error.
+            let instance_current_state =
+                get_instance_current_state(picodata_path, &instance_data_dir)?;
+            if !instance_current_state.is_online() {
+                log::info!("Waiting for '{new_instance_name}' to become 'Online'");
+                continue;
+            }
+
+            log::info!("{:?}", instance_current_state);
 
             // create symlink to real instance data dir
             let symlink_name = run_params.data_dir.join("cluster").join(&new_instance_name);
