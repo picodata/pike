@@ -155,7 +155,7 @@ pub fn get_active_socket_path(
     data_dir: &Path,
     plugin_path: &Path,
     instance_name: &str,
-) -> Option<String> {
+) -> Option<PathBuf> {
     let socket_path = plugin_path
         .join(data_dir)
         .join("cluster")
@@ -163,14 +163,14 @@ pub fn get_active_socket_path(
         .join("admin.sock");
 
     if socket_path.exists() && UnixStream::connect(&socket_path).is_ok() {
-        return socket_path.to_str().map(str::to_owned);
+        return Some(socket_path);
     }
 
     None
 }
 
 // Scan data directory and return the first active instance's socket path
-pub fn find_active_socket(data_dir: &Path, plugin_path: &Path) -> Result<Option<String>> {
+pub fn find_active_socket_path(data_dir: &Path, plugin_path: &Path) -> Result<Option<PathBuf>> {
     let instances_path = plugin_path.join(data_dir.join("cluster"));
     if !instances_path.exists() {
         return Ok(None);
@@ -237,7 +237,7 @@ pub fn copy_directory_tree(src_path: &Path, dst_dir: &Path) -> Result<()> {
 }
 
 /// Spawns picodata admin in a new process.
-pub fn spawn_picodata_admin(picodata_path: &Path, socket_path: &PathBuf) -> Result<Child> {
+pub fn spawn_picodata_admin(picodata_path: &Path, socket_path: &Path) -> Result<Child> {
     Command::new(picodata_path)
         .arg("admin")
         .arg(socket_path)
@@ -251,12 +251,10 @@ pub fn spawn_picodata_admin(picodata_path: &Path, socket_path: &PathBuf) -> Resu
 /// Sends text to admin.sock and returns received stdout.
 pub fn run_query_in_picodata_admin(
     picodata_path: &Path,
-    instance_data_dir: &Path,
+    socket_path: &Path,
     query: &str,
 ) -> Result<String> {
-    let admin_soket = instance_data_dir.join("admin.sock");
-    let mut picodata_admin = spawn_picodata_admin(picodata_path, &admin_soket)?;
-
+    let mut picodata_admin = spawn_picodata_admin(picodata_path, socket_path)?;
     {
         let picodata_stdin = picodata_admin.stdin.as_mut().unwrap();
         picodata_stdin
@@ -290,12 +288,14 @@ pub fn run_query_in_picodata_admin(
 
 pub mod instance_info {
 
-    use crate::commands::lib::run_query_in_picodata_admin;
-    use anyhow::{bail, Result};
+    use crate::commands::lib::{find_active_socket_path, run_query_in_picodata_admin};
+    use anyhow::{anyhow, bail, Context, Result};
     use std::{path::Path, str::FromStr};
 
-    const GET_INSTANCE_NAME: &str = "\\lua\npico.instance_info().name\n";
-    const GET_INSTANCE_CURRENT_STATE: &str = "\\lua\npico.instance_info().current_state.variant\n";
+    const GET_INSTANCE_NAME: &str = "\\lua\npico.instance_info().name";
+    const GET_INSTANCE_CURRENT_STATE: &str = "\\lua\npico.instance_info().current_state.variant";
+    const GET_CLUSTER_LEADER_ID: &str =
+        "\\lua\nbox.func[\".proc_runtime_info\"]:call().raft.leader_id";
 
     #[derive(Clone, Copy, Debug)]
     pub enum InstanceState {
@@ -305,7 +305,7 @@ pub mod instance_info {
     }
 
     impl InstanceState {
-        pub fn is_online(&self) -> bool {
+        pub fn is_online(self) -> bool {
             matches!(self, InstanceState::Online)
         }
     }
@@ -325,31 +325,50 @@ pub mod instance_info {
         }
     }
 
-    pub fn get_instance_name(picodata_path: &Path, instance_data_dir: &Path) -> Result<String> {
-        let stdout =
-            run_query_in_picodata_admin(picodata_path, instance_data_dir, GET_INSTANCE_NAME)?;
+    /// Runs input query in picodata admin.
+    ///
+    /// Only single line is extracted from returned STDOUT.
+    fn get_lua_single_line_output(
+        picodata_path: &Path,
+        socket_path: &Path,
+        lua_query: &str,
+    ) -> Result<String> {
+        let stdout = run_query_in_picodata_admin(picodata_path, socket_path, lua_query)?;
 
-        let Some(instance_name) = stdout.lines().find_map(|line| line.strip_prefix("- ")) else {
-            bail!("unable to extract instance name from Lua query output '{stdout}'");
+        let Some(output) = stdout.lines().find_map(|line| line.strip_prefix("- ")) else {
+            bail!("unable to extract single line from Lua query output '{stdout}'");
         };
 
-        Ok(instance_name.to_string())
+        Ok(output.to_string())
+    }
+
+    pub fn get_instance_name(picodata_path: &Path, instance_data_dir: &Path) -> Result<String> {
+        let instance_socket = instance_data_dir.join("admin.sock");
+
+        get_lua_single_line_output(picodata_path, &instance_socket, GET_INSTANCE_NAME)
     }
 
     pub fn get_instance_current_state(
         picodata_path: &Path,
         instance_data_dir: &Path,
     ) -> Result<InstanceState> {
-        let stdout = run_query_in_picodata_admin(
-            picodata_path,
-            instance_data_dir,
-            GET_INSTANCE_CURRENT_STATE,
-        )?;
+        let instance_socket = instance_data_dir.join("admin.sock");
 
-        let Some(current_state) = stdout.lines().find_map(|line| line.strip_prefix("- ")) else {
-            bail!("unable to extract instance state from Lua query output '{stdout}'");
+        get_lua_single_line_output(picodata_path, &instance_socket, GET_INSTANCE_CURRENT_STATE)
+            .and_then(|state| state.parse())
+    }
+
+    pub fn get_cluster_leader_id(
+        picodata_path: &Path,
+        data_dir: &Path,
+        plugin_path: &Path,
+    ) -> Result<usize> {
+        let Some(socket_path) = find_active_socket_path(data_dir, plugin_path)? else {
+            bail!("failed to get cluster leader id information: no active socket found")
         };
 
-        current_state.parse()
+        get_lua_single_line_output(picodata_path, &socket_path, GET_CLUSTER_LEADER_ID)
+            .and_then(|str| str.parse().context("failed to parse leader id from string"))
+            .map_err(|err| anyhow!("unable to get cluster leader id: {err}"))
     }
 }

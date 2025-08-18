@@ -19,9 +19,11 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use std::{fs, path::PathBuf};
 
-use crate::commands::lib::instance_info::{get_instance_current_state, get_instance_name};
+use crate::commands::lib::instance_info::{
+    get_cluster_leader_id, get_instance_current_state, get_instance_name,
+};
 use crate::commands::lib::{
-    cargo_build, copy_directory_tree, find_active_socket, spawn_picodata_admin,
+    cargo_build, copy_directory_tree, find_active_socket_path, spawn_picodata_admin,
     unpack_shipping_archive,
 };
 use crate::commands::lib::{get_active_socket_path, BuildType};
@@ -366,7 +368,7 @@ impl PicodataInstance {
                 continue;
             };
 
-            // If name is already known, then socket is ready, i.e. we assume 
+            // If name is already known, then socket is ready, i.e. we assume
             // call below should return without error.
             let instance_current_state =
                 get_instance_current_state(picodata_path, &instance_data_dir)?;
@@ -374,8 +376,6 @@ impl PicodataInstance {
                 log::info!("Waiting for '{new_instance_name}' to become 'Online'");
                 continue;
             }
-
-            log::info!("{:?}", instance_current_state);
 
             // create symlink to real instance data dir
             let symlink_name = run_params.data_dir.join("cluster").join(&new_instance_name);
@@ -778,9 +778,11 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         );
         return Ok(vec![]);
     } else if !run_single_instance {
-        let cur_running_instance = find_active_socket(&params.data_dir, &params.plugin_path)?;
-        if let Some(sock_path) = cur_running_instance {
-            bail!("cluster has already started, can connect via {sock_path}");
+        if let Some(sock_path) = find_active_socket_path(&params.data_dir, &params.plugin_path)? {
+            bail!(
+                "cluster has already started, can connect via {}",
+                sock_path.display()
+            );
         }
     }
 
@@ -914,8 +916,33 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             }
         }
 
-        // TODO: check cluster is started by logs or iproto
-        thread::sleep(Duration::from_secs(3));
+        // Check whether cluster leader is known at this point.
+        // If yes, just skip this step. Otherwise, try to resolve it through
+        // any available socket in the cluster.
+        {
+            let timeout = Duration::from_secs(15);
+            let start = Instant::now();
+
+            log::info!(
+                "Waiting for cluster RAFT leader to be negotiated (timeout {}s)",
+                timeout.as_secs()
+            );
+
+            while Instant::now().duration_since(start) < timeout {
+                let raft_leader_id = get_cluster_leader_id(
+                    &params.picodata_path,
+                    &params.data_dir,
+                    &params.plugin_path,
+                )?;
+
+                if raft_leader_id != 0 {
+                    log::info!("Cluster leader id is {raft_leader_id}");
+                    break;
+                }
+
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
 
         if !params.disable_plugin_install {
             info!("Enabling plugins...");
