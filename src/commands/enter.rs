@@ -1,3 +1,4 @@
+use crate::commands::lib::get_cluster_dir;
 use anyhow::{bail, Context, Result};
 use log::info;
 use std::{path::Path, process::Command};
@@ -10,7 +11,7 @@ pub fn cmd(
 ) -> Result<()> {
     info!("Entering instance <{instance_name}>");
 
-    let cluster_dir = plugin_path.join(data_dir).join("cluster");
+    let cluster_dir = get_cluster_dir(plugin_path, data_dir);
 
     enter_instance(&cluster_dir, instance_name, picodata_path)
         .context(format!("failed to enter instance {instance_name}"))

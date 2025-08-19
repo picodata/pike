@@ -1,4 +1,4 @@
-use crate::commands::lib::get_active_socket_path;
+use crate::commands::lib::{get_active_socket_path, get_cluster_dir};
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use derive_builder::Builder;
@@ -94,14 +94,9 @@ fn stop_instance(params: &Params, instance_dir: &Path) -> Result<()> {
     }
 
     let pid = read_pid_from_file(&pid_file_path).context("failed to read the PID file")?;
+    let cluster_dir = get_cluster_dir(&params.plugin_path, &params.data_dir);
 
-    if get_active_socket_path(
-        &params.data_dir,
-        &params.plugin_path,
-        link_name.to_str().unwrap(),
-    )
-    .is_none()
-    {
+    if get_active_socket_path(&cluster_dir, link_name.to_str().unwrap()).is_none() {
         info!(
             "stopping picodata instance: {} - {}",
             link_name.to_string_lossy(),

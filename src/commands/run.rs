@@ -23,8 +23,8 @@ use crate::commands::lib::instance_info::{
     get_cluster_leader_id, get_instance_current_state, get_instance_name,
 };
 use crate::commands::lib::{
-    cargo_build, copy_directory_tree, find_active_socket_path, spawn_picodata_admin,
-    unpack_shipping_archive,
+    cargo_build, copy_directory_tree, find_active_socket_path, get_cluster_dir,
+    spawn_picodata_admin, unpack_shipping_archive,
 };
 use crate::commands::lib::{get_active_socket_path, BuildType};
 use crate::commands::lib::{is_plugin_archive, is_plugin_dir, is_plugin_shipping_dir};
@@ -142,7 +142,7 @@ impl Topology {
     }
 }
 
-fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &Path) -> Result<()> {
+fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path) -> Result<()> {
     let mut queries: Vec<String> = Vec::new();
 
     for (plugin_name, plugin) in &topology.plugins {
@@ -179,7 +179,7 @@ fn enable_plugins(topology: &Topology, data_dir: &Path, picodata_path: &Path) ->
         ));
     }
 
-    let admin_soket = data_dir.join("cluster").join("i1").join("admin.sock");
+    let admin_soket = cluster_dir.join("i1").join("admin.sock");
 
     for query in queries {
         log::info!("picodata admin: {query}");
@@ -264,24 +264,28 @@ pub struct PicodataInstance {
 }
 
 impl PicodataInstance {
-    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_lines)]
     fn new(
         instance_id: u16,
-        bin_port: u16,
-        http_port: u16,
-        pg_port: u16,
         first_instance_bin_port: u16,
         plugins_dir: Option<&Path>,
         tier: &str,
         run_params: &Params,
-        env_templates: &BTreeMap<String, String>,
-        tiers_config: &str,
-        picodata_path: &Path,
-        config_path: &Path,
     ) -> Result<Self> {
+        // Properties
+        let bin_port = 3000 + instance_id;
+        let http_port = run_params.base_http_port + instance_id;
+        let pg_port = run_params.base_pg_port + instance_id;
         let mut instance_name = format!("i{instance_id}");
-        let instance_data_dir = run_params.data_dir.join("cluster").join(&instance_name);
+        let tiers_config = get_merged_cluster_tier_config(
+            &run_params.plugin_path,
+            &run_params.config_path,
+            &run_params.topology.tiers,
+        );
+
+        // Paths
+        let cluster_dir = get_cluster_dir(&run_params.plugin_path, &run_params.data_dir);
+        let instance_data_dir = cluster_dir.join(&instance_name);
         let log_file_path = instance_data_dir.join("picodata.log");
 
         fs::create_dir_all(&instance_data_dir).context("Failed to create instance data dir")?;
@@ -289,7 +293,7 @@ impl PicodataInstance {
         let env_templates_ctx = liquid::object!({
             "instance_id": instance_id,
         });
-        let env_vars = Self::compute_env_vars(env_templates, &env_templates_ctx)?;
+        let env_vars = Self::compute_env_vars(&run_params.topology.enviroment, &env_templates_ctx)?;
 
         let mut child = Command::new(&run_params.picodata_path);
         child.envs(&env_vars);
@@ -328,7 +332,7 @@ impl PicodataInstance {
             &format!("cluster.tier={tiers_config}",),
         ]);
 
-        let config_path = run_params.plugin_path.join(config_path);
+        let config_path = run_params.plugin_path.join(&run_params.config_path);
         if config_path.exists() {
             child.args([
                 "--config",
@@ -362,8 +366,9 @@ impl PicodataInstance {
         let start = Instant::now();
         while Instant::now().duration_since(start) < Duration::from_secs(10) {
             thread::sleep(Duration::from_millis(100));
-            let Ok(new_instance_name) = get_instance_name(picodata_path, &instance_data_dir)
-                .inspect_err(|err| log::debug!("failed to get name of the instance: {err}"))
+            let Ok(new_instance_name) =
+                get_instance_name(&run_params.picodata_path, &instance_data_dir)
+                    .inspect_err(|err| log::debug!("failed to get name of the instance: {err}"))
             else {
                 continue;
             };
@@ -371,14 +376,14 @@ impl PicodataInstance {
             // If name is already known, then socket is ready, i.e. we assume
             // call below should return without error.
             let instance_current_state =
-                get_instance_current_state(picodata_path, &instance_data_dir)?;
+                get_instance_current_state(&run_params.picodata_path, &instance_data_dir)?;
             if !instance_current_state.is_online() {
                 log::info!("Waiting for '{new_instance_name}' to become 'Online'");
                 continue;
             }
 
             // create symlink to real instance data dir
-            let symlink_name = run_params.data_dir.join("cluster").join(&new_instance_name);
+            let symlink_name = cluster_dir.join(&new_instance_name);
             let _ = fs::remove_file(&symlink_name);
             symlink(&instance_name, symlink_name)
                 .context("failed create symlink to instance dir")?;
@@ -760,16 +765,11 @@ impl Params {
 
 #[allow(clippy::too_many_lines)]
 pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
+    let cluster_dir = get_cluster_dir(&params.plugin_path, &params.data_dir);
     let run_single_instance = params.instance_name.is_some();
     let instance_name = params.instance_name.as_ref();
 
-    if run_single_instance
-        && get_active_socket_path(
-            &params.data_dir,
-            &params.plugin_path,
-            instance_name.unwrap(),
-        )
-        .is_some()
+    if run_single_instance && get_active_socket_path(&cluster_dir, instance_name.unwrap()).is_some()
     {
         info!(
             "running picodata instance {} - {}",
@@ -778,7 +778,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         );
         return Ok(vec![]);
     } else if !run_single_instance {
-        if let Some(sock_path) = find_active_socket_path(&params.data_dir, &params.plugin_path)? {
+        if let Some(sock_path) = find_active_socket_path(&cluster_dir)? {
             bail!(
                 "cluster has already started, can connect via {}",
                 sock_path.display()
@@ -787,7 +787,6 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
     }
 
     let mut params = params.clone();
-    params.data_dir = params.plugin_path.join(&params.data_dir);
 
     let mut plugins_dir = None;
     if is_plugin_dir(&params.plugin_path) {
@@ -810,25 +809,18 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
     let mut picodata_processes = vec![];
 
-    let tiers_config = get_merged_cluster_tier_config(
-        &params.plugin_path,
-        &params.config_path,
-        &params.topology.tiers,
-    );
-
     let first_instance_bin_port = 3001;
     let mut instance_id = 0;
     if run_single_instance {
         let instance_name = instance_name.unwrap().as_str();
-        let instances_path = params.data_dir.join("cluster");
-        let dirs = fs::read_dir(&instances_path).context(format!(
+        let dirs = fs::read_dir(&cluster_dir).context(format!(
             "cluster data dir with path {} does not exist",
-            instances_path.to_string_lossy()
+            cluster_dir.to_string_lossy()
         ))?;
 
         info!(
             "running picodata cluster instance '{instance_name}', data folder: {}",
-            instances_path.join(instance_name).to_string_lossy()
+            cluster_dir.join(instance_name).to_string_lossy()
         );
 
         // Find directory that belongs to instance.
@@ -869,17 +861,10 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
         let pico_instance = PicodataInstance::new(
             instance_id,
-            3000 + instance_id,
-            params.base_http_port + instance_id,
-            params.base_pg_port + instance_id,
             first_instance_bin_port,
             plugins_dir.as_deref(),
             instance_tier_name,
             &params,
-            &params.topology.enviroment,
-            &tiers_config,
-            &params.picodata_path,
-            &params.config_path,
         )?;
 
         picodata_processes.push(pico_instance);
@@ -897,17 +882,10 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
                 instance_id += 1;
                 let pico_instance = PicodataInstance::new(
                     instance_id,
-                    3000 + instance_id,
-                    params.base_http_port + instance_id,
-                    params.base_pg_port + instance_id,
                     first_instance_bin_port,
                     plugins_dir.as_deref(),
                     tier_name,
                     &params,
-                    &params.topology.enviroment,
-                    &tiers_config,
-                    &params.picodata_path,
-                    &params.config_path,
                 )?;
 
                 picodata_processes.push(pico_instance);
@@ -929,11 +907,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             );
 
             while Instant::now().duration_since(start) < timeout {
-                let raft_leader_id = get_cluster_leader_id(
-                    &params.picodata_path,
-                    &params.data_dir,
-                    &params.plugin_path,
-                )?;
+                let raft_leader_id = get_cluster_leader_id(&params.picodata_path, &cluster_dir)?;
 
                 if raft_leader_id != 0 {
                     log::info!("Cluster leader id is {raft_leader_id}");
@@ -948,8 +922,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             info!("Enabling plugins...");
 
             if plugins_dir.is_some() {
-                let result =
-                    enable_plugins(&params.topology, &params.data_dir, &params.picodata_path);
+                let result = enable_plugins(&params.topology, &cluster_dir, &params.picodata_path);
                 if let Err(e) = result {
                     for process in &mut picodata_processes {
                         process.kill().unwrap_or_else(|e| {
