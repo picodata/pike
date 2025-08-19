@@ -49,6 +49,9 @@ const BAFFLED_WHALE: &str = r"
                                  `-.,'
  ";
 
+const TIMEOUT_WAITING_FOR_CLUSTER_ID: Duration = Duration::from_secs(15);
+const TIMEOUT_WAITING_FOR_INSTANCE_READINESS: Duration = Duration::from_secs(10);
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct Tier {
     pub replicasets: u8,
@@ -364,7 +367,7 @@ impl PicodataInstance {
             .context(format!("failed to start picodata instance: {instance_id}"))?;
 
         let start = Instant::now();
-        while Instant::now().duration_since(start) < Duration::from_secs(10) {
+        while Instant::now().duration_since(start) < TIMEOUT_WAITING_FOR_INSTANCE_READINESS {
             thread::sleep(Duration::from_millis(100));
             let Ok(new_instance_name) =
                 get_instance_name(&run_params.picodata_path, &instance_data_dir)
@@ -898,7 +901,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         // If yes, just skip this step. Otherwise, try to resolve it through
         // any available socket in the cluster.
         {
-            let timeout = Duration::from_secs(15);
+            let timeout = TIMEOUT_WAITING_FOR_CLUSTER_ID;
             let start = Instant::now();
 
             log::info!(
