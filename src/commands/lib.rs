@@ -150,17 +150,13 @@ pub fn cargo_build(build_type: BuildType, target_dir: &PathBuf, build_dir: &Path
     Ok(())
 }
 
-// Return socket path to active instance
-pub fn get_active_socket_path(
-    data_dir: &Path,
-    plugin_path: &Path,
-    instance_name: &str,
-) -> Option<PathBuf> {
-    let socket_path = plugin_path
-        .join(data_dir)
-        .join("cluster")
-        .join(instance_name)
-        .join("admin.sock");
+pub fn get_cluster_dir(plugin_path: &Path, data_dir: &Path) -> PathBuf {
+    plugin_path.join(data_dir).join("cluster")
+}
+
+// Return socket path to the active instance
+pub fn get_active_socket_path(cluster_dir: &Path, instance_name: &str) -> Option<PathBuf> {
+    let socket_path = cluster_dir.join(instance_name).join("admin.sock");
 
     if socket_path.exists() && UnixStream::connect(&socket_path).is_ok() {
         return Some(socket_path);
@@ -169,22 +165,21 @@ pub fn get_active_socket_path(
     None
 }
 
-// Scan data directory and return the first active instance's socket path
-pub fn find_active_socket_path(data_dir: &Path, plugin_path: &Path) -> Result<Option<PathBuf>> {
-    let instances_path = plugin_path.join(data_dir.join("cluster"));
-    if !instances_path.exists() {
+// Scan directory with instances and return the first active socket path
+pub fn find_active_socket_path(cluster_dir: &Path) -> Result<Option<PathBuf>> {
+    if !cluster_dir.exists() {
         return Ok(None);
     }
 
-    let dirs = fs::read_dir(&instances_path).context(format!(
+    let dirs = fs::read_dir(cluster_dir).context(format!(
         "cluster data dir with path {} does not exist",
-        instances_path.to_string_lossy()
+        cluster_dir.display()
     ))?;
 
     for current_dir in dirs {
         let dir_name = current_dir?.file_name();
         if let Some(name) = dir_name.to_str() {
-            let socket_path = get_active_socket_path(data_dir, plugin_path, name);
+            let socket_path = get_active_socket_path(cluster_dir, name);
             if socket_path.is_some() {
                 return Ok(socket_path);
             }
@@ -358,12 +353,8 @@ pub mod instance_info {
             .and_then(|state| state.parse())
     }
 
-    pub fn get_cluster_leader_id(
-        picodata_path: &Path,
-        data_dir: &Path,
-        plugin_path: &Path,
-    ) -> Result<usize> {
-        let Some(socket_path) = find_active_socket_path(data_dir, plugin_path)? else {
+    pub fn get_cluster_leader_id(picodata_path: &Path, cluster_dir: &Path) -> Result<usize> {
+        let Some(socket_path) = find_active_socket_path(cluster_dir)? else {
             bail!("failed to get cluster leader id information: no active socket found")
         };
 
