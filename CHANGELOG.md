@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [2.7.1]
+
+## Fixed
+- waiting for leader id to be negotiated before enabling plugins
+- waiting for node Online state before enabling plugins
+- with the help of added checks for leader id and node online status, cluster no longer dies with "RAFT proposal dropped" error
+
 ## [2.7.0]
 
 ### Added
