@@ -82,6 +82,9 @@ enum Command {
         /// Disable the automatic installation of plugins
         #[arg(long)]
         disable_install_plugins: bool,
+        /// Base iproto port for picodata instances
+        #[arg(long, default_value = "3000")]
+        base_bin_port: u16,
         /// Base http port for picodata instances
         #[arg(long, default_value = "8000")]
         base_http_port: u16,
@@ -343,6 +346,7 @@ fn main() -> Result<()> {
             topology,
             data_dir,
             disable_install_plugins: disable_plugin_install,
+            base_bin_port,
             base_http_port,
             picodata_path,
             base_pg_port,
@@ -381,6 +385,7 @@ fn main() -> Result<()> {
                 .topology(topology)
                 .data_dir(data_dir)
                 .disable_plugin_install(disable_plugin_install)
+                .base_bin_port(base_bin_port)
                 .base_http_port(base_http_port)
                 .picodata_path(picodata_path)
                 .base_pg_port(base_pg_port)
