@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- use env variables for ipv4 addresses if they are set and cli arguments are not provided
+
 ## [2.7.1]
 
 ## Fixed
