@@ -997,6 +997,7 @@ fn run_with_external_plugin_workspace() {
 #[test]
 fn run_specific_instance() {
     let plugin_path = Path::new(PLUGIN_DIR);
+    init_plugin(PLUGIN_NAME);
     let target_instance = "i2";
 
     let _cluster_handle = run_cluster(
@@ -1087,4 +1088,78 @@ fn run_specific_instance() {
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
+}
+
+#[test]
+fn run_with_env_variables() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+    init_plugin(PLUGIN_NAME);
+
+    let plugins = BTreeMap::from([(
+        PLUGIN_NAME.to_string(),
+        Plugin {
+            migration_context: vec![MigrationContextVar {
+                name: "name".to_string(),
+                value: "value".to_string(),
+            }],
+            services: BTreeMap::from([(
+                "example_service".to_string(),
+                Service {
+                    tiers: vec!["default".to_string()],
+                },
+            )]),
+            ..Default::default()
+        },
+    )]);
+
+    let tiers = BTreeMap::from([(
+        "default".to_string(),
+        Tier {
+            replicasets: 2,
+            replication_factor: 2,
+        },
+    )]);
+
+    let enviroment = BTreeMap::from_iter([
+        (
+            String::from("PICODATA_HTTP_LISTEN"),
+            String::from("0.0.0.0:{{ instance_id | plus: 18000 }}"),
+        ),
+        (
+            String::from("PICODATA_PG_LISTEN"),
+            String::from("127.0.0.1:{{ instance_id | plus: 5400 }}"),
+        ),
+        (
+            String::from("PICODATA_IPROTO_LISTEN"),
+            String::from("127.0.0.1:{{ instance_id | plus: 3300 }}"),
+        ),
+    ]);
+
+    let topology = Topology {
+        enviroment,
+        plugins,
+        tiers,
+    };
+    let params = RunParamsBuilder::default()
+        .topology(topology)
+        .daemon(true)
+        .plugin_path(plugin_path.into())
+        .build()
+        .unwrap();
+
+    let pico_instances = run(&params).unwrap();
+    let properties = pico_instances.first().unwrap().properties();
+
+    assert_eq!(properties.bin_port, &3301);
+    assert_eq!(properties.http_port, &18001);
+    assert_eq!(properties.pg_port, &5401);
+    assert_eq!(properties.instance_id, &1);
+    assert_eq!(properties.tier, "default");
+    assert_eq!(properties.instance_name, "default_1_1");
+    assert_eq!(
+        properties.data_dir.to_str().unwrap(),
+        "./tests/tmp/test-plugin/./tmp/cluster/i1"
+    );
+
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 }
