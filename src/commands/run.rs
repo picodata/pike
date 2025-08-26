@@ -10,6 +10,7 @@ use serde_yaml::{Mapping, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
+use std::net::SocketAddrV4;
 use std::os::unix::fs::symlink;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -239,6 +240,24 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
     Ok(())
 }
 
+fn get_ipv4_from_liquid_var(
+    env_vars: &BTreeMap<String, String>,
+    variable: &str,
+) -> Option<SocketAddrV4> {
+    let env_ipv4 = env_vars.get(variable)?;
+    let env_ipv4 = env_ipv4.parse::<SocketAddrV4>().unwrap_or_else(|e| {
+        panic!("could not parse {variable} to an ipv4 address: {e}. hint: use 127.0.0.1")
+    });
+    let ip = env_ipv4.ip();
+    assert!(
+        ip.is_loopback() || ip.is_unspecified(),
+        "ipv4 address {env_ipv4:?} of variable {variable} \
+        is not loopback (127.0.0.1) or unspecified (0.0.0.0), \
+        so it can't be used in pike."
+    );
+    Some(env_ipv4)
+}
+
 #[allow(dead_code)]
 pub struct PicodataInstanceProperties<'a> {
     pub bin_port: &'a u16,
@@ -270,15 +289,11 @@ impl PicodataInstance {
     #[allow(clippy::too_many_lines)]
     fn new(
         instance_id: u16,
-        first_instance_bin_port: u16,
         plugins_dir: Option<&Path>,
         tier: &str,
         run_params: &Params,
     ) -> Result<Self> {
         // Properties
-        let bin_port = 3000 + instance_id;
-        let http_port = run_params.base_http_port + instance_id;
-        let pg_port = run_params.base_pg_port + instance_id;
         let mut instance_name = format!("i{instance_id}");
         let tiers_config = get_merged_cluster_tier_config(
             &run_params.plugin_path,
@@ -296,7 +311,14 @@ impl PicodataInstance {
         let env_templates_ctx = liquid::object!({
             "instance_id": instance_id,
         });
-        let env_vars = Self::compute_env_vars(&run_params.topology.enviroment, &env_templates_ctx)?;
+        let env_vars: BTreeMap<String, String> =
+            Self::compute_env_vars(&run_params.topology.enviroment, &env_templates_ctx)?;
+
+        let first_env_templates_ctx = liquid::object!({
+            "instance_id": 1,
+        });
+        let first_env_vars: BTreeMap<String, String> =
+            Self::compute_env_vars(&run_params.topology.enviroment, &first_env_templates_ctx)?;
 
         let mut child = Command::new(&run_params.picodata_path);
         child.envs(&env_vars);
@@ -317,18 +339,40 @@ impl PicodataInstance {
             "--iproto-listen"
         };
 
+        let first_instance_bin_ipv4 =
+            get_ipv4_from_liquid_var(&first_env_vars, "PICODATA_IPROTO_LISTEN").unwrap_or(
+                format!("127.0.0.1:{}", run_params.base_bin_port + 1)
+                    .parse()
+                    .unwrap(),
+            );
+        let bin_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_IPROTO_LISTEN").unwrap_or(
+            format!("127.0.0.1:{}", run_params.base_bin_port + instance_id)
+                .parse()
+                .unwrap(),
+        );
+        let http_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_HTTP_LISTEN").unwrap_or(
+            format!("0.0.0.0:{}", run_params.base_http_port + instance_id)
+                .parse()
+                .unwrap(),
+        );
+        let pg_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_PG_LISTEN").unwrap_or(
+            format!("127.0.0.1:{}", run_params.base_pg_port + instance_id)
+                .parse()
+                .unwrap(),
+        );
+
         child.args([
             "run",
             data_dir_flag,
             instance_data_dir.to_str().expect("unreachable"),
             listen_flag,
-            &format!("127.0.0.1:{bin_port}"),
+            &bin_ipv4.to_string(),
             "--peer",
-            &format!("127.0.0.1:{first_instance_bin_port}"),
+            &first_instance_bin_ipv4.to_string(),
             "--http-listen",
-            &format!("0.0.0.0:{http_port}"),
+            &http_ipv4.to_string(),
             "--pg-listen",
-            &format!("127.0.0.1:{pg_port}"),
+            &pg_ipv4.to_string(),
             "--tier",
             tier,
             "--config-parameter",
@@ -404,9 +448,9 @@ impl PicodataInstance {
             disable_colors: run_params.disable_colors,
             data_dir: instance_data_dir,
             log_file_path,
-            pg_port,
-            bin_port,
-            http_port,
+            pg_port: pg_ipv4.port(),
+            bin_port: bin_ipv4.port(),
+            http_port: http_ipv4.port(),
             instance_id,
         };
 
@@ -732,6 +776,8 @@ pub struct Params {
     data_dir: PathBuf,
     #[builder(default = "false")]
     disable_plugin_install: bool,
+    #[builder(default = "3000")]
+    base_bin_port: u16,
     #[builder(default = "8000")]
     base_http_port: u16,
     #[builder(default = "PathBuf::from(\"picodata\")")]
@@ -812,7 +858,6 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
     let mut picodata_processes = vec![];
 
-    let first_instance_bin_port = 3001;
     let mut instance_id = 0;
     if run_single_instance {
         let instance_name = instance_name.unwrap().as_str();
@@ -864,7 +909,6 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
         let pico_instance = PicodataInstance::new(
             instance_id,
-            first_instance_bin_port,
             plugins_dir.as_deref(),
             instance_tier_name,
             &params,
@@ -883,13 +927,8 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         for (tier_name, tier) in &params.topology.tiers {
             for _ in 0..(tier.replicasets * tier.replication_factor) {
                 instance_id += 1;
-                let pico_instance = PicodataInstance::new(
-                    instance_id,
-                    first_instance_bin_port,
-                    plugins_dir.as_deref(),
-                    tier_name,
-                    &params,
-                )?;
+                let pico_instance =
+                    PicodataInstance::new(instance_id, plugins_dir.as_deref(), tier_name, &params)?;
 
                 picodata_processes.push(pico_instance);
 
