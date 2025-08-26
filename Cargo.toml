@@ -37,7 +37,7 @@ colored = "3"
 rand = "0.9"
 derive_builder = "0.20"
 toml_edit = "0.23.3"
-regex = "1.11.1"
+regex = "1.11.2"
 serde_ignored = "0.1.11"
 
 [lib]
