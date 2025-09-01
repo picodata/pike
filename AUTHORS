@@ -1,5 +1,10 @@
-Pike is a collective effort, and incorporates
-many contributions from the community.
+Though Pike is a collective effort, and incorporates
+many contributions from the community there is a person,
+who deserves an honorable mention.
+That was his persistence and efforts that brought Pike
+to life. His contribution to that project is invaluable.
+
+- Evgeniy Mitin <e.mitin@picodata.io>
 
 Below follows an alphabetical list of people, who
 contributed their code.
@@ -7,7 +12,6 @@ contributed their code.
 NOTE: If you can commit a change to this list, please do not hesitate
 to add your name to it.
 
-- Evgeniy Mitin <e.mitin@picodata.io>
 - Alexander Morozov <a.morozov@picodata.io>
 - Boris Sinyapkin <b.sinyapkin@picodata.io>
 - Vitaliy Klimenko <v.klimenko@picodata.io>
