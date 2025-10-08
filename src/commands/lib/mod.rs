@@ -120,7 +120,8 @@ pub fn is_plugin_archive(test_path: &Path) -> Result<()> {
     bail!("plugin archive candidate has invalid structure");
 }
 
-#[allow(clippy::needless_pass_by_value)]
+/// Build helper. Captures stdout (line by line) and stderr (on failure).
+/// Avoids panic when stderr was previously not piped.
 pub fn cargo_build(build_type: BuildType, target_dir: &PathBuf, build_dir: &PathBuf) -> Result<()> {
     let mut args = vec!["build"];
     if let BuildType::Release = build_type {
@@ -132,21 +133,39 @@ pub fn cargo_build(build_type: BuildType, target_dir: &PathBuf, build_dir: &Path
         .arg("--target-dir")
         .arg(target_dir)
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped()) // ВАЖНО: захватываем stderr, иначе unwrap() паниковал
         .current_dir(build_dir)
         .spawn()
         .context("running cargo build")?;
 
-    let stdout = child.stdout.take().expect("Failed to capture stdout");
-    let reader = BufReader::new(stdout);
-    for line in reader.lines() {
-        let line = line.unwrap_or_else(|e| format!("{e}"));
-        print!("{line}");
+    if let Some(stdout) = child.stdout.take() {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            let line = line.unwrap_or_else(|e| format!("{e}"));
+            print!("{line}");
+        }
     }
 
-    if !child.wait().unwrap().success() {
-        let mut stderr = String::new();
-        child.stderr.unwrap().read_to_string(&mut stderr).unwrap();
-        bail!("build error: {stderr}");
+    let status = child
+        .wait()
+        .context("waiting for cargo build process to finish")?;
+
+    if !status.success() {
+        // Попробуем собрать stderr, если он есть
+        let mut stderr_buf = String::new();
+        if let Some(mut stderr) = child.stderr.take() {
+            let _ = stderr.read_to_string(&mut stderr_buf);
+        }
+        // Дополняем диагностикой
+        bail!(
+            "build error (status {}): {}",
+            status,
+            if stderr_buf.trim().is_empty() {
+                "<no stderr output>"
+            } else {
+                stderr_buf.trim()
+            }
+        );
     }
 
     Ok(())

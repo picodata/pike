@@ -22,6 +22,35 @@ use crate::helpers::is_instance_running;
 
 const TOTAL_INSTANCES: i32 = 4;
 
+/// Find archive with new naming format: <name>_<version>-<osid>_<variant>.tar.gz
+/// Ensures exactly one archive matches.
+fn find_os_suffixed_archive(dir: &Path, name: &str, version: &str) -> PathBuf {
+    let prefix = format!("{name}_{version}-");
+    let mut matches = vec![];
+    let entries = fs::read_dir(dir)
+        .unwrap_or_else(|_| panic!("Cannot read build dir {dir:?} while searching archives"));
+    for entry in entries {
+        let entry = entry.unwrap();
+        let fname = entry.file_name();
+        let fname = fname.to_string_lossy();
+        if fname.starts_with(&prefix) && fname.ends_with(".tar.gz") {
+            matches.push(entry.path());
+        }
+    }
+    assert!(
+        !matches.is_empty(),
+        "No archive found in {dir:?} with prefix {prefix}"
+    );
+    assert_eq!(
+        matches.len(),
+        1,
+        "Expected exactly one archive for {name} {version}, found {}: {:?}",
+        matches.len(),
+        matches
+    );
+    matches.remove(0)
+}
+
 #[test]
 fn test_cluster_setup_debug() {
     let _cluster_handle = run_cluster(
@@ -457,7 +486,7 @@ fn test_quickstart_pipeline() {
     let stdout = String::from_utf8_lossy(&wrong_plugin_path_cmd.stdout);
     assert!(
         stdout.contains("pike outside Plugin directory"),
-        "Recieved unexpected output, while trying to run pike in wrong directory, where is the fish? Output: {stdout}"
+        "Received unexpected output, while trying to run pike in wrong directory, where is the fish? Output: {stdout}"
     );
 
     init_plugin("quickstart");
@@ -502,15 +531,17 @@ fn test_quickstart_pipeline() {
     }
 
     exec_pike(["stop", "--plugin-path", "quickstart"]);
-
     assert!(cluster_started);
 
     // Quickly test pack command
     exec_pike(["plugin", "pack", "--debug", "--plugin-path", "quickstart"]);
 
-    assert!(quickstart_path
-        .join("target/debug/quickstart-0.1.0.tar.gz")
-        .exists());
+    let build_dir = quickstart_path.join("target/debug");
+    let quickstart_archive = find_os_suffixed_archive(&build_dir, "quickstart", "0.1.0");
+    assert!(
+        quickstart_archive.exists(),
+        "Expected quickstart archive at {quickstart_archive:?}"
+    );
 }
 
 #[test]
@@ -590,11 +621,9 @@ fn test_workspace_pipeline() {
     }
 
     exec_pike(["stop", "--plugin-path", "workspace_plugin"]);
-
     assert!(cluster_started);
 
     // Fully test pack command for proper artefacts inside archives
-
     exec_pike([
         "plugin",
         "pack",
@@ -603,21 +632,13 @@ fn test_workspace_pipeline() {
         "workspace_plugin",
     ]);
 
-    assert!(workspace_path
-        .join("target/debug/workspace_plugin-0.1.0.tar.gz")
-        .exists());
-    assert!(workspace_path
-        .join("target/debug/sub_plugin-0.1.0.tar.gz")
-        .exists());
-
     let build_dir = workspace_path.join("target/debug");
+    let workspace_archive = find_os_suffixed_archive(&build_dir, "workspace_plugin", "0.1.0");
+    let sub_archive = find_os_suffixed_archive(&build_dir, "sub_plugin", "0.1.0");
 
-    // Check first plugin
+    // Unpack first plugin
     let _ = fs::create_dir(build_dir.join("tmp_workspace_plugin"));
-    helpers::unpack_archive(
-        &build_dir.join("workspace_plugin-0.1.0.tar.gz"),
-        &build_dir.join("tmp_workspace_plugin"),
-    );
+    helpers::unpack_archive(&workspace_archive, &build_dir.join("tmp_workspace_plugin"));
 
     let base_file_path = build_dir
         .join("tmp_workspace_plugin")
@@ -629,18 +650,14 @@ fn test_workspace_pipeline() {
     assert!(base_file_path.join("manifest.yaml").exists());
     assert!(base_file_path.join("migrations").is_dir());
 
-    // Check second plugin with custom assets
+    // Unpack second plugin
     let _ = fs::create_dir(build_dir.join("tmp_sub_plugin"));
-    helpers::unpack_archive(
-        &build_dir.join("sub_plugin-0.1.0.tar.gz"),
-        &build_dir.join("tmp_sub_plugin"),
-    );
+    helpers::unpack_archive(&sub_archive, &build_dir.join("tmp_sub_plugin"));
 
     let base_file_path = build_dir
         .join("tmp_sub_plugin")
         .join("sub_plugin")
         .join("0.1.0");
-
     assert!(base_file_path
         .join(format!("libsub_plugin.{LIB_EXT}"))
         .exists());
@@ -768,7 +785,6 @@ fn test_run_with_several_tiers() {
         // +-------------+-----------------+---------+---------------------+-----------------+
         let pico_service =
             get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_service");
-
         if !(pico_service.contains("second") && pico_service.contains("third")) {
             dbg!(pico_service);
             continue;
@@ -856,44 +872,45 @@ fn run_with_external_plugin_archive() {
     build_plugin(&helpers::BuildType::Debug, "0.1.0", plugin_path);
 
     // setup and pack external plugin
-    let ext_plugin_path = PathBuf::from("./tests/tmp_ext/external-plugin-1");
+    let ext_plugin_root = PathBuf::from("./tests/tmp_ext/external-plugin-1");
     init_plugin_with_args(TestPluginInitParams::<String> {
         name: "external-plugin-1".to_string(),
-        plugin_path: ext_plugin_path.join(""),
+        plugin_path: ext_plugin_root.join(""),
         shared_target_path: "./tests/tmp_ext/ext_shared_target".into(),
         working_dir: "./tests/tmp_ext".into(),
         ..Default::default()
     });
-    build_plugin(&helpers::BuildType::Release, "0.1.0", &ext_plugin_path);
+    build_plugin(&helpers::BuildType::Release, "0.1.0", &ext_plugin_root);
     let pack_args = ["plugin", "pack", "--plugin-path", "./external-plugin-1"];
     exec_pike_in(pack_args, "./tests/tmp_ext");
 
-    let our_plugin_path = Path::new("./tests/tmp/test-plugin");
-    let ext_plugin_path = Path::new(
-        "./tests/tmp_ext/external-plugin-1/target/release/external-plugin-1-0.1.0.tar.gz",
-    );
+    // Find new-format archive
+    let ext_release_dir = Path::new("./tests/tmp_ext/external-plugin-1/target/release");
+    let ext_plugin_archive =
+        find_os_suffixed_archive(ext_release_dir, "external-plugin-1", "0.1.0");
 
     let plugins = BTreeMap::from([
         (PLUGIN_NAME.to_string(), Plugin::default()),
         (
             "external-plugin-1".to_string(),
             Plugin {
-                path: Some(ext_plugin_path.into()),
+                path: Some(ext_plugin_archive),
                 ..Default::default()
             },
         ),
     ]);
-    let params = make_ext_run_params(our_plugin_path, plugins)
+    let params = make_ext_run_params(Path::new("./tests/tmp/test-plugin"), plugins)
         .build()
         .unwrap();
 
     run(&params).unwrap();
 
-    let cluster_started = wait_cluster_start_completed(our_plugin_path, |state| {
-        assert_eq!(state.pico_instance.matches("Online").count(), 8);
-        assert_eq!(state.pico_plugin.matches("true").count(), 2);
-        true
-    });
+    let cluster_started =
+        wait_cluster_start_completed(Path::new("./tests/tmp/test-plugin"), |state| {
+            assert_eq!(state.pico_instance.matches("Online").count(), 8);
+            assert_eq!(state.pico_plugin.matches("true").count(), 2);
+            true
+        });
 
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 

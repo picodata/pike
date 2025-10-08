@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+- Archive naming now includes OS identifier and variant: `<name>_<version>-<osid>_<variant>.tar.gz`
+- OS detection for `plugin pack`:
+  - Linux: parsing `/etc/os-release`
+  - macOS: `sw_vers`
+  - Rolling distro handling
+
+### Changed
+- Previous archive name `<name>-<version>.tar.gz` replaced by new format including OS suffix
+
+### Notes
+- If `VERSION_ID` is missing for a non‑rolling distro, the variant becomes `unknown`
+- For known rolling distros without `VERSION_ID` the variant becomes `rolling`
+
 ## [2.8.0]
 
 ### Added
