@@ -49,6 +49,22 @@ cargo pike plugin pack
 cargo test
 ```
 
+### Формат имени архива (plugin pack)
+
+Собранные архивы теперь содержат информацию об ОС и её варианте в имени файла:
+
+```
+<plugin_name>_<version>-<os_id>_<variant>.tar.gz
+```
+
+Примеры:
+- `weather-cache_0.1.1-ubuntu_focal.tar.gz`
+- `weather-cache_0.1.1-centos_el8.tar.gz`
+- `weather-cache_0.1.1-altlinux_p9.tar.gz`
+
+Для rolling-дистрибутивов (например, `arch`, `gentoo`, `void`) в качестве варианта используется `rolling`.
+Если конкретный вариант не может быть определён, указываются безопасные значения по умолчанию.
+
 ## Команды
 
 ### `--help`
