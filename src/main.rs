@@ -10,6 +10,8 @@ use std::{
 };
 use toml_edit::{DocumentMut, Item, Value};
 
+use crate::commands::ride;
+
 mod commands;
 
 const CK_CHECK_PARRENT_INTERVAL_SEC: u64 = 3;
@@ -170,6 +172,9 @@ enum Command {
         #[command(subcommand)]
         command: Config,
     },
+    #[command(hide = true)]
+    /// Make life a ride
+    Ride {},
 }
 
 #[derive(Subcommand)]
@@ -432,6 +437,9 @@ fn main() -> Result<()> {
             run_child_killer();
             commands::clean::cmd(&data_dir, &plugin_path)
                 .context("failed to execute \"clean\" command")?;
+        }
+        Command::Ride {} => {
+            ride::cmd()?;
         }
         Command::Enter {
             instance_name,

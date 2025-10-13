@@ -39,6 +39,7 @@ derive_builder = "0.20"
 toml_edit = "0.23.7"
 regex = "1.12.1"
 serde_ignored = "0.1.14"
+terminal_size = "0.4.3"
 
 [lib]
 name = "pike"
