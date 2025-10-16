@@ -1,31 +1,31 @@
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use derive_builder::Builder;
-use log::{error, info};
+use log::{error, info, warn};
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
 use rand::Rng;
 use serde::Deserialize;
 use serde_yaml::{Mapping, Value};
 use std::collections::{BTreeMap, HashMap};
+use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::SocketAddrV4;
 use std::os::unix::fs::symlink;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::str::{self};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use std::{fs, path::PathBuf};
 
 use crate::commands::lib::instance_info::{
     get_cluster_leader_id, get_instance_current_state, get_instance_name,
 };
 use crate::commands::lib::{
     cargo_build, copy_directory_tree, find_active_socket_path, get_cluster_dir,
-    spawn_picodata_admin, unpack_shipping_archive,
+    run_query_in_picodata_admin, spawn_picodata_admin, unpack_shipping_archive,
 };
 use crate::commands::lib::{get_active_socket_path, BuildType};
 use crate::commands::lib::{is_plugin_archive, is_plugin_dir, is_plugin_shipping_dir};
@@ -800,6 +800,8 @@ pub struct Params {
     config_path: PathBuf,
     #[builder(default)]
     instance_name: Option<String>,
+    #[builder(default = "false")]
+    with_web_auth: bool,
 }
 
 impl Params {
@@ -810,6 +812,51 @@ impl Params {
             BuildType::Debug
         }
     }
+}
+
+fn configure_web_auth<F>(
+    picodata_path: &Path,
+    socket_path: &Path,
+    with_web_auth: bool,
+    run_admin: F,
+) -> Result<()>
+where
+    F: Fn(&Path, &Path, &str) -> Result<String>,
+{
+    if with_web_auth {
+        run_admin(picodata_path, socket_path, "ALTER SYSTEM RESET jwt_secret;")
+            .context("failed to enable WebUI authentication (RESET jwt_secret)")?;
+        info!("WebUI auth: включена (RESET jwt_secret).");
+    } else {
+        run_admin(
+            picodata_path,
+            socket_path,
+            "ALTER SYSTEM SET jwt_secret = '';",
+        )
+        .context("failed to disable WebUI authentication (SET jwt_secret='')")?;
+        info!("WebUI auth: отключена (jwt_secret='').");
+    }
+    Ok(())
+}
+
+// При ошибке только предупреждаем, запуск не падает
+fn apply_web_auth_setting(params: &Params, cluster_dir: &Path) -> Result<()> {
+    let Some(socket_path) = find_active_socket_path(cluster_dir)? else {
+        bail!("не удалось найти активный admin.sock для применения настройки WebUI auth");
+    };
+
+    let run_admin = |p: &Path, s: &Path, q: &str| run_query_in_picodata_admin(p, s, q);
+
+    if let Err(err) = configure_web_auth(
+        &params.picodata_path,
+        &socket_path,
+        params.with_web_auth,
+        run_admin,
+    ) {
+        warn!("Не удалось применить WebUI auth настройку: {err:#}");
+    }
+
+    Ok(())
 }
 
 #[allow(clippy::too_many_lines)]
@@ -920,6 +967,8 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             "running picodata instance {instance_name} - {}",
             "OK".green()
         );
+
+        apply_web_auth_setting(&params, &cluster_dir)?;
     } else {
         info!("Running the cluster...");
         let start_cluster_run = Instant::now();
@@ -960,6 +1009,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             }
         }
 
+        apply_web_auth_setting(&params, &cluster_dir)?;
         if !params.disable_plugin_install {
             info!("Enabling plugins...");
 
@@ -1014,4 +1064,54 @@ pub fn cmd(params: &Params) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[test]
+    fn web_auth_config_enables_with_reset() {
+        let picodata = Path::new("picodata");
+        let sock = Path::new("/tmp/admin.sock");
+        let captured: RefCell<Vec<String>> = RefCell::new(vec![]);
+
+        let runner = |_: &Path, _: &Path, q: &str| -> Result<String> {
+            captured.borrow_mut().push(q.to_string());
+            Ok(String::new())
+        };
+
+        configure_web_auth(picodata, sock, true, runner).unwrap();
+
+        let calls = captured.borrow();
+        assert_eq!(calls.len(), 1);
+        assert!(
+            calls[0].contains("ALTER SYSTEM RESET jwt_secret;"),
+            "expected RESET query, got: {}",
+            calls[0]
+        );
+    }
+
+    #[test]
+    fn web_auth_config_clears_secret_when_disabled() {
+        let picodata = Path::new("picodata");
+        let sock = Path::new("/tmp/admin.sock");
+        let captured: RefCell<Vec<String>> = RefCell::new(vec![]);
+
+        let runner = |_: &Path, _: &Path, q: &str| -> Result<String> {
+            captured.borrow_mut().push(q.to_string());
+            Ok(String::new())
+        };
+
+        configure_web_auth(picodata, sock, false, runner).unwrap();
+
+        let calls = captured.borrow();
+        assert_eq!(calls.len(), 1);
+        assert!(
+            calls[0].contains("ALTER SYSTEM SET jwt_secret = '';"),
+            "expected query to clear secret, got: {}",
+            calls[0]
+        );
+    }
 }

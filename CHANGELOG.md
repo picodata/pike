@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Added
 
+- Add `--with-web-auth` flag to pike run, explicitly enabling WebUI authentication
 - Add plugin lifecycle smoke test in plugin template
 - Archive naming now includes OS identifier and variant: `<name>_<version>-<osid>_<variant>.tar.gz`
 - OS detection for `plugin pack`:
