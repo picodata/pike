@@ -119,6 +119,10 @@ enum Command {
         /// will run all instances in the cluster.
         #[arg(long, value_name = "INSTANCE_NAME", default_value = None)]
         instance_name: Option<String>,
+        /// Keep `WebUI` authentication enabled (opt-in). By default, Pike disables `WebUI` auth
+        /// for local development via `ALTER SYSTEM SET jwt_secret = ''`.
+        #[arg(long, value_name = "WITH_WEB_AUTH", default_value_t = false)]
+        with_web_auth: bool,
     },
     /// Stop Picodata cluster or a specific instance
     Stop {
@@ -358,6 +362,7 @@ fn main() -> Result<()> {
             no_build,
             config_path,
             instance_name,
+            with_web_auth,
         } => {
             is_required_path_exists(&plugin_path, &topology, CARING_PIKE, 1);
 
@@ -397,6 +402,7 @@ fn main() -> Result<()> {
                 .no_build(no_build)
                 .config_path(config_path)
                 .instance_name(instance_name)
+                .with_web_auth(with_web_auth)
                 .build()
                 .unwrap();
             commands::run::cmd(&params).context("failed to execute Run command")?;
