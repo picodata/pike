@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [2.9.0]
+
 ### Added
 
 - Add `--with-web-auth` flag to pike run, explicitly enabling WebUI authentication
