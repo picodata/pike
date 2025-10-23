@@ -190,6 +190,9 @@ enum Plugin {
         /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
+        /// Disable plugin build before packing the archive
+        #[arg(long)]
+        no_build: bool,
     },
     /// Alias for cargo build command
     Build {
@@ -460,10 +463,11 @@ fn main() -> Result<()> {
                     debug,
                     target_dir,
                     plugin_path,
+                    no_build,
                 } => {
                     is_required_path_exists(&plugin_path, Path::new("Cargo.toml"), CARING_PIKE, 1);
 
-                    commands::plugin::pack::cmd(debug, &target_dir, &plugin_path)
+                    commands::plugin::pack::cmd(debug, &target_dir, &plugin_path, no_build)
                         .context("failed to execute \"pack\" command")?;
                 }
                 Plugin::Build {
