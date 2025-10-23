@@ -21,7 +21,46 @@ struct CargoManifest {
     package: PackageInfo,
 }
 
-pub fn cmd(pack_debug: bool, target_dir: &PathBuf, plugin_path: &PathBuf) -> Result<()> {
+/// Validate that pre-built plugin shipping directory contains required files
+/// Required: manifest.yaml and `lib{normalized_package_name}.{LIB_EXT}`
+fn validate_plugin_build_tree(
+    plugin_build_dir: &Path,
+    normalized_package_name: &str,
+) -> Result<()> {
+    if !plugin_build_dir.exists() {
+        bail!(
+            "Build output directory not found: {}. Build the plugin first or remove --no-build.",
+            plugin_build_dir.display()
+        );
+    }
+
+    let lib_name = format!("lib{normalized_package_name}.{LIB_EXT}");
+    let lib_path = plugin_build_dir.join(&lib_name);
+    if !lib_path.exists() {
+        bail!(
+            "Missing plugin library '{}' in {}. Build the plugin first or remove --no-build.",
+            lib_name,
+            plugin_build_dir.display()
+        );
+    }
+
+    let manifest_path = plugin_build_dir.join("manifest.yaml");
+    if !manifest_path.exists() {
+        bail!(
+            "Missing manifest.yaml in {}. Build the plugin first or remove --no-build.",
+            plugin_build_dir.display()
+        );
+    }
+
+    Ok(())
+}
+
+pub fn cmd(
+    pack_debug: bool,
+    target_dir: &PathBuf,
+    plugin_path: &PathBuf,
+    no_build: bool,
+) -> Result<()> {
     let current_dir = env::current_dir().context("failed to get current working directory")?;
     let root_dir = if plugin_path.is_absolute() {
         plugin_path.clone()
@@ -39,8 +78,12 @@ pub fn cmd(pack_debug: bool, target_dir: &PathBuf, plugin_path: &PathBuf) -> Res
         BuildType::Release
     };
 
-    cargo_build(build_type, target_dir, plugin_path)
-        .with_context(|| format!("building {build_type} version of plugin"))?;
+    if no_build {
+        info!("--no-build: skipping cargo build for plugin pack");
+    } else {
+        cargo_build(build_type, target_dir, plugin_path)
+            .with_context(|| format!("building {build_type} version of plugin"))?;
+    }
 
     let build_root = {
         let effective_target_dir = if target_dir.is_absolute() {
@@ -103,6 +146,8 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
     let normalized_package_name = package_name.replace('-', "_");
     let plugin_build_dir = build_dir.join(&package_name).join(&plugin_version);
     let root_in_archive = Path::new(&package_name).join(&plugin_version);
+
+    validate_plugin_build_tree(&plugin_build_dir, &normalized_package_name)?;
 
     let os_suffix = detect_os_suffix().context("failed to detect OS for archive naming")?;
 
@@ -351,4 +396,117 @@ fn get_latest_plugin_version(plugin_dir: &Path) -> Result<String> {
         })?;
 
     Ok(version.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_plugin_build_tree, LIB_EXT};
+    use std::fs;
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn tmp_dir(prefix: &str) -> PathBuf {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("pike-pack-ut-{prefix}-{ts}"));
+        dir
+    }
+
+    fn touch(path: &Path) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        let mut f = fs::File::create(path).unwrap();
+        let _ = f.write_all(b"");
+    }
+
+    fn make_build_tree(
+        base: &Path,
+        pkg: &str,
+        ver: &str,
+        with_manifest: bool,
+        with_lib: bool,
+    ) -> PathBuf {
+        let build_dir = base.join(pkg).join(ver);
+        fs::create_dir_all(&build_dir).unwrap();
+
+        if with_manifest {
+            touch(&build_dir.join("manifest.yaml"));
+        }
+        if with_lib {
+            let libname = format!("lib{}.{LIB_EXT}", pkg.replace('-', "_"));
+            touch(&build_dir.join(libname));
+        }
+        fs::create_dir_all(build_dir.join("migrations")).unwrap();
+
+        build_dir
+    }
+
+    #[test]
+    fn validate_ok_when_all_required_files_exist() {
+        let base = tmp_dir("ok");
+        let pkg = "some-plugin";
+        let ver = "0.1.0";
+        let plugin_build_dir = make_build_tree(&base, pkg, ver, true, true);
+
+        let res = validate_plugin_build_tree(&plugin_build_dir, &pkg.replace('-', "_"));
+        assert!(res.is_ok(), "Expected OK, got error: {res:?}");
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn validate_fails_if_dir_missing() {
+        let base = tmp_dir("missing-dir");
+        let non_existing = base.join("nope/0.0.0");
+        let res = validate_plugin_build_tree(&non_existing, "nope");
+        assert!(res.is_err(), "Expected error for missing dir");
+        let msg = format!("{res:?}");
+        assert!(
+            msg.contains("Build output directory not found"),
+            "Unexpected error message: {msg}"
+        );
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn validate_fails_if_manifest_missing() {
+        let base = tmp_dir("missing-manifest");
+        let pkg = "x-plugin";
+        let ver = "1.2.3";
+        let plugin_build_dir = make_build_tree(&base, pkg, ver, false, true);
+
+        let res = validate_plugin_build_tree(&plugin_build_dir, &pkg.replace('-', "_"));
+        assert!(res.is_err(), "Expected error for missing manifest");
+        let msg = format!("{res:?}");
+        assert!(
+            msg.contains("Missing manifest.yaml"),
+            "Unexpected error message: {msg}"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn validate_fails_if_lib_missing() {
+        let base = tmp_dir("missing-lib");
+        let pkg = "another-plugin";
+        let ver = "9.9.9";
+        let plugin_build_dir = make_build_tree(&base, pkg, ver, true, false);
+
+        let res = validate_plugin_build_tree(&plugin_build_dir, &pkg.replace('-', "_"));
+        assert!(res.is_err(), "Expected error for missing lib");
+        let msg = format!("{res:?}");
+        let expected_lib = format!("lib{}.{LIB_EXT}", pkg.replace('-', "_"));
+        assert!(
+            msg.contains("Missing plugin library") && msg.contains(&expected_lib),
+            "Unexpected error message: {msg}"
+        );
+
+        let _ = fs::remove_dir_all(&base);
+    }
 }

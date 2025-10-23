@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- Add optional `--no-build` flag to `plugin pack` command
+
 ## [2.9.0]
 
 ### Added
