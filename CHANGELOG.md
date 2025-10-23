@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- Add `--no-build` flag to `plugin pack`: when set, Pike skips `cargo build` and validates that the shipping directory already exists and has required files (`manifest.yaml` and plugin library). If structure is invalid or missing, the command fails with a hint to build first or remove `--no-build`
+
 ## [2.9.0]
 
 ### Added
