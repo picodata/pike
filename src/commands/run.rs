@@ -299,7 +299,7 @@ impl PicodataInstance {
             &run_params.plugin_path,
             &run_params.config_path,
             &run_params.topology.tiers,
-        );
+        )?;
 
         // Paths
         let cluster_dir = get_cluster_dir(&run_params.plugin_path, &run_params.data_dir);
@@ -605,13 +605,48 @@ fn get_merged_cluster_tier_config(
     plugin_path: &Path,
     config_path: &Path,
     tiers: &BTreeMap<String, Tier>,
-) -> String {
+) -> Result<String> {
     let picodata_conf_path = plugin_path.join(config_path);
-    let picodata_conf_raw = fs::read_to_string(picodata_conf_path).unwrap_or_default();
-    let picodata_conf: HashMap<String, Value> =
-        serde_yaml::from_str(&picodata_conf_raw).unwrap_or_default();
 
-    let cluster_params = picodata_conf
+    // Отсутствие файла — валидный пустой конфиг
+    let maybe_raw = fs::read_to_string(&picodata_conf_path);
+    let root_value: Value = match maybe_raw {
+        Err(e) if e.kind() == ErrorKind::NotFound => Value::Mapping(Mapping::new()),
+        Err(e) => {
+            return Err(e).with_context(|| {
+                format!(
+                    "failed to read picodata config at {}",
+                    picodata_conf_path.display()
+                )
+            })
+        }
+        Ok(raw) => {
+            // Пустой файл — валидный пустой конфиг
+            if raw.trim().is_empty() {
+                Value::Mapping(Mapping::new())
+            } else {
+                serde_yaml::from_str::<Value>(&raw).with_context(|| {
+                    format!(
+                        "invalid YAML in picodata config at {}",
+                        picodata_conf_path.display()
+                    )
+                })?
+            }
+        }
+    };
+
+    let root_map = match root_value {
+        Value::Mapping(m) => m,
+        other => {
+            bail!(
+                "invalid root in picodata config at {}: expected YAML mapping object, got {:?}",
+                picodata_conf_path.display(),
+                other
+            );
+        }
+    };
+
+    let cluster_params = root_map
         .get("cluster")
         .and_then(Value::as_mapping)
         .cloned()
@@ -650,7 +685,7 @@ fn get_merged_cluster_tier_config(
             });
     }
 
-    serde_json::to_string(&tier_params).unwrap()
+    serde_json::to_string(&tier_params).context("failed to serialize cluster.tier to JSON")
 }
 
 fn get_external_plugin_path_kind(path: &Path) -> Result<PluginPathKind> {
@@ -1112,6 +1147,174 @@ mod tests {
             calls[0].contains("ALTER SYSTEM SET jwt_secret = '';"),
             "expected query to clear secret, got: {}",
             calls[0]
+        );
+    }
+
+    fn temp_dir_unique(prefix: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("{prefix}_{nanos}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn merged_cluster_tier_config_ok_when_config_missing() {
+        let plugin_dir = temp_dir_unique("pike_test_missing");
+        // config_path relative to plugin_dir
+        let config_path = PathBuf::from("picodata.yaml");
+
+        let mut tiers = BTreeMap::new();
+        tiers.insert(
+            "t1".to_string(),
+            Tier {
+                replicasets: 1,
+                replication_factor: 2,
+            },
+        );
+
+        let json = get_merged_cluster_tier_config(&plugin_dir, &config_path, &tiers).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(v.get("t1").is_some());
+        assert_eq!(
+            v["t1"]["replication_factor"].as_i64().unwrap(),
+            2,
+            "replication_factor from topology must be applied"
+        );
+    }
+
+    #[test]
+    fn merged_cluster_tier_config_ok_when_config_empty() {
+        let plugin_dir = temp_dir_unique("pike_test_empty");
+        let config_path = PathBuf::from("picodata.yaml");
+        let config_file = plugin_dir.join(&config_path);
+        fs::write(&config_file, "").unwrap();
+
+        let mut tiers = BTreeMap::new();
+        tiers.insert(
+            "t1".to_string(),
+            Tier {
+                replicasets: 1,
+                replication_factor: 3,
+            },
+        );
+
+        let json = get_merged_cluster_tier_config(&plugin_dir, &config_path, &tiers).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["t1"]["replication_factor"].as_i64().unwrap(), 3);
+    }
+
+    #[test]
+    fn merged_cluster_tier_config_errors_on_invalid_yaml() {
+        let plugin_dir = temp_dir_unique("pike_test_invalid");
+        let config_path = PathBuf::from("picodata.yaml");
+        let config_file = plugin_dir.join(&config_path);
+        // invalid YAML
+        fs::write(&config_file, "cluster: [\n - broken").unwrap();
+
+        let mut tiers = BTreeMap::new();
+        tiers.insert(
+            "t1".to_string(),
+            Tier {
+                replicasets: 1,
+                replication_factor: 1,
+            },
+        );
+
+        let res = get_merged_cluster_tier_config(&plugin_dir, &config_path, &tiers);
+        assert!(res.is_err(), "invalid YAML must return error");
+    }
+
+    #[test]
+    fn merged_cluster_tier_config_preserves_valid_config_and_overrides_replication_factor() {
+        let plugin_dir = temp_dir_unique("pike_test_valid");
+        let config_path = PathBuf::from("picodata.yaml");
+        let config_file = plugin_dir.join(&config_path);
+        let yaml = r#"
+        cluster:
+          tier:
+            t1: null
+            t2:
+              replication_factor: 99
+              custom: "keep"
+        "#;
+        fs::write(&config_file, yaml).unwrap();
+
+        let mut tiers = BTreeMap::new();
+        tiers.insert(
+            "t1".to_string(),
+            Tier {
+                replicasets: 1,
+                replication_factor: 5,
+            },
+        );
+        tiers.insert(
+            "t2".to_string(),
+            Tier {
+                replicasets: 1,
+                replication_factor: 7,
+            },
+        );
+
+        let json = get_merged_cluster_tier_config(&plugin_dir, &config_path, &tiers).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // t1 must become a map with replication_factor
+        assert_eq!(v["t1"]["replication_factor"].as_i64().unwrap(), 5);
+
+        // t2 must override replication_factor but keep custom key
+        assert_eq!(v["t2"]["replication_factor"].as_i64().unwrap(), 7);
+        assert_eq!(v["t2"]["custom"].as_str().unwrap(), "keep");
+    }
+
+    #[test]
+    fn merged_cluster_tier_config_errors_on_non_mapping_root() {
+        let plugin_dir = temp_dir_unique("pike_test_non_mapping_root");
+        let config_path = PathBuf::from("picodata.yaml");
+        let config_file = plugin_dir.join(&config_path);
+
+        fs::write(&config_file, "- a\n- b\n- c\n").unwrap();
+
+        let mut tiers = BTreeMap::new();
+        tiers.insert(
+            "t1".to_string(),
+            Tier {
+                replicasets: 1,
+                replication_factor: 1,
+            },
+        );
+
+        let err = get_merged_cluster_tier_config(&plugin_dir, &config_path, &tiers).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("expected YAML mapping"),
+            "expected error about non-mapping root, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn merged_cluster_tier_config_errors_on_null_root() {
+        let plugin_dir = temp_dir_unique("pike_test_null_root");
+        let config_path = PathBuf::from("picodata.yaml");
+        let config_file = plugin_dir.join(&config_path);
+
+        fs::write(&config_file, "null").unwrap();
+
+        let mut tiers = BTreeMap::new();
+        tiers.insert(
+            "t1".to_string(),
+            Tier {
+                replicasets: 1,
+                replication_factor: 1,
+            },
+        );
+
+        let err = get_merged_cluster_tier_config(&plugin_dir, &config_path, &tiers).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("expected YAML mapping"),
+            "expected error about null root, got: {err}"
         );
     }
 }
