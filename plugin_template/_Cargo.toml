@@ -13,7 +13,7 @@ anyhow = "1.0.98"
 rmpv = "1.0.0"
 shors = "0.12.3"
 rmp-serde = "1.0.0"
-picotest = "1.4.0"
+picotest = "1.8.1"
 
 [dev-dependencies]
 tokio = "1.29.1"
