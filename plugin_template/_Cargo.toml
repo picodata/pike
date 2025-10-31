@@ -6,7 +6,7 @@ publish = false
 resolver = "3"
 
 [dependencies]
-picodata-plugin = "=25.2.1"
+picodata-plugin = "=25.4.2"
 serde = { version = "1", features = ["derive"] }
 log = "0.4"
 anyhow = "1.0.98"
