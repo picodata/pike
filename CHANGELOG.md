@@ -7,8 +7,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ## [UNRELEASED]
 
 ### Added
-
+- Support running external plugins without a parent plugin project
 - Add optional `--no-build` flag to `plugin pack` command
+
+### Changed
+- `enable_plugins` no longer uses `unwrap()` for plugin version; returns a clear error instead
+- When plugins are declared but `--plugin-dir` cannot be determined, Pike now returns a clear error instead of silently skipping plugin enablement
 
 ## [2.9.0]
 

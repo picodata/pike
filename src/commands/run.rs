@@ -150,7 +150,9 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
     let mut queries: Vec<String> = Vec::new();
 
     for (plugin_name, plugin) in &topology.plugins {
-        let plugin_version = plugin.version.as_ref().unwrap();
+        let Some(plugin_version) = plugin.version.as_ref() else {
+            bail!("plugin version is missing for '{plugin_name}'");
+        };
 
         // create plugin
         queries.push(format!(
@@ -901,6 +903,19 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         params
             .topology
             .find_plugin_versions(plugins_dir.as_ref().unwrap())?;
+    } else if params.topology.has_external_plugins() {
+        // Нет родительского плагина, но есть внешние плагины.
+        // Готовим их в служебной директории кластера и используем её как --plugin-dir
+        let run_plugins_dir = cluster_dir.join("plugins");
+        fs::create_dir_all(&run_plugins_dir).with_context(|| {
+            format!(
+                "failed to create plugins working directory at {}",
+                run_plugins_dir.display()
+            )
+        })?;
+        prepare_external_plugins(&params, &run_plugins_dir)?;
+        params.topology.find_plugin_versions(&run_plugins_dir)?;
+        plugins_dir = Some(run_plugins_dir);
     }
 
     let mut picodata_processes = vec![];
@@ -1013,6 +1028,10 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         if !params.disable_plugin_install {
             info!("Enabling plugins...");
 
+            if !params.topology.plugins.is_empty() && plugins_dir.is_none() {
+                bail!("failed to enable plugins: plugin directory is unknown. If you use external plugins, ensure they are prepared (archive or shipping dir) or run from a pike plugin project");
+            }
+
             if plugins_dir.is_some() {
                 let result = enable_plugins(&params.topology, &cluster_dir, &params.picodata_path);
                 if let Err(e) = result {
@@ -1112,6 +1131,57 @@ mod tests {
             calls[0].contains("ALTER SYSTEM SET jwt_secret = '';"),
             "expected query to clear secret, got: {}",
             calls[0]
+        );
+    }
+
+    fn temp_dir_unique(prefix: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("{prefix}_{nanos}"));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn enable_plugins_fails_on_missing_version() {
+        let topology = Topology {
+            tiers: BTreeMap::new(),
+            plugins: {
+                let mut m = BTreeMap::new();
+                m.insert(
+                    "p".to_string(),
+                    Plugin {
+                        migration_context: vec![],
+                        services: BTreeMap::new(),
+                        version: None,
+                        path: None,
+                    },
+                );
+                m
+            },
+            enviroment: BTreeMap::new(),
+        };
+        let cluster_dir = temp_dir_unique("pike_test_cluster");
+        let picodata_path = Path::new("picodata");
+        let err = enable_plugins(&topology, &cluster_dir, picodata_path).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("plugin version is missing"),
+            "Expected explicit error on missing version, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn external_plugin_path_must_be_relative() {
+        let tmp = temp_dir_unique("pike_test_abs_path");
+        let abs = tmp.canonicalize().unwrap();
+        let err = get_external_plugin_path_kind(&abs).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("external plugin path must be relative"),
+            "Expected error about relative path, got: {msg}"
         );
     }
 }
