@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 - Add optional `--no-build` flag to `plugin pack` command
 
+### Changed
+
+- Bump Picodata version to 25.4.2 in plugin template
+
 ## [2.9.0]
 
 ### Added
