@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use colored::Colorize;
 use derive_builder::Builder;
 use log::{error, info, warn};
@@ -90,7 +90,11 @@ pub struct Plugin {
     pub services: BTreeMap<String, Service>,
     #[serde(skip)]
     pub version: Option<String>,
-    /// Relative path to plugin, if it is located outside of current directory.
+    /// Path to plugin, if it is located outside current directory.
+    ///
+    /// Supported formats:
+    /// - Relative
+    /// - Absolute
     ///
     /// Path should conform to one of path kinds, see [`PluginPathKind`]
     pub path: Option<PathBuf>,
@@ -124,11 +128,10 @@ impl Topology {
                     current_plugin_dir.display()
                 );
             }
-            let mut versions: Vec<_> = fs::read_dir(current_plugin_dir)
-                .unwrap()
+            let mut versions: Vec<_> = fs::read_dir(current_plugin_dir)?
                 .map(|r| r.unwrap())
                 .collect();
-            versions.sort_by_key(std::fs::DirEntry::path);
+            versions.sort_by_key(fs::DirEntry::path);
             let newest_version = versions
                 .last()
                 .unwrap()
@@ -150,7 +153,9 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
     let mut queries: Vec<String> = Vec::new();
 
     for (plugin_name, plugin) in &topology.plugins {
-        let plugin_version = plugin.version.as_ref().unwrap();
+        let Some(plugin_version) = plugin.version.as_ref() else {
+            bail!("plugin version is missing for '{plugin_name}'");
+        };
 
         // create plugin
         queries.push(format!(
@@ -183,12 +188,12 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
         ));
     }
 
-    let admin_soket = cluster_dir.join("i1").join("admin.sock");
+    let admin_socket = cluster_dir.join("i1").join("admin.sock");
 
     for query in queries {
-        log::info!("picodata admin: {query}");
+        info!("picodata admin: {query}");
 
-        let mut picodata_admin = spawn_picodata_admin(picodata_path, &admin_soket)?;
+        let mut picodata_admin = spawn_picodata_admin(picodata_path, &admin_socket)?;
 
         {
             let picodata_stdin = picodata_admin.stdin.as_mut().unwrap();
@@ -213,7 +218,7 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
             let reader = BufReader::new(output);
             for line in reader.lines() {
                 let line = line.expect("failed to read picodata admin output");
-                log::info!("picodata admin: {line}");
+                info!("picodata admin: {line}");
 
                 // Ignore some types of error messages like re-enabling the plugin
                 let err_messages_to_ignore: Vec<&str> = vec!["already enabled", "already exists"];
@@ -340,7 +345,7 @@ impl PicodataInstance {
 
         let picodata_version = get_picodata_version(&run_params.picodata_path)?;
         let data_dir_flag = if picodata_version.contains("picodata 24.6") {
-            log::warn!(
+            warn!(
                 "You are using old version of picodata: {picodata_version} In the next major release it WILL NOT BE SUPPORTED"
             );
             "--data-dir"
@@ -355,26 +360,14 @@ impl PicodataInstance {
         };
 
         let first_instance_bin_ipv4 =
-            get_ipv4_from_liquid_var(&first_env_vars, "PICODATA_IPROTO_LISTEN").unwrap_or(
-                format!("127.0.0.1:{}", run_params.base_bin_port + 1)
-                    .parse()
-                    .unwrap(),
-            );
-        let bin_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_IPROTO_LISTEN").unwrap_or(
-            format!("127.0.0.1:{}", run_params.base_bin_port + instance_id)
-                .parse()
-                .unwrap(),
-        );
-        let http_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_HTTP_LISTEN").unwrap_or(
-            format!("0.0.0.0:{}", run_params.base_http_port + instance_id)
-                .parse()
-                .unwrap(),
-        );
-        let pg_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_PG_LISTEN").unwrap_or(
-            format!("127.0.0.1:{}", run_params.base_pg_port + instance_id)
-                .parse()
-                .unwrap(),
-        );
+            get_ipv4_from_liquid_var(&first_env_vars, "PICODATA_IPROTO_LISTEN")
+                .unwrap_or(format!("127.0.0.1:{}", run_params.base_bin_port + 1).parse()?);
+        let bin_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_IPROTO_LISTEN")
+            .unwrap_or(format!("127.0.0.1:{}", run_params.base_bin_port + instance_id).parse()?);
+        let http_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_HTTP_LISTEN")
+            .unwrap_or(format!("0.0.0.0:{}", run_params.base_http_port + instance_id).parse()?);
+        let pg_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_PG_LISTEN")
+            .unwrap_or(format!("127.0.0.1:{}", run_params.base_pg_port + instance_id).parse()?);
 
         child.args([
             "run",
@@ -401,7 +394,7 @@ impl PicodataInstance {
                 config_path.to_str().unwrap_or("./picodata.yaml"),
             ]);
         } else {
-            log::warn!(
+            warn!(
                 "couldn't locate picodata config at {} - skipping.",
                 config_path.to_str().unwrap()
             );
@@ -440,7 +433,7 @@ impl PicodataInstance {
             let instance_current_state =
                 get_instance_current_state(&run_params.picodata_path, &instance_data_dir)?;
             if !instance_current_state.is_online() {
-                log::info!("Waiting for '{new_instance_name}' to become 'Online'");
+                info!("Waiting for '{new_instance_name}' to become 'Online'");
                 continue;
             }
 
@@ -689,117 +682,141 @@ fn get_merged_cluster_tier_config(
 }
 
 fn get_external_plugin_path_kind(path: &Path) -> Result<PluginPathKind> {
-    if !path.is_relative() {
-        bail!("external plugin path must be relative");
+    // Forbid symlinks explicitly to avoid confusing copies/unpacks
+    if path
+        .symlink_metadata()
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+    {
+        bail!(
+            "symlink as external plugin path is not supported: {}",
+            path.display()
+        );
     }
-    let meta = path
-        .metadata()
-        .context("failed to query external plugin path metadata")?;
+
+    let meta = path.metadata().with_context(|| {
+        format!(
+            "failed to query external plugin path metadata at {}",
+            path.display()
+        )
+    })?;
+
     if meta.is_file() {
-        match is_plugin_archive(path) {
-            Ok(()) => return Ok(PluginPathKind::ShippingArchive),
-            Err(error) => return Err(error.context("external plugin path is an unknown file")),
-        }
+        return match is_plugin_archive(path) {
+            Ok(()) => Ok(PluginPathKind::ShippingArchive),
+            Err(error) => Err(error.context("external plugin path is an unknown file")),
+        };
     }
     if meta.is_dir() {
         if is_plugin_dir(path) {
             return Ok(PluginPathKind::CrateOrWorkspaceDirectory);
         }
-        match is_plugin_shipping_dir(path) {
-            Ok(()) => return Ok(PluginPathKind::ShippingDirectory),
+        return match is_plugin_shipping_dir(path) {
+            Ok(()) => Ok(PluginPathKind::ShippingDirectory),
             Err(error) => {
-                return Err(error.context("external plugin path directory has invalid structure"))
+                Err(error.context("external plugin path directory has invalid structure"))
             }
-        }
-    }
-    if meta.is_symlink() {
-        bail!("symlink as external plugin path is not supported");
+        };
     }
     // should be unreachable
-    bail!("unknown external plugin path type");
+    bail!("unknown external plugin path type: '{}'", path.display());
+}
+
+/// Helper function for `prepare_external_plugins` receding repeating code
+fn materialize_external_plugin(
+    name: &str,
+    kind: PluginPathKind,
+    path: &PathBuf,
+    params: &Params,
+    plugin_run_dir: &Path,
+) -> Result<()> {
+    match kind {
+        PluginPathKind::ShippingArchive => {
+            unpack_shipping_archive(path, plugin_run_dir).with_context(|| {
+                format!(
+                    "failed to unpack shipping archive for plugin '{}' from '{}'",
+                    name,
+                    path.display()
+                )
+            })?;
+        }
+        PluginPathKind::ShippingDirectory => {
+            copy_directory_tree(path, plugin_run_dir).with_context(|| {
+                format!(
+                    "failed to copy shipping directory for plugin '{}' from '{}'",
+                    name,
+                    path.display()
+                )
+            })?;
+        }
+        PluginPathKind::CrateOrWorkspaceDirectory => {
+            let (profile, target_dir) = (params.get_build_profile(), &params.target_dir);
+            if !params.no_build {
+                cargo_build(profile, target_dir, path).with_context(|| {
+                    format!(
+                        "failed to build external cargo plugin '{}' at '{}'",
+                        name,
+                        path.display()
+                    )
+                })?;
+            }
+            let src_shipping_dir = path.join(target_dir).join(profile.to_string()).join(name);
+            copy_directory_tree(&src_shipping_dir, plugin_run_dir).with_context(|| {
+                format!(
+                    "failed to copy built plugin '{}' from '{}' (profile {})",
+                    name,
+                    src_shipping_dir.display(),
+                    profile
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// Prepares plugin directory structure for external plugins from topology
 ///
-/// Depending whether plugin path destination is plugin project directory,
+/// Depending on whether plugin path destination is plugin project directory,
 /// built plugin directory or zip-packed plugin directory, maybe invoke cargo build
 fn prepare_external_plugins(params: &Params, plugin_run_dir: &Path) -> Result<()> {
     if !params.topology.has_external_plugins() {
         return Ok(());
     }
-    let topology_plugins = &params.topology.plugins;
-    let external_plugins = topology_plugins
+
+    let external_plugins: Vec<_> = params
+        .topology
+        .plugins
         .iter()
-        .filter(|(_name, plugin)| plugin.is_external())
-        .collect::<Vec<_>>();
-    let n_external = external_plugins.len();
-    log::info!("Found {n_external} external plugins, loading into {plugin_run_dir:?}");
-    let mut path_kind_mapping = HashMap::with_capacity(external_plugins.len());
+        .filter(|(_, p)| p.is_external())
+        .collect();
+
+    info!(
+        "Found {} external plugins, loading into {}",
+        external_plugins.len(),
+        plugin_run_dir.display()
+    );
+
+    let mut path_info: HashMap<&str, (PluginPathKind, PathBuf)> =
+        HashMap::with_capacity(external_plugins.len());
+
     for (name, plugin) in external_plugins {
         let path = plugin
             .path
             .as_ref()
-            .expect("external plugins have path (checking kind)");
-        let path_kind = get_external_plugin_path_kind(path).with_context(|| {
-            let path_display = path.to_string_lossy();
-            format!("failed to validate external path {path_display} for plugin {name}")
+            .ok_or_else(|| anyhow!("external plugin '{name}' has no path"))?;
+        let kind = get_external_plugin_path_kind(path).with_context(|| {
+            format!(
+                "failed to validate external path '{}' for plugin {}",
+                path.display(),
+                name
+            )
         })?;
-        path_kind_mapping.insert(name, path_kind);
+        path_info.insert(name.as_str(), (kind, path.clone()));
     }
 
-    // convert shipping archive to shipping directories at plugin run directory
-    let archived = topology_plugins.iter().filter(|(name, _plugin)| {
-        path_kind_mapping.get(name) == Some(&PluginPathKind::ShippingArchive)
-    });
-    for (name, plugin) in archived {
-        let path = plugin
-            .path
-            .as_ref()
-            .expect("external plugin (shipping archive) must have a path");
-        unpack_shipping_archive(path, plugin_run_dir).with_context(|| {
-            let (path_as_str, kind) = (path.to_string_lossy(), "shipping archive");
-            format!("preparation for plugin {name} with external path {path_as_str} ({kind}) has failed")
-        })?;
+    for (name, (kind, path)) in &path_info {
+        materialize_external_plugin(name, *kind, path, params, plugin_run_dir)?;
     }
-
-    // clone shipping directories content to plugin run directory
-    let foldered = topology_plugins.iter().filter(|(name, _plugin)| {
-        path_kind_mapping.get(name) == Some(&PluginPathKind::ShippingDirectory)
-    });
-    for (name, plugin) in foldered {
-        let path = plugin
-            .path
-            .as_ref()
-            .expect("external plugin (shipping folder) must have a path");
-        copy_directory_tree(path, plugin_run_dir).with_context(|| {
-            let (path_as_str,kind) = (path.to_string_lossy(), "shipping directory");
-            format!("preparation for plugin {name} with external path {path_as_str} ({kind}) has failed")
-        })?;
-    }
-
-    // copy built plugins to plugin run directory
-    let cargoed = topology_plugins.iter().filter(|(name, _plugin)| {
-        path_kind_mapping.get(name) == Some(&PluginPathKind::CrateOrWorkspaceDirectory)
-    });
-    for (name, plugin) in cargoed {
-        let path = plugin
-            .path
-            .as_ref()
-            .expect("external plugin (cargo project) must have a path");
-        let (profile, target_dir) = (params.get_build_profile(), &params.target_dir);
-        if !params.no_build {
-            cargo_build(profile, target_dir, path).with_context(|| {
-                let (path_as_str, kind) = (path.to_string_lossy(), "cargo project");
-                format!("preparation for plugin {name} with external path {path_as_str} ({kind}) has failed")
-            })?;
-        }
-        let src_shipping_dir = path.join(target_dir).join(profile.to_string()).join(name);
-        copy_directory_tree(&src_shipping_dir, plugin_run_dir).with_context(|| {
-            let path = path.to_string_lossy();
-            format!("copying shipping directory for plugin {name} with path {path} has failed")
-        })?;
-    }
-
     Ok(())
 }
 
@@ -936,6 +953,24 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         params
             .topology
             .find_plugin_versions(plugins_dir.as_ref().unwrap())?;
+    } else if params.topology.has_external_plugins() {
+        // Нет родительского плагина, но есть внешние плагины.
+        // Готовим их в служебной директории кластера и используем её как --plugin-dir
+        let run_plugins_dir = cluster_dir.join("plugins");
+        fs::create_dir_all(&run_plugins_dir).with_context(|| {
+            format!(
+                "failed to create plugins working directory at {}",
+                run_plugins_dir.display()
+            )
+        })?;
+        prepare_external_plugins(&params, &run_plugins_dir)?;
+        params.topology.find_plugin_versions(&run_plugins_dir)?;
+        plugins_dir = Some(run_plugins_dir);
+    } else if !params.topology.plugins.is_empty() {
+        bail!(
+            "failed to prepare plugins: plugin directory is unknown.\n\
+            If you use external plugins, ensure they are prepared or run from a pike plugin project"
+        );
     }
 
     let mut picodata_processes = vec![];
@@ -973,7 +1008,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         }
         let pico_instance_name = instance_dir
             .file_name()
-            .expect("unreachable: canonicolized path cannot have .. as filename")
+            .expect("unreachable: canonicalized path cannot have .. as filename")
             .to_str();
         let instance_id = pico_instance_name
             .expect("unreachable: instance path should be convertible to str")[1..]
@@ -1028,7 +1063,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             let timeout = TIMEOUT_WAITING_FOR_CLUSTER_ID;
             let start = Instant::now();
 
-            log::info!(
+            info!(
                 "Waiting for cluster RAFT leader to be negotiated (timeout {}s)",
                 timeout.as_secs()
             );
@@ -1037,7 +1072,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
                 let raft_leader_id = get_cluster_leader_id(&params.picodata_path, &cluster_dir)?;
 
                 if raft_leader_id != 0 {
-                    log::info!("Cluster leader id is {raft_leader_id}");
+                    info!("Cluster leader id is {raft_leader_id}");
                     break;
                 }
 
@@ -1046,21 +1081,21 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         }
 
         apply_web_auth_setting(&params, &cluster_dir)?;
-        if !params.disable_plugin_install {
-            info!("Enabling plugins...");
-
-            if plugins_dir.is_some() {
-                let result = enable_plugins(&params.topology, &cluster_dir, &params.picodata_path);
-                if let Err(e) = result {
-                    for process in &mut picodata_processes {
-                        process.kill().unwrap_or_else(|e| {
-                            error!("failed to kill picodata instances: {e:#}");
-                        });
-                    }
-                    bail!("failed to enable plugins: {e}");
-                }
+        if !params.disable_plugin_install && !params.topology.plugins.is_empty() {
+            if plugins_dir.is_none() {
+                bail!("failed to enable plugins: directory with plugins is missing.")
             }
-        };
+            info!("Enabling plugins...");
+            let result = enable_plugins(&params.topology, &cluster_dir, &params.picodata_path);
+            if let Err(e) = result {
+                for process in &mut picodata_processes {
+                    process.kill().unwrap_or_else(|e| {
+                        error!("failed to kill picodata instances: {e:#}");
+                    });
+                }
+                bail!("failed to enable plugins: {e}");
+            }
+        }
 
         info!(
             "Picodata cluster has started (launch time: {} sec, total instances: {instance_id})",
@@ -1081,7 +1116,7 @@ pub fn cmd(params: &Params) -> Result<()> {
         return Ok(());
     }
 
-    // Set Ctrl+C handler. Upon recieving Ctrl+C signal
+    // Set Ctrl+C handler. Upon receiving Ctrl+C signal
     // All instances would be killed, then joined and
     // destructors will be called
     let picodata_pids: Vec<u32> = pico_instances.iter().map(|p| p.child.id()).collect();
@@ -1105,7 +1140,31 @@ pub fn cmd(params: &Params) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::lib::LIB_EXT;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
     use std::cell::RefCell;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tar::Builder;
+
+    fn tmp_dir(prefix: &str) -> PathBuf {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("pike-run-ut-{prefix}-{ts}"));
+        dir
+    }
+
+    fn capture_runner(
+        captured: &RefCell<Vec<String>>,
+    ) -> impl Fn(&Path, &Path, &str) -> Result<String> + '_ {
+        move |_: &Path, _: &Path, q: &str| -> Result<String> {
+            captured.borrow_mut().push(q.to_string());
+            Ok(String::new())
+        }
+    }
 
     #[test]
     fn web_auth_config_enables_with_reset() {
@@ -1113,12 +1172,7 @@ mod tests {
         let sock = Path::new("/tmp/admin.sock");
         let captured: RefCell<Vec<String>> = RefCell::new(vec![]);
 
-        let runner = |_: &Path, _: &Path, q: &str| -> Result<String> {
-            captured.borrow_mut().push(q.to_string());
-            Ok(String::new())
-        };
-
-        configure_web_auth(picodata, sock, true, runner).unwrap();
+        configure_web_auth(picodata, sock, true, capture_runner(&captured)).unwrap();
 
         let calls = captured.borrow();
         assert_eq!(calls.len(), 1);
@@ -1135,12 +1189,7 @@ mod tests {
         let sock = Path::new("/tmp/admin.sock");
         let captured: RefCell<Vec<String>> = RefCell::new(vec![]);
 
-        let runner = |_: &Path, _: &Path, q: &str| -> Result<String> {
-            captured.borrow_mut().push(q.to_string());
-            Ok(String::new())
-        };
-
-        configure_web_auth(picodata, sock, false, runner).unwrap();
+        configure_web_auth(picodata, sock, false, capture_runner(&captured)).unwrap();
 
         let calls = captured.borrow();
         assert_eq!(calls.len(), 1);
@@ -1152,8 +1201,8 @@ mod tests {
     }
 
     fn temp_dir_unique(prefix: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("{prefix}_{nanos}"));
@@ -1296,6 +1345,35 @@ mod tests {
     }
 
     #[test]
+    fn enable_plugins_fails_on_missing_version() {
+        let topology = Topology {
+            tiers: BTreeMap::new(),
+            plugins: {
+                let mut m = BTreeMap::new();
+                m.insert(
+                    "p".to_string(),
+                    Plugin {
+                        migration_context: vec![],
+                        services: BTreeMap::new(),
+                        version: None,
+                        path: None,
+                    },
+                );
+                m
+            },
+            enviroment: BTreeMap::new(),
+        };
+        let cluster_dir = temp_dir_unique("pike_test_cluster");
+        let picodata_path = Path::new("picodata");
+        let err = enable_plugins(&topology, &cluster_dir, picodata_path).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("plugin version is missing"),
+            "Expected explicit error on missing version, got: {msg}"
+        );
+    }
+
+    #[test]
     fn merged_cluster_tier_config_errors_on_null_root() {
         let plugin_dir = temp_dir_unique("pike_test_null_root");
         let config_path = PathBuf::from("picodata.yaml");
@@ -1317,5 +1395,130 @@ mod tests {
             format!("{err:#}").contains("expected YAML mapping"),
             "expected error about null root, got: {err}"
         );
+    }
+
+    #[test]
+    fn external_plugin_absolute_path_supported() {
+        // Create a shipping directory structure: plugin_name/version/manifest.yaml
+        let base = tmp_dir("abs");
+        let plugin_name = "abs_plugin";
+        let version = "0.1.0";
+        let shipping_root = base.join(plugin_name).join(version);
+        fs::create_dir_all(&shipping_root).unwrap();
+        fs::write(shipping_root.join("manifest.yaml"), "name: abs_plugin\n").unwrap();
+
+        let kind = get_external_plugin_path_kind(&base.join(plugin_name)).unwrap();
+        assert_eq!(kind, PluginPathKind::ShippingDirectory);
+    }
+
+    #[test]
+    fn materialize_external_plugin_shipping_directory() {
+        let base = tmp_dir("mat_dir");
+        let src = base.join("test_plugin");
+        let dst = base.join("dst");
+        fs::create_dir_all(&src).unwrap();
+        fs::create_dir_all(&dst).unwrap();
+
+        fs::write(src.join("manifest.yaml"), "name: test\n").unwrap();
+
+        let topology = Topology::default();
+        let params = ParamsBuilder::default().topology(topology).build().unwrap();
+
+        materialize_external_plugin(
+            "test_plugin",
+            PluginPathKind::ShippingDirectory,
+            &src,
+            &params,
+            &dst,
+        )
+        .unwrap();
+
+        assert!(dst.join("test_plugin/manifest.yaml").exists());
+    }
+
+    #[test]
+    fn materialize_external_plugin_shipping_archive() {
+        let base = tmp_dir("mat_arc");
+        fs::create_dir_all(&base).unwrap();
+        let archive_path = base.join("plugin.tar.gz");
+        let dst = base.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+
+        // Create dummy tar.gz
+        {
+            let file = File::create(&archive_path).unwrap();
+            let enc = GzEncoder::new(file, Compression::default());
+            let mut tar = Builder::new(enc);
+
+            // Create required structure for is_plugin_archive
+            // plugin_name / plugin_version / [manifest.yaml | lib...]
+            let header_path_manifest = Path::new("test_plugin/0.1.0/manifest.yaml");
+            let mut header = tar::Header::new_gnu();
+            header.set_size(0);
+            header.set_cksum();
+            tar.append_data(&mut header, header_path_manifest, &mut "".as_bytes())
+                .unwrap();
+
+            let lib_name = format!("test_plugin/0.1.0/libtest.{LIB_EXT}");
+            let header_path_lib = Path::new(&lib_name);
+            let mut header_lib = tar::Header::new_gnu();
+            header_lib.set_size(0);
+            header_lib.set_cksum();
+            tar.append_data(&mut header_lib, header_path_lib, &mut "".as_bytes())
+                .unwrap();
+
+            tar.finish().unwrap();
+        }
+
+        let topology = Topology::default();
+        let params = ParamsBuilder::default().topology(topology).build().unwrap();
+
+        materialize_external_plugin(
+            "test_plugin",
+            PluginPathKind::ShippingArchive,
+            &archive_path,
+            &params,
+            &dst,
+        )
+        .unwrap();
+
+        let unpacked_manifest = dst.join("test_plugin/0.1.0/manifest.yaml");
+        assert!(
+            unpacked_manifest.exists(),
+            "manifest should be unpacked at {}",
+            unpacked_manifest.display()
+        );
+    }
+
+    #[test]
+    fn materialize_external_plugin_crate_no_build() {
+        let base = tmp_dir("mat_crate");
+        let plugin_path = base.join("my_plugin");
+        // emulate build artifact: target/debug/my_plugin/manifest.yaml
+        let artifact_path = plugin_path.join("target/debug/my_plugin");
+        fs::create_dir_all(&artifact_path).unwrap();
+        fs::write(artifact_path.join("manifest.yaml"), "artifact").unwrap();
+
+        let dst = base.join("dst");
+        fs::create_dir_all(&dst).unwrap();
+
+        let topology = Topology::default();
+        let params = ParamsBuilder::default()
+            .topology(topology)
+            .no_build(true)
+            .target_dir(PathBuf::from("target"))
+            .build()
+            .unwrap();
+
+        materialize_external_plugin(
+            "my_plugin",
+            PluginPathKind::CrateOrWorkspaceDirectory,
+            &plugin_path,
+            &params,
+            &dst,
+        )
+        .unwrap();
+
+        assert!(dst.join("my_plugin/manifest.yaml").exists());
     }
 }
