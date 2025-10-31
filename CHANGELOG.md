@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- Add optional `--no-build` flag to `plugin pack` command
+
+## [2.9.0]
+
+### Added
+
+- Add `--with-web-auth` flag to pike run, explicitly enabling WebUI authentication
+- Add plugin lifecycle smoke test in plugin template
+- Archive naming now includes OS identifier and variant: `<name>_<version>-<osid>_<variant>.tar.gz`
+- OS detection for `plugin pack`:
+  - Linux: parsing `/etc/os-release`
+  - macOS: `sw_vers`
+  - Rolling distro handling
+
+### Changed
+- Previous archive name `<name>-<version>.tar.gz` replaced by new format including OS suffix
+
+### Notes
+- If `VERSION_ID` is missing for a non‑rolling distro, the variant becomes `unknown`
+- For known rolling distros without `VERSION_ID` the variant becomes `rolling`
+
 ## [2.8.0]
 
 ### Added
@@ -216,10 +239,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 - Clean plugin folder from trash in workspaces (67ed7f79)
 - Update Rust version (568b75c6)
 - Improve `run` command behavior:
-  - Add daemon mode (0cd689e9)
-  - Improve logs (d07baf58)
-  - Write logs to files per instance (d07baf58)
-  - Add colored instance name prefix in stdout logs (d07baf58)
+    - Add daemon mode (0cd689e9)
+    - Improve logs (d07baf58)
+    - Write logs to files per instance (d07baf58)
+    - Add colored instance name prefix in stdout logs (d07baf58)
 - Improve `Ctrl+C` handling for proper shutdown (701be745)
 - Enhance error handling during instance stop (d233a74d)
 - Forward output from `picodata admin` in `config apply` command (05bae132)

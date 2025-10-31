@@ -10,6 +10,8 @@ use std::{
 };
 use toml_edit::{DocumentMut, Item, Value};
 
+use crate::commands::ride;
+
 mod commands;
 
 const CK_CHECK_PARRENT_INTERVAL_SEC: u64 = 3;
@@ -119,6 +121,10 @@ enum Command {
         /// will run all instances in the cluster.
         #[arg(long, value_name = "INSTANCE_NAME", default_value = None)]
         instance_name: Option<String>,
+        /// Keep `WebUI` authentication enabled (opt-in). By default, Pike disables `WebUI` auth
+        /// for local development via `ALTER SYSTEM SET jwt_secret = ''`.
+        #[arg(long, value_name = "WITH_WEB_AUTH", default_value_t = false)]
+        with_web_auth: bool,
     },
     /// Stop Picodata cluster or a specific instance
     Stop {
@@ -166,6 +172,9 @@ enum Command {
         #[command(subcommand)]
         command: Config,
     },
+    #[command(hide = true)]
+    /// Make life a ride
+    Ride {},
 }
 
 #[derive(Subcommand)]
@@ -181,6 +190,9 @@ enum Plugin {
         /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
         plugin_path: PathBuf,
+        /// Disable plugin build before packing the archive
+        #[arg(long)]
+        no_build: bool,
     },
     /// Alias for cargo build command
     Build {
@@ -358,6 +370,7 @@ fn main() -> Result<()> {
             no_build,
             config_path,
             instance_name,
+            with_web_auth,
         } => {
             is_required_path_exists(&plugin_path, &topology, CARING_PIKE, 1);
 
@@ -397,6 +410,7 @@ fn main() -> Result<()> {
                 .no_build(no_build)
                 .config_path(config_path)
                 .instance_name(instance_name)
+                .with_web_auth(with_web_auth)
                 .build()
                 .unwrap();
             commands::run::cmd(&params).context("failed to execute Run command")?;
@@ -427,6 +441,9 @@ fn main() -> Result<()> {
             commands::clean::cmd(&data_dir, &plugin_path)
                 .context("failed to execute \"clean\" command")?;
         }
+        Command::Ride {} => {
+            ride::cmd()?;
+        }
         Command::Enter {
             instance_name,
             data_dir,
@@ -446,10 +463,11 @@ fn main() -> Result<()> {
                     debug,
                     target_dir,
                     plugin_path,
+                    no_build,
                 } => {
                     is_required_path_exists(&plugin_path, Path::new("Cargo.toml"), CARING_PIKE, 1);
 
-                    commands::plugin::pack::cmd(debug, &target_dir, &plugin_path)
+                    commands::plugin::pack::cmd(debug, &target_dir, &plugin_path, no_build)
                         .context("failed to execute \"pack\" command")?;
                 }
                 Plugin::Build {
