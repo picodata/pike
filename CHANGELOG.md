@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Added
 
+- Support running external plugins without a parent plugin project
 - Add `--archive-name` option to `plugin pack`
 - Add validation of picodata.yaml config
 - Add `--picodata-path` option to `config apply` command
