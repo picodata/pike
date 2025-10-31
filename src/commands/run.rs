@@ -150,7 +150,9 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
     let mut queries: Vec<String> = Vec::new();
 
     for (plugin_name, plugin) in &topology.plugins {
-        let plugin_version = plugin.version.as_ref().unwrap();
+        let Some(plugin_version) = plugin.version.as_ref() else {
+            bail!("plugin version is missing for '{plugin_name}'");
+        };
 
         // create plugin
         queries.push(format!(
@@ -772,7 +774,7 @@ fn prepare_external_plugins(params: &Params, plugin_run_dir: &Path) -> Result<()
             .as_ref()
             .expect("external plugin (shipping folder) must have a path");
         copy_directory_tree(path, plugin_run_dir).with_context(|| {
-            let (path_as_str,kind) = (path.to_string_lossy(), "shipping directory");
+            let (path_as_str, kind) = (path.to_string_lossy(), "shipping directory");
             format!("preparation for plugin {name} with external path {path_as_str} ({kind}) has failed")
         })?;
     }
@@ -936,6 +938,24 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         params
             .topology
             .find_plugin_versions(plugins_dir.as_ref().unwrap())?;
+    } else if params.topology.has_external_plugins() {
+        // Нет родительского плагина, но есть внешние плагины.
+        // Готовим их в служебной директории кластера и используем её как --plugin-dir
+        let run_plugins_dir = cluster_dir.join("plugins");
+        fs::create_dir_all(&run_plugins_dir).with_context(|| {
+            format!(
+                "failed to create plugins working directory at {}",
+                run_plugins_dir.display()
+            )
+        })?;
+        prepare_external_plugins(&params, &run_plugins_dir)?;
+        params.topology.find_plugin_versions(&run_plugins_dir)?;
+        plugins_dir = Some(run_plugins_dir);
+    } else if !params.topology.plugins.is_empty() {
+        bail!(
+            "failed to prepare plugins: plugin directory is unknown.\n\
+            If you use external plugins, ensure they are prepared or run from a pike plugin project"
+        );
     }
 
     let mut picodata_processes = vec![];
@@ -1048,7 +1068,6 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         apply_web_auth_setting(&params, &cluster_dir)?;
         if !params.disable_plugin_install {
             info!("Enabling plugins...");
-
             if plugins_dir.is_some() {
                 let result = enable_plugins(&params.topology, &cluster_dir, &params.picodata_path);
                 if let Err(e) = result {
@@ -1296,6 +1315,35 @@ mod tests {
     }
 
     #[test]
+    fn enable_plugins_fails_on_missing_version() {
+        let topology = Topology {
+            tiers: BTreeMap::new(),
+            plugins: {
+                let mut m = BTreeMap::new();
+                m.insert(
+                    "p".to_string(),
+                    Plugin {
+                        migration_context: vec![],
+                        services: BTreeMap::new(),
+                        version: None,
+                        path: None,
+                    },
+                );
+                m
+            },
+            enviroment: BTreeMap::new(),
+        };
+        let cluster_dir = temp_dir_unique("pike_test_cluster");
+        let picodata_path = Path::new("picodata");
+        let err = enable_plugins(&topology, &cluster_dir, picodata_path).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("plugin version is missing"),
+            "Expected explicit error on missing version, got: {msg}"
+        );
+    }
+
+    #[test]
     fn merged_cluster_tier_config_errors_on_null_root() {
         let plugin_dir = temp_dir_unique("pike_test_null_root");
         let config_path = PathBuf::from("picodata.yaml");
@@ -1316,6 +1364,18 @@ mod tests {
         assert!(
             format!("{err:#}").contains("expected YAML mapping"),
             "expected error about null root, got: {err}"
+        );
+    }
+
+    #[test]
+    fn external_plugin_path_must_be_relative() {
+        let tmp = temp_dir_unique("pike_test_abs_path");
+        let abs = tmp.canonicalize().unwrap();
+        let err = get_external_plugin_path_kind(&abs).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("external plugin path must be relative"),
+            "Expected error about relative path, got: {msg}"
         );
     }
 }
