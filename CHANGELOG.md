@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Changed
 
 - Bump Picodata version to 25.4.2 in plugin template
+- Bump Picotest version to 1.8.1 in plugin template
 
 ## [2.9.0]
 
