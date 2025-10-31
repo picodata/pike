@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Added
 - Support running external plugins without a parent plugin project
+- Add optional `--no-build` flag to `plugin pack` command
 
 ### Changed
 - `enable_plugins` no longer uses `unwrap()` for plugin version; returns a clear error instead
