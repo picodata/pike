@@ -81,6 +81,7 @@ fn apply_service_config(
     service_name: &str,
     config: &HashMap<String, serde_yaml::Value>,
     admin_socket: &Path,
+    picodata_path: &Path,
 ) -> Result<()> {
     let mut queries: Vec<String> = Vec::new();
 
@@ -95,7 +96,7 @@ fn apply_service_config(
     for query in queries {
         log::info!("picodata admin: {query}");
 
-        let mut picodata_admin = Command::new("picodata")
+        let mut picodata_admin = Command::new(picodata_path)
             .arg("admin")
             .arg(
                 admin_socket
@@ -174,6 +175,7 @@ fn apply_plugin_config(params: &Params, current_plugin_path: &str) -> Result<()>
             &service_name,
             &service_config,
             &admin_socket,
+            &params.picodata_path,
         )
         .context(format!(
             "failed to apply service config for service {service_name}"
@@ -216,6 +218,8 @@ pub struct Params {
     plugin_path: PathBuf,
     #[builder(default)]
     plugin_name: Option<String>,
+    #[builder(default = "PathBuf::from(\"picodata\")")]
+    picodata_path: PathBuf,
 }
 
 impl ParamsBuilder {
@@ -289,4 +293,62 @@ pub fn cmd(params: &Params) -> Result<()> {
     apply_plugin_config(params, "./")?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn tmp_dir(prefix: &str) -> PathBuf {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let mut dir = env::temp_dir();
+        dir.push(format!("pike-config-apply-ut-{prefix}-{ts}"));
+        dir
+    }
+
+    #[test]
+    fn apply_service_config_uses_custom_picodata_path_and_fails_cleanly() {
+        let mut service_cfg: HashMap<String, serde_yaml::Value> = HashMap::new();
+        service_cfg.insert(
+            "k".to_string(),
+            serde_yaml::to_value("v").expect("serialize test value"),
+        );
+
+        let bogus_picodata = PathBuf::from("/this/does/not/exist/picodata-bogus");
+        let bogus_socket = Path::new("/tmp/nonexistent-admin.sock");
+
+        let err = apply_service_config(
+            "p",
+            "0.1.0",
+            "svc",
+            &service_cfg,
+            bogus_socket,
+            &bogus_picodata,
+        )
+        .unwrap_err();
+
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("failed to run picodata admin"),
+            "expected process spawn error context, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn params_builder_has_default_picodata_path() {
+        let params = ParamsBuilder::default().build().unwrap();
+        assert_eq!(params.picodata_path, PathBuf::from("picodata"));
+    }
+
+    #[test]
+    fn read_config_from_path_reports_read_error() {
+        let dir = tmp_dir("cfg");
+        let cfg = dir.join("no-file.yaml");
+        let res = read_config_from_path(&cfg);
+        assert!(res.is_err());
+    }
 }

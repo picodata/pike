@@ -391,3 +391,4 @@ cargo pike config apply
 
 - `-c, --config-path <CONFIG>` - Путь к файлу конфига. Значение по умолчанию: `plugin_config.yaml`
 - `--data-dir <DATA_DIR>` - Путь к директории хранения файлов кластера. Значение по умолчанию: `./tmp`
+- `--picodata-path <BINARY_PATH>` - Путь к бинарному файлу Picodata, который будет использоваться для вызова picodata admin при применении конфига. По умолчанию используется `picodata` из `$PATH`
