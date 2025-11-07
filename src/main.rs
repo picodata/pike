@@ -257,6 +257,8 @@ enum Config {
         /// Choose plugin which config should be applied
         #[arg(long, value_name = "PLUGIN_NAME")]
         plugin_name: Option<String>,
+        #[arg(long, value_name = "BINARY_PATH", default_value = "picodata")]
+        picodata_path: PathBuf,
     },
 }
 
@@ -513,12 +515,14 @@ fn main() -> Result<()> {
                     data_dir,
                     plugin_path,
                     plugin_name,
+                    picodata_path,
                 } => {
                     let params = commands::config::apply::ParamsBuilder::default()
                         .config_path(config_path)
                         .data_dir(data_dir)
                         .plugin_path(plugin_path)
                         .plugin_name(plugin_name)
+                        .picodata_path(picodata_path)
                         .build()
                         .unwrap();
                     commands::config::apply::cmd(&params)
