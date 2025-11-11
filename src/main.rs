@@ -193,6 +193,9 @@ enum Plugin {
         /// Disable plugin build before packing the archive
         #[arg(long)]
         no_build: bool,
+        /// Override resulting archive file name or path (if relative, placed under <target>/<profile>)
+        #[arg(long, value_name = "ARCHIVE_NAME")]
+        archive_name: Option<PathBuf>,
     },
     /// Alias for cargo build command
     Build {
@@ -466,11 +469,18 @@ fn main() -> Result<()> {
                     target_dir,
                     plugin_path,
                     no_build,
+                    archive_name,
                 } => {
                     is_required_path_exists(&plugin_path, Path::new("Cargo.toml"), CARING_PIKE, 1);
 
-                    commands::plugin::pack::cmd(debug, &target_dir, &plugin_path, no_build)
-                        .context("failed to execute \"pack\" command")?;
+                    commands::plugin::pack::cmd(
+                        debug,
+                        &target_dir,
+                        &plugin_path,
+                        no_build,
+                        archive_name.as_ref(),
+                    )
+                    .context("failed to execute \"pack\" command")?;
                 }
                 Plugin::Build {
                     release,
