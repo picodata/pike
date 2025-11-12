@@ -1005,7 +1005,8 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
 
         apply_web_auth_setting(&params, &cluster_dir)?;
     } else {
-        info!("Running the cluster...");
+        let picodata_version = get_picodata_version(&params.picodata_path)?;
+        info!("Running the cluster with {picodata_version}...");
         let start_cluster_run = Instant::now();
 
         for (tier_name, tier) in &params.topology.tiers {
