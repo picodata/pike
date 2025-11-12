@@ -60,6 +60,7 @@ pub fn cmd(
     target_dir: &PathBuf,
     plugin_path: &PathBuf,
     no_build: bool,
+    archive_name: Option<&PathBuf>,
 ) -> Result<()> {
     let current_dir = env::current_dir().context("failed to get current working directory")?;
     let root_dir = if plugin_path.is_absolute() {
@@ -103,6 +104,12 @@ pub fn cmd(
         .context("Failed to parse Cargo.toml")?;
 
     if let Some(workspace) = parsed_toml.get("workspace") {
+        if archive_name.is_some() {
+            bail!(
+                "--archive-name is not supported for workspaces (multiple archives are produced)"
+            );
+        }
+
         let mut packaged_any = false;
         if let Some(members) = workspace.get("members").and_then(|m| m.as_array()) {
             for member in members {
@@ -113,7 +120,7 @@ pub fn cmd(
                 let member_path = root_dir.join(member_str);
                 if member_path.join("manifest.yaml.template").exists() {
                     info!("Packing workspace member plugin: {}", member_path.display());
-                    create_plugin_archive(&build_root, &member_path)?;
+                    create_plugin_archive(&build_root, &member_path, None)?;
                     packaged_any = true;
                 } else {
                     debug!(
@@ -131,10 +138,14 @@ pub fn cmd(
         return Ok(());
     }
 
-    create_plugin_archive(&build_root, &root_dir)
+    create_plugin_archive(&build_root, &root_dir, archive_name.map(PathBuf::as_path))
 }
 
-fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
+fn create_plugin_archive(
+    build_dir: &Path,
+    plugin_dir: &Path,
+    archive_name_override: Option<&Path>,
+) -> Result<()> {
     let plugin_version = get_latest_plugin_version(plugin_dir)?;
     let cargo_manifest: CargoManifest = toml::from_str(
         &fs::read_to_string(plugin_dir.join("Cargo.toml"))
@@ -149,13 +160,12 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
 
     validate_plugin_build_tree(&plugin_build_dir, &normalized_package_name)?;
 
-    let os_suffix = detect_os_suffix().context("failed to detect OS for archive naming")?;
-
-    let archive_filename = format!(
-        "{}_{}-{}.tar.gz",
-        package_name, cargo_manifest.package.version, os_suffix
-    );
-    let compressed_file_path = build_dir.join(&archive_filename);
+    let compressed_file_path = resolve_archive_destination(
+        build_dir,
+        archive_name_override,
+        &package_name,
+        &cargo_manifest.package.version,
+    )?;
 
     if !plugin_build_dir.exists() {
         bail!(
@@ -170,6 +180,16 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
         plugin_version,
         compressed_file_path.display()
     );
+
+    let parent = compressed_file_path
+        .parent()
+        .ok_or_else(|| anyhow!("failed to resolve archive parent directory"))?;
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "failed to ensure archive parent directory {}",
+            parent.display()
+        )
+    })?;
 
     let compressed_file =
         File::create(&compressed_file_path).context("failed to create archive file")?;
@@ -220,6 +240,41 @@ fn create_plugin_archive(build_dir: &Path, plugin_dir: &Path) -> Result<()> {
 
     info!("Archive created: {}", compressed_file_path.display());
     Ok(())
+}
+
+fn resolve_archive_destination(
+    build_dir: &Path,
+    override_name: Option<&Path>,
+    package_name: &str,
+    package_version: &str,
+) -> Result<PathBuf> {
+    if let Some(name) = override_name {
+        let mut dest = if name.is_absolute() {
+            name.to_path_buf()
+        } else {
+            build_dir.join(name)
+        };
+
+        let fname = dest
+            .file_name()
+            .ok_or_else(|| {
+                anyhow!(
+                    "invalid archive name (no filename component): {}",
+                    dest.display()
+                )
+            })?
+            .to_string_lossy()
+            .to_string();
+        if !fname.ends_with(".tar.gz") {
+            dest.set_file_name(format!("{fname}.tar.gz"));
+        }
+        return Ok(dest);
+    }
+
+    // Default auto archive name with OS suffix
+    let os_suffix = detect_os_suffix().context("failed to detect OS for archive naming")?;
+    let archive_filename = format!("{package_name}_{package_version}-{os_suffix}.tar.gz");
+    Ok(build_dir.join(archive_filename))
 }
 
 // ---------------- OS detection (per target) ----------------
@@ -400,7 +455,7 @@ fn get_latest_plugin_version(plugin_dir: &Path) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_plugin_build_tree, LIB_EXT};
+    use super::{resolve_archive_destination, validate_plugin_build_tree, LIB_EXT};
     use std::fs;
     use std::io::Write;
     use std::path::{Path, PathBuf};
@@ -508,5 +563,40 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn resolve_archive_relative_with_ext_goes_into_build_dir() {
+        let build_dir = PathBuf::from("/tmp/build/rel");
+        let dest = resolve_archive_destination(
+            &build_dir,
+            Some(Path::new("custom.tar.gz")),
+            "pkg",
+            "0.1.0",
+        )
+        .unwrap();
+        assert_eq!(dest, build_dir.join("custom.tar.gz"));
+    }
+
+    #[test]
+    fn resolve_archive_relative_without_ext_appends_tar_gz() {
+        let build_dir = PathBuf::from("/tmp/build/rel");
+        let dest =
+            resolve_archive_destination(&build_dir, Some(Path::new("custom")), "pkg", "0.1.0")
+                .unwrap();
+        assert_eq!(dest, build_dir.join("custom.tar.gz"));
+    }
+
+    #[test]
+    fn resolve_archive_absolute_without_ext_appends_tar_gz() {
+        let build_dir = PathBuf::from("/tmp/build/rel");
+        let dest = resolve_archive_destination(
+            &build_dir,
+            Some(Path::new("/var/tmp/out/custom-name")),
+            "pkg",
+            "0.1.0",
+        )
+        .unwrap();
+        assert_eq!(dest, PathBuf::from("/var/tmp/out/custom-name.tar.gz"));
     }
 }
