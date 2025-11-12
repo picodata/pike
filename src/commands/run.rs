@@ -258,6 +258,21 @@ fn get_ipv4_from_liquid_var(
     Some(env_ipv4)
 }
 
+fn get_picodata_version(picodata_path: &PathBuf) -> Result<String> {
+    let picodata_output = Command::new(picodata_path).arg("--version").output();
+
+    let picodata_output = match picodata_output {
+        Ok(o) => o,
+        Err(err) if err.kind() == ErrorKind::NotFound => {
+            println!("{BAFFLED_WHALE}");
+            bail!("Picodata not found")
+        }
+        Err(err) => bail!("failed to get picodata version ({err})"),
+    };
+
+    Ok(str::from_utf8(&picodata_output.stdout)?.to_string())
+}
+
 #[allow(dead_code)]
 pub struct PicodataInstanceProperties<'a> {
     pub bin_port: &'a u16,
@@ -323,7 +338,7 @@ impl PicodataInstance {
         let mut child = Command::new(&run_params.picodata_path);
         child.envs(&env_vars);
 
-        let picodata_version = Self::get_picodata_version(&run_params.picodata_path)?;
+        let picodata_version = get_picodata_version(&run_params.picodata_path)?;
         let data_dir_flag = if picodata_version.contains("picodata 24.6") {
             log::warn!(
                 "You are using old version of picodata: {picodata_version} In the next major release it WILL NOT BE SUPPORTED"
@@ -462,21 +477,6 @@ impl PicodataInstance {
         pico_instance.make_pid_file()?;
 
         Ok(pico_instance)
-    }
-
-    fn get_picodata_version(picodata_path: &PathBuf) -> Result<String> {
-        let picodata_output = Command::new(picodata_path).arg("--version").output();
-
-        let picodata_output = match picodata_output {
-            Ok(o) => o,
-            Err(err) if err.kind() == ErrorKind::NotFound => {
-                println!("{BAFFLED_WHALE}");
-                bail!("Picodata not found")
-            }
-            Err(err) => bail!("failed to get picodata version ({err})"),
-        };
-
-        Ok(str::from_utf8(&picodata_output.stdout)?.to_string())
     }
 
     #[allow(dead_code)]
