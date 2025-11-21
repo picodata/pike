@@ -172,24 +172,84 @@ replication_factor = 1
 
 #### Подключение внешних плагинов
 
-Для добавления дополнительных плагинов, не входящих в текущий проект, в топологии можно указать свойство `path` для плагина:
+Для добавления дополнительных плагинов, не входящих в текущий проект, в топологии можно указать свойство `path` для плагина.
+
+Поддерживаются две формы пути: относительный и абсолютный.
 
 ```toml
 [plugin.ext_plugin]
-...
-path = "../ext_plugin"
+path = "../ext_plugin"                # относительная директория проекта
 
 [plugin.third_party_plugin]
-...
-path = "third-patry/third_party_plugin.tar.gz
+path = "/opt/bundles/third_plugin_0.3.1-ubuntu_focal.tar.gz"  # абсолютный путь к архиву
+
+[plugin.home_plugin]
+path = "~/Downloads/my_plugin_0.2.0-arch_rolling.tar.gz"      # путь из $HOME
 ```
 
-Путь к внешнему плагину должен быть относительным, разрешается относительно рабочей директории `pike` и может являтся одним из трех вариантов:
-* Директория с проектом плагина (поддерживаются и cargo project и cargo workspace)
-* Директория с собранными версиями плагина, которая получается в результате выполнения `pike plugin build`
+Путь может вести на:
+* Директорию с проектом плагина (поддерживаются и cargo project и cargo workspace)
+* Директорию с собранными версиями плагина, которая получается в результате выполнения `pike plugin build`
 * Архив с плагином, созданный через `pike plugin pack` или вручную.
 
-Файлы такого внешнего плагина будут помещены в общую для запуска кластера директорию, находящуюся в текущем проекте. Если путь указывает на проект, то, при необходимости, он будет предварительно собран (включая все плагины воркспейса).
+Файлы внешних плагинов автоматически помещаются в рабочую директорию запуска кластера: `<data_dir>/cluster/plugins`. Эта директория затем передаётся picodata через `--plugin-dir`, поэтому нет необходимости иметь «родительский» плагин. Достаточно:
+- положить `topology.toml` и (опционально) `picodata.yaml` в пустую папку
+- указать `path` на архив/директорию внешнего плагина
+- запустить `cargo pike run`
+
+#### Пример запуска внешнего плагина
+
+Предварительно подготавливаем плагин:
+
+```bash
+mkdir -p "/tmp/pike-manual-test"
+cd "/tmp/pike-manual-test"
+cargo pike plugin new my-plugin
+cd my-plugin
+cargo pike plugin pack
+```
+
+Путь, полученный в результате работы `pike plugin pack` нужно будет указать в topology.toml `path`. 
+
+Создаем папку my-run в домашней директории со следующим содержимым:
+
+```
+my-run/
+├── topology.toml
+└── picodata.yaml   (опционально)
+```
+
+`topology.toml`:
+
+```toml
+[tier.default]
+replicasets = 1
+replication_factor = 3
+
+[plugin.my-plugin]
+path = "/tmp/pike-manual-test/my-plugin/./target/release/my-plugin_0.1.0-cachyos_rolling.tar.gz"
+migration_context = []
+
+[plugin.my-plugin.service.example_service]
+tiers = ["default"]
+```
+
+`picodata.yaml`:
+
+```yaml
+cluster:
+  name: my-plugin_0.1.0-arch_rolling
+  default_bucket_count: 16384
+instance:
+  memtx:
+    memory: 2000000000
+```
+
+Запуск:
+
+```bash
+cargo pike run
+```
 
 ### `stop`
 
