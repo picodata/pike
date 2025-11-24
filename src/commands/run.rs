@@ -118,6 +118,21 @@ pub struct Topology {
 }
 
 impl Topology {
+    /// Parse topology toml file and validate the fields.
+    /// Emit warning upon meeting alien fields.
+    pub fn parse_toml(path: &PathBuf) -> Result<Self> {
+        let content = fs::read_to_string(path)
+            .context(format!("failed to read topology from {}", path.display()))?;
+
+        let deserializer = toml::de::Deserializer::parse(&content)
+            .context(format!("failed to parse topology from {}", path.display()))?;
+
+        serde_ignored::deserialize(deserializer, |f| {
+            warn!("Unknown field in topology TOML: {f}");
+        })
+        .map_err(anyhow::Error::from)
+    }
+
     fn find_plugin_versions(&mut self, plugins_dir: &Path) -> Result<()> {
         for (plugin_name, plugin) in &mut self.plugins {
             let current_plugin_dir = plugins_dir.join(plugin_name);
