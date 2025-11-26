@@ -11,7 +11,7 @@ cargo install picodata-pike
 ## Поддерживаемые версии
 
 | Pike    | Picodata         |
-| ------- | ---------------- |
+|---------|------------------|
 | `1.*.*` | `> 24.6, < 25.1` |
 | `2.*.*` | `>= 25.1, < 26`  |
 
@@ -66,6 +66,10 @@ cargo pike --help
 Пример топологии:
 
 ```toml
+pre_install_sql = [
+    'ALTER SYSTEM SET raft_wal_count_max = 10000;'
+]
+
 [tier.default]
 replicasets = 2
 replication_factor = 2
@@ -110,6 +114,15 @@ cargo pike run --topology topology.toml --data-dir ./tmp
 #### topology.toml
 
 ```toml
+# SQL-скрипты, которые будут выполнены перед установкой плагинов.
+# Полезно для установки глобальных настроек кластера, создания пользователей или таблиц.
+# Рекомендуется использовать тройные кавычки ('''), чтобы не экранировать кавычки внутри SQL.
+pre_install_sql = [
+    'ALTER SYSTEM SET raft_wal_count_max = 10000;',
+    '''CREATE USER "my_user" WITH PASSWORD 'secret';''',
+    '''CREATE TABLE "init_table" ("id" INT PRIMARY KEY, "val" TEXT) DISTRIBUTED GLOBALLY;'''
+]
+
 # описание количества репликасетов и фактора репликации тира
 # фактор репликации отвечает за количество инстансов в одном репликасете
 # в примере используется тир default, указано два репликасета и фактор репликации 2,

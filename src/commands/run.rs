@@ -115,6 +115,8 @@ pub struct Topology {
     pub plugins: BTreeMap<String, Plugin>,
     #[serde(default)]
     pub enviroment: BTreeMap<String, String>,
+    #[serde(default)]
+    pub pre_install_sql: Vec<String>,
 }
 
 impl Topology {
@@ -166,6 +168,13 @@ impl Topology {
 
 fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path) -> Result<()> {
     let mut queries: Vec<String> = Vec::new();
+
+    if !topology.pre_install_sql.is_empty() {
+        info!("Executing pre-install SQL scripts...");
+        for query in &topology.pre_install_sql {
+            queries.push(query.clone());
+        }
+    }
 
     for (plugin_name, plugin) in &topology.plugins {
         let Some(plugin_version) = plugin.version.as_ref() else {
@@ -1377,6 +1386,7 @@ mod tests {
                 m
             },
             enviroment: BTreeMap::new(),
+            pre_install_sql: vec![],
         };
         let cluster_dir = temp_dir_unique("pike_test_cluster");
         let picodata_path = Path::new("picodata");
@@ -1535,5 +1545,34 @@ mod tests {
         .unwrap();
 
         assert!(dst.join("my_plugin/manifest.yaml").exists());
+    }
+    #[test]
+    fn test_topology_deserialization_with_pre_install_sql() {
+        let toml_str = r#"
+        pre_install_sql = [
+            'CREATE TABLE "t" ("id" INT PRIMARY KEY);',
+            "ALTER SYSTEM SET param = 'value';",
+            '''
+            ALTER SYSTEM SET multiline = 'test';
+            '''
+        ]
+        [tier.default]
+        replicasets = 1
+        replication_factor = 1
+        "#;
+        let topology: Topology = toml::from_str(toml_str).unwrap();
+        assert_eq!(topology.pre_install_sql.len(), 3);
+        assert_eq!(
+            topology.pre_install_sql[0].trim(),
+            "CREATE TABLE \"t\" (\"id\" INT PRIMARY KEY);"
+        );
+        assert_eq!(
+            topology.pre_install_sql[1].trim(),
+            "ALTER SYSTEM SET param = 'value';"
+        );
+        assert_eq!(
+            topology.pre_install_sql[2].trim(),
+            "ALTER SYSTEM SET multiline = 'test';"
+        );
     }
 }
