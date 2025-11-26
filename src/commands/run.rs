@@ -115,6 +115,8 @@ pub struct Topology {
     pub plugins: BTreeMap<String, Plugin>,
     #[serde(default)]
     pub enviroment: BTreeMap<String, String>,
+    #[serde(default)]
+    pub pre_install_sql: Vec<String>,
 }
 
 impl Topology {
@@ -147,6 +149,57 @@ impl Topology {
     fn has_external_plugins(&self) -> bool {
         self.plugins.values().any(Plugin::is_external)
     }
+}
+
+fn run_pre_install_sql(
+    topology: &Topology,
+    cluster_dir: &Path,
+    picodata_path: &Path,
+) -> Result<()> {
+    if topology.pre_install_sql.is_empty() {
+        return Ok(());
+    }
+
+    let admin_socket = cluster_dir.join("i1").join("admin.sock");
+
+    for query in &topology.pre_install_sql {
+        info!("picodata admin (pre-install): {query}");
+
+        let mut picodata_admin = spawn_picodata_admin(picodata_path, &admin_socket)?;
+
+        {
+            let picodata_stdin = picodata_admin.stdin.as_mut().unwrap();
+            picodata_stdin
+                .write_all(query.as_bytes())
+                .context("failed to send pre-install sql query")?;
+        }
+
+        let exit_code = picodata_admin
+            .wait()
+            .context("failed to wait for picodata admin")?
+            .code()
+            .unwrap();
+
+        let outputs: [Box<dyn Read + Send>; 2] = [
+            Box::new(picodata_admin.stdout.unwrap()),
+            Box::new(picodata_admin.stderr.unwrap()),
+        ];
+
+        for output in outputs {
+            let reader = BufReader::new(output);
+            for line in reader.lines() {
+                let line = line.expect("failed to read picodata admin output");
+                info!("picodata admin: {line}");
+            }
+        }
+
+        if exit_code == 1 {
+            bail!("failed to execute pre-install sql query: {query}");
+        }
+    }
+
+    info!("Pre-install SQL scripts executed successfully");
+    Ok(())
 }
 
 fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path) -> Result<()> {
@@ -1081,6 +1134,16 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
         }
 
         apply_web_auth_setting(&params, &cluster_dir)?;
+        // Run pre-install SQL scripts
+        if let Err(e) = run_pre_install_sql(&params.topology, &cluster_dir, &params.picodata_path) {
+            for process in &mut picodata_processes {
+                process.kill().unwrap_or_else(|e| {
+                    error!("failed to kill picodata instances: {e:#}");
+                });
+            }
+            bail!("failed to run pre-install scripts: {e}");
+        }
+
         if !params.disable_plugin_install && !params.topology.plugins.is_empty() {
             if plugins_dir.is_none() {
                 bail!("failed to enable plugins: directory with plugins is missing.")
@@ -1362,6 +1425,7 @@ mod tests {
                 m
             },
             enviroment: BTreeMap::new(),
+            pre_install_sql: vec![],
         };
         let cluster_dir = temp_dir_unique("pike_test_cluster");
         let picodata_path = Path::new("picodata");
@@ -1520,5 +1584,27 @@ mod tests {
         .unwrap();
 
         assert!(dst.join("my_plugin/manifest.yaml").exists());
+    }
+    #[test]
+    fn test_topology_deserialization_with_pre_install_sql() {
+        let toml_str = r#"
+        pre_install_sql = [
+            'CREATE TABLE "t" ("id" INT PRIMARY KEY);',
+            "ALTER SYSTEM SET param = 'value';"
+        ]
+        [tier.default]
+        replicasets = 1
+        replication_factor = 1
+        "#;
+        let topology: Topology = toml::from_str(toml_str).unwrap();
+        assert_eq!(topology.pre_install_sql.len(), 2);
+        assert_eq!(
+            topology.pre_install_sql[0],
+            "CREATE TABLE \"t\" (\"id\" INT PRIMARY KEY);"
+        );
+        assert_eq!(
+            topology.pre_install_sql[1],
+            "ALTER SYSTEM SET param = 'value';"
+        );
     }
 }
