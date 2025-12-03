@@ -9,6 +9,7 @@ use std::{
     path::{Path, PathBuf},
     process::{self, Command, Stdio},
 };
+use toml_edit::DocumentMut;
 
 /// Mapping of plugin service names to their properties specified in
 /// [plugin configuration](https://github.com/picodata/pike?tab=readme-ov-file#config-apply).
@@ -252,7 +253,7 @@ pub fn cmd(params: &Params) -> Result<()> {
         &cargo_toml_path.display()
     ))?;
 
-    let parsed_toml: toml::Value = cargo_toml_content
+    let parsed_toml: DocumentMut = cargo_toml_content
         .parse()
         .context("Failed to parse Cargo.toml")?;
 

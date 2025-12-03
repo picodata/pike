@@ -8,7 +8,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 use tar::Builder;
-use toml::Value;
+use toml_edit::DocumentMut;
 
 #[derive(Deserialize)]
 struct PackageInfo {
@@ -99,7 +99,7 @@ pub fn cmd(
     let cargo_toml_content = fs::read_to_string(&cargo_toml_path)
         .with_context(|| format!("Failed to read Cargo.toml in {}", cargo_toml_path.display()))?;
 
-    let parsed_toml: Value = cargo_toml_content
+    let parsed_toml: DocumentMut = cargo_toml_content
         .parse()
         .context("Failed to parse Cargo.toml")?;
 
@@ -452,7 +452,7 @@ fn get_latest_plugin_version(plugin_dir: &Path) -> Result<String> {
     let cargo_toml = fs::read_to_string(&cargo_toml_path)
         .with_context(|| format!("Failed to read {}", cargo_toml_path.display()))?;
 
-    let parsed: Value = toml::from_str(&cargo_toml).context("Failed to parse Cargo.toml")?;
+    let parsed: DocumentMut = cargo_toml.parse().context("Failed to parse Cargo.toml")?;
 
     let version = parsed
         .get("package")
