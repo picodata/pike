@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [3.0.0]
+
 ### Added
 
 - Support running SQL scripts before plugin installation
@@ -20,7 +22,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 - Bump Picodata version to 25.4.2 in plugin template
 - Bump Picotest version to 1.8.1 in plugin template
 
-## [2.9.0]
+## [2.9.0] Deprecated
+
+### Breaking Changes
+
+- Default archive name in 'plugin pack' now includes OS identifier. Please, ignore this release to
+  keep backward compatibility or update to 3.0.0.
 
 ### Added
 
