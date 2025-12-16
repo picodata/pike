@@ -450,11 +450,13 @@ fn test_picodata_instance_interaction() {
         .topology(topology)
         .daemon(true)
         .plugin_path(plugin_path.into())
+        .with_audit(true)
         .build()
         .unwrap();
 
     let pico_instances = run(&params).unwrap();
     let properties = pico_instances.first().unwrap().properties();
+    let data_dir = properties.data_dir.to_str().unwrap();
 
     assert_eq!(properties.bin_port, &3001);
     assert_eq!(properties.http_port, &8001);
@@ -462,9 +464,10 @@ fn test_picodata_instance_interaction() {
     assert_eq!(properties.instance_id, &1);
     assert_eq!(properties.tier, "default");
     assert_eq!(properties.instance_name, "default_1_1");
+    assert_eq!(data_dir, "./tests/tmp/test-plugin/./tmp/cluster/i1");
     assert_eq!(
-        properties.data_dir.to_str().unwrap(),
-        "./tests/tmp/test-plugin/./tmp/cluster/i1"
+        Path::new(data_dir).join("audit.log").to_str().unwrap(),
+        "./tests/tmp/test-plugin/./tmp/cluster/i1/audit.log"
     );
 
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);

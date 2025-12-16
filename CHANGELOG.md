@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- Add optional `--with_audit` flag to `pike run`, explicitly enabling audit log.
+
 ## [3.0.0]
 
 ### Added

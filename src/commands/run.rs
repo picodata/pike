@@ -349,6 +349,7 @@ impl PicodataInstance {
         let cluster_dir = get_cluster_dir(&run_params.plugin_path, &run_params.data_dir);
         let instance_data_dir = cluster_dir.join(&instance_name);
         let log_file_path = instance_data_dir.join("picodata.log");
+        let audit_file_path = instance_data_dir.join("audit.log");
 
         fs::create_dir_all(&instance_data_dir).context("Failed to create instance data dir")?;
 
@@ -437,6 +438,10 @@ impl PicodataInstance {
         } else {
             child.stdout(Stdio::piped()).stderr(Stdio::piped());
         };
+
+        if run_params.with_audit {
+            child.args(["--audit", audit_file_path.to_str().expect("unreachable")]);
+        }
 
         let child = child
             .spawn()
@@ -878,6 +883,8 @@ pub struct Params {
     instance_name: Option<String>,
     #[builder(default = "false")]
     with_web_auth: bool,
+    #[builder(default = "false")]
+    with_audit: bool,
 }
 
 impl Params {
