@@ -124,6 +124,11 @@ enum Command {
         /// for local development via `ALTER SYSTEM SET jwt_secret = ''`.
         #[arg(long, value_name = "WITH_WEB_AUTH", default_value_t = false)]
         with_web_auth: bool,
+        /// Enables Picodata audit logging. Audit logs are disabled by default.
+        /// When enabled, each cluster instance maintains its own audit log file
+        /// named `audit.log` within its respective instance directory.
+        #[arg(long, value_name = "WITH_AUDIT", default_value_t = false)]
+        with_audit: bool,
     },
     /// Stop Picodata cluster or a specific instance
     Stop {
@@ -375,6 +380,7 @@ fn main() -> Result<()> {
             config_path,
             instance_name,
             with_web_auth,
+            with_audit,
         } => {
             is_required_path_exists(&plugin_path, &topology, CARING_PIKE, 1);
 
@@ -401,6 +407,7 @@ fn main() -> Result<()> {
                 .config_path(config_path)
                 .instance_name(instance_name)
                 .with_web_auth(with_web_auth)
+                .with_audit(with_audit)
                 .build()
                 .unwrap();
             commands::run::cmd(&params).context("failed to execute Run command")?;
