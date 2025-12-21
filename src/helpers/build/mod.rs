@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 const MANIFEST_TEMPLATE_NAME: &str = "manifest.yaml.template";
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub const LIB_EXT: &str = "so";
 
 #[cfg(target_os = "macos")]

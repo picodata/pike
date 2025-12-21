@@ -27,7 +27,7 @@ pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, PLUGIN_NAME);
 pub const SHARED_TARGET_NAME: &str = "shared_target";
 pub const SHARED_TARGET_PATH: &str = concat!(TESTS_DIR, SHARED_TARGET_NAME);
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub const LIB_EXT: &str = "so";
 
 #[cfg(target_os = "macos")]
