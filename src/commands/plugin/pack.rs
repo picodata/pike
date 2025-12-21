@@ -293,9 +293,9 @@ fn generate_archive_path(
 
 // ---------------- OS detection (per target) ----------------
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
 fn detect_os_suffix() -> Result<String> {
-    detect_linux_os_suffix()
+    detect_linux_freebsd_os_suffix()
 }
 
 #[cfg(target_os = "macos")]
@@ -303,13 +303,13 @@ fn detect_os_suffix() -> Result<String> {
     detect_macos_os_suffix()
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "freebsd")))]
 fn detect_os_suffix() -> Result<String> {
     bail!("unsupported operating system for packing plugin (supported: linux, macos)");
 }
 
-#[cfg(target_os = "linux")]
-fn detect_linux_os_suffix() -> Result<String> {
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+fn detect_linux_freebsd_os_suffix() -> Result<String> {
     const OS_RELEASE: &str = "/etc/os-release";
     const ROLLING_DISTROS: &[&str] = &[
         "arch",
@@ -371,7 +371,7 @@ fn detect_linux_os_suffix() -> Result<String> {
     Ok(format!("{id}_{variant}"))
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
 fn resolve_linux_variant(id: &str, rolling: &[&str]) -> String {
     if rolling.iter().any(|d| *d == id) {
         "rolling".to_string()

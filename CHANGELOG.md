@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Added
 
 - Add optional `--with_audit` flag to `pike run`, explicitly enabling audit log.
+- Add support for FreeBSD OS
 
 ## [3.0.0]
 
