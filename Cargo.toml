@@ -36,7 +36,7 @@ nix = { version = "0.30.1", features = ["signal"] }
 colored = "3"
 rand = "0.9"
 derive_builder = "0.20"
-toml_edit = "0.23.9"
+toml_edit = "0.24.0"
 regex = "1.12.2"
 serde_ignored = "0.1.14"
 terminal_size = "0.4.3"
@@ -50,6 +50,6 @@ name = "cargo-pike"
 path = "src/main.rs"
 
 [dev-dependencies]
-toml_edit = "0.23.9"
+toml_edit = "0.24.0"
 constcat = "0.6.1"
 rstest = "0.26.1"
