@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 - Add optional `--with_audit` flag to `pike run`, explicitly enabling audit log.
 - Add support for FreeBSD OS
+- Add Prometheus to depencencies in plugin template
 
 ## [3.0.0]
 
