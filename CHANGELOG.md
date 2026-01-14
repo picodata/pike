@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 - Add optional `--with_audit` flag to `pike run`, explicitly enabling audit log.
 - Add support for FreeBSD OS
 
+### Changed
+
+- Bump Picodata version to 25.5.2 in plugin template
+
 ## [3.0.0]
 
 ### Added
