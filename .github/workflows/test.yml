@@ -50,7 +50,7 @@ jobs:
     if: ${{ needs.pre_job.outputs.should_skip != 'true' }}
     runs-on: ubuntu-latest
     container:
-      image: docker.binary.picodata.io/picodata:25.4.2
+      image: docker.binary.picodata.io/picodata:25.5.2
       options: --user root
     steps:
       - uses: actions/checkout@v4
