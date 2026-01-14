@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 - Add support for FreeBSD OS
 - Add Prometheus to depencencies in plugin template
 
+### Changed
+
+- Bump Picodata version to 25.5.2 in plugin template
+
 ## [3.0.0]
 
 ### Added
