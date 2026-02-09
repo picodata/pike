@@ -4,7 +4,7 @@ use derive_builder::Builder;
 use log::{error, info, warn};
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
-use rand::Rng;
+use rand::RngExt;
 use serde::Deserialize;
 use serde_yaml::{Mapping, Value};
 use std::collections::{BTreeMap, HashMap};
