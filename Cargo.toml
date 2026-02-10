@@ -34,7 +34,7 @@ fs_extra = "1"
 libc = "0.2.180"
 nix = { version = "0.31.1", features = ["signal"] }
 colored = "3"
-rand = "0.9"
+rand = "0.10"
 derive_builder = "0.20"
 toml_edit = "0.24.0"
 regex = "1.12.3"
