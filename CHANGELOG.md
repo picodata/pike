@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- Add configurable manifest.yaml.template path for build helper
+
 ## [3.1.0]
 
 ### Added
