@@ -3,7 +3,7 @@ use fs_extra::dir;
 use fs_extra::dir::CopyOptions;
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 const MANIFEST_TEMPLATE_NAME: &str = "manifest.yaml.template";
 
@@ -23,12 +23,22 @@ fn get_output_path() -> PathBuf {
 
 #[derive(Debug, Builder)]
 pub struct Params {
+    #[builder(default = "PathBuf::from(MANIFEST_TEMPLATE_NAME)")]
+    #[builder(setter(custom))]
+    manifest_template_path: PathBuf,
     #[builder(default)]
     #[builder(setter(custom))]
     custom_assets: Vec<(PathBuf, PathBuf)>,
 }
 
 impl ParamsBuilder {
+    /// Sets a path to manifest.yaml.template file
+    /// Path will be resolved relative to `CARGO_MANIFEST_DIR`
+    pub fn manifest_template_path<P: AsRef<Path>>(&mut self, path: P) -> &mut Self {
+        self.manifest_template_path = Some(path.as_ref().to_path_buf());
+        self
+    }
+
     pub fn custom_assets<I, S>(&mut self, assets: I) -> &mut Self
     where
         I: IntoIterator<Item = S>,
@@ -114,6 +124,25 @@ fn add_custom_assets(custom_assets: &Vec<(PathBuf, PathBuf)>, plugin_path: &Path
     }
 }
 
+/// Resolves and strips current dir (.) and parent dir (..) components
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            Component::CurDir => continue,
+            _ => {
+                normalized.push(component.as_os_str());
+            }
+        }
+    }
+    normalized
+}
+
 pub fn main(params: &Params) {
     let out_dir = get_output_path();
     let pkg_version = env::var("CARGO_PKG_VERSION").unwrap();
@@ -182,10 +211,24 @@ pub fn main(params: &Params) {
         dir::copy(&migrations_dir, &plugin_path, &cp_opts).unwrap();
     }
 
-    if crate_dir.join(MANIFEST_TEMPLATE_NAME).exists() {
-        let template_path = crate_dir.join(MANIFEST_TEMPLATE_NAME);
-        let template =
-            fs::read_to_string(template_path).expect("template for manifest plugin not found");
+    // Using absolute patch can lead to "works on my machine only" situations, thus error.
+    // Relative path which does leave project root directory can also lead to this situation,
+    // though we will not enforce such check that for now.
+    let template_path = if params.manifest_template_path.is_absolute() {
+        println!("cargo::error=Can not use absolute paths for manifest.yaml.template");
+        params.manifest_template_path.clone()
+    } else {
+        let template_path = normalize_path(&crate_dir.join(&params.manifest_template_path));
+        if !template_path.starts_with(crate_dir) {
+            println!("cargo::warning=Relative path to manifest.yaml.template seems to leave project directory");
+        }
+        template_path
+    };
+
+    if template_path.exists() {
+        let template = fs::read_to_string(template_path)
+            .inspect_err(|e| println!("cargo::error=Read error for manifest.yaml.template: {e}"))
+            .expect("template for manifest plugin can not be read");
         let template = liquid::ParserBuilder::with_stdlib()
             .build()
             .unwrap()
@@ -199,9 +242,9 @@ pub fn main(params: &Params) {
 
         fs::write(&out_manifest_path, template.render(&template_ctx).unwrap()).unwrap();
     } else {
-        log::warn!(
-            "Couldn't find manifest.yaml template at {}, skipping its generation...",
-            crate_dir.display()
+        println!(
+            "cargo::warning=Couldn't find manifest.yaml template at '{}', skipping its generation",
+            template_path.display()
         );
     }
 
