@@ -145,7 +145,7 @@ pub fn cmd(path: Option<&Path>, without_git: bool, init_workspace: bool) -> Resu
         Some(p) => {
             if p.exists() {
                 bail!("path {} already exists", p.to_string_lossy())
-            };
+            }
             p.to_path_buf()
         }
         None => env::current_dir()?,
