@@ -414,9 +414,12 @@ impl PicodataInstance {
 
         let config_path = run_params.plugin_path.join(&run_params.config_path);
         if config_path.exists() {
+            // Template the config file with instance_id
+            let instance_config_path =
+                Self::template_config(&config_path, &instance_data_dir, &env_templates_ctx)?;
             child.args([
                 "--config",
-                config_path.to_str().unwrap_or("./picodata.yaml"),
+                instance_config_path.to_str().unwrap_or("./picodata.yaml"),
             ]);
         } else {
             warn!(
@@ -437,7 +440,7 @@ impl PicodataInstance {
             child.args(["--log", log_file_path.to_str().expect("unreachable")]);
         } else {
             child.stdout(Stdio::piped()).stderr(Stdio::piped());
-        };
+        }
 
         if run_params.with_audit {
             child.args(["--audit", audit_file_path.to_str().expect("unreachable")]);
@@ -536,6 +539,49 @@ impl PicodataInstance {
                 Ok((k.clone(), tpl.render(ctx)?))
             })
             .collect()
+    }
+
+    /// Templates a picodata.yaml config file with Liquid variables (e.g., `instance_id`).
+    /// Returns the path to the templated config file in the instance data directory.
+    fn template_config(
+        config_path: &Path,
+        instance_data_dir: &Path,
+        ctx: &liquid::Object,
+    ) -> Result<PathBuf> {
+        let config_content = fs::read_to_string(config_path).with_context(|| {
+            format!(
+                "failed to read picodata config at {}",
+                config_path.display()
+            )
+        })?;
+
+        let parser = liquid::ParserBuilder::with_stdlib()
+            .build()
+            .context("failed to build Liquid parser")?;
+
+        let template = parser.parse(&config_content).with_context(|| {
+            format!(
+                "failed to parse picodata config as Liquid template at {}",
+                config_path.display()
+            )
+        })?;
+
+        let rendered = template.render(ctx).with_context(|| {
+            format!(
+                "failed to render picodata config template at {}",
+                config_path.display()
+            )
+        })?;
+
+        let instance_config_path = instance_data_dir.join("picodata.yaml");
+        fs::write(&instance_config_path, &rendered).with_context(|| {
+            format!(
+                "failed to write templated picodata config to {}",
+                instance_config_path.display()
+            )
+        })?;
+
+        Ok(instance_config_path)
     }
 
     fn capture_logs(&mut self) -> Result<()> {
@@ -974,12 +1020,12 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             plugins_dir = Some(params.plugin_path.join(params.target_dir.join("release")));
         } else {
             plugins_dir = Some(params.plugin_path.join(params.target_dir.join("debug")));
-        };
+        }
 
         prepare_external_plugins(&params, plugins_dir.as_ref().unwrap())?;
         if !params.no_build {
             cargo_build(build_type, &params.target_dir, &params.plugin_path)?;
-        };
+        }
 
         params
             .topology
