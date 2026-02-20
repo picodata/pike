@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Added
 
+- Add Liquid template rendering support for `picodata.yaml` config files (see [picodata.yaml](README.md#picodatayaml))
 - Add configurable manifest.yaml.template path for build helper
 
 ### Changed
