@@ -373,7 +373,7 @@ fn detect_linux_freebsd_os_suffix() -> Result<String> {
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 fn resolve_linux_variant(id: &str, rolling: &[&str]) -> String {
-    if rolling.iter().any(|d| *d == id) {
+    if rolling.contains(&id) {
         "rolling".to_string()
     } else {
         "unknown".to_string()

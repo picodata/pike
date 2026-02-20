@@ -27,8 +27,12 @@ const TOTAL_INSTANCES: i32 = 4;
 fn find_os_suffixed_archive(dir: &Path, name: &str, version: &str) -> PathBuf {
     let prefix = format!("{name}_{version}-");
     let mut matches = vec![];
-    let entries = fs::read_dir(dir)
-        .unwrap_or_else(|_| panic!("Cannot read build dir {dir:?} while searching archives"));
+    let entries = fs::read_dir(dir).unwrap_or_else(|_| {
+        panic!(
+            "Cannot read build dir {} while searching archives",
+            dir.display()
+        )
+    });
     for entry in entries {
         let entry = entry.unwrap();
         let fname = entry.file_name();
@@ -39,7 +43,9 @@ fn find_os_suffixed_archive(dir: &Path, name: &str, version: &str) -> PathBuf {
     }
     assert!(
         !matches.is_empty(),
-        "No archive found in {dir:?} with prefix {prefix}"
+        "No archive found in {} with prefix {}",
+        dir.display(),
+        prefix
     );
     assert_eq!(
         matches.len(),
