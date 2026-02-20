@@ -437,7 +437,7 @@ impl PicodataInstance {
             child.args(["--log", log_file_path.to_str().expect("unreachable")]);
         } else {
             child.stdout(Stdio::piped()).stderr(Stdio::piped());
-        };
+        }
 
         if run_params.with_audit {
             child.args(["--audit", audit_file_path.to_str().expect("unreachable")]);
@@ -974,12 +974,12 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             plugins_dir = Some(params.plugin_path.join(params.target_dir.join("release")));
         } else {
             plugins_dir = Some(params.plugin_path.join(params.target_dir.join("debug")));
-        };
+        }
 
         prepare_external_plugins(&params, plugins_dir.as_ref().unwrap())?;
         if !params.no_build {
             cargo_build(build_type, &params.target_dir, &params.plugin_path)?;
-        };
+        }
 
         params
             .topology

@@ -244,7 +244,7 @@ pub fn validate_symlink(symlink_path: &PathBuf) -> bool {
     false
 }
 
-/// Computes relative symlink to path `src_path`. `dst_path` is future symlink placement.  
+/// Computes relative symlink to path `src_path`. `dst_path` is future symlink placement.
 /// Both paths must be absolute.
 pub fn compute_relative_symlink<SrcP, DstP>(src_path: SrcP, dst_path: DstP) -> PathBuf
 where
@@ -535,7 +535,7 @@ where
 
     if let Some(plugin_path_pos) = args.iter().position(|a| a.as_ref() == "--plugin-path") {
         set_current_version_of_pike(args[plugin_path_pos + 1].as_ref());
-    };
+    }
 
     let mut pike_child = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
         .arg("pike")
@@ -619,7 +619,7 @@ pub fn await_picodata_admin(
     }
 }
 
-/// Recursively deletes directory, if exists.  
+/// Recursively deletes directory, if exists.
 /// Does not follow symlinks.
 pub fn cleanup_dir(path: &Path) {
     match fs::remove_dir_all(path) {

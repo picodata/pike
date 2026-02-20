@@ -47,9 +47,9 @@ impl Service for ExampleService {
 
         log::warn!("Registering HTTP handle /hello");
         HTTP_SERVER.with(|srv| {
-            routes()
-                .into_iter()
-                .for_each(|route| srv.register(Box::new(route)));
+            for route in routes() {
+                srv.register(Box::new(route));
+            }
         });
 
         log::warn!("Registering RPC handle /greetings_rpc");
