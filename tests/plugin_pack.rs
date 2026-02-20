@@ -35,9 +35,8 @@ fn find_archive(dir: &Path, name: &str, version: &str) -> PathBuf {
     }
     assert!(
         !matches.is_empty(),
-        "No archive found in {} with prefix {}",
-        dir.display(),
-        prefix
+        "No archive found in {} with prefix {prefix}",
+        dir.display()
     );
     assert_eq!(
         matches.len(),
