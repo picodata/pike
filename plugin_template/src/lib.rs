@@ -13,10 +13,8 @@ pub fn service_registrar(reg: &mut ServiceRegistry) {
         service::ExampleService::default,
     );
     reg.add_config_validator::<service::ExampleService>("example_service", env!("CARGO_PKG_VERSION"), |cfg| {
-        if let Some(cfg_value) = cfg.value {
-            if cfg_value == "tarantool" {
-                return Err("Please call a pest control service!".into());
-            }
+        if let Some(cfg_value) = cfg.value && cfg_value == "tarantool" {
+            return Err("Please call a pest control service!".into());
         }
         Ok(())
     });

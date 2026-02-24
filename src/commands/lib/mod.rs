@@ -97,7 +97,7 @@ pub fn is_plugin_archive(test_path: &Path) -> Result<()> {
         if let Ok(entry_path) = entry.path() {
             // plugin_name / plugin_version / root_file_name
             if entry_path.components().count() == 3 {
-                if let Some(last_part) = entry_path.components().last() {
+                if let Some(last_part) = entry_path.components().next_back() {
                     has_manifest = has_manifest || last_part.as_os_str() == "manifest.yaml";
                     has_lib = has_lib
                         || last_part
