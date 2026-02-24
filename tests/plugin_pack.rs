@@ -35,7 +35,8 @@ fn find_archive(dir: &Path, name: &str, version: &str) -> PathBuf {
     }
     assert!(
         !matches.is_empty(),
-        "No archive found in {dir:?} with prefix {prefix}"
+        "No archive found in {} with prefix {prefix}",
+        dir.display()
     );
     assert_eq!(
         matches.len(),
@@ -54,7 +55,8 @@ fn has_legacy_archive(dir: &Path, name: &str, version: &str) -> bool {
 fn assert_no_legacy_archive(dir: &Path, name: &str, version: &str) {
     assert!(
         !has_legacy_archive(dir, name, version),
-        "Legacy archive <{name}-{version}.tar.gz> must NOT be produced anymore (found in {dir:?})"
+        "Legacy archive <{name}-{version}.tar.gz> must NOT be produced anymore (found in {})",
+        dir.display()
     );
 }
 

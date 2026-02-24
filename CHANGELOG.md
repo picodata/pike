@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- Add Liquid template rendering support for `picodata.yaml` config files
+  - Config files can now use Liquid template variables (e.g., `{{ instance_id }}`)
+  - Templates are automatically rendered during `pike run` with context variables
+
 ## [3.1.0]
 
 ### Added
