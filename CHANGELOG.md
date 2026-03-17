@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [3.2.0]
+
 ### Added
 
 - Add Liquid template rendering support for `picodata.yaml` config files (see [picodata.yaml](README.md#picodatayaml))
