@@ -186,6 +186,13 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
             r#"CREATE PLUGIN "{plugin_name}" {plugin_version};"#
         ));
 
+        // add services to tiers
+        for (service_name, service) in &plugin.services {
+            for tier_name in &service.tiers {
+                queries.push(format!(r#"ALTER PLUGIN "{plugin_name}" {plugin_version} ADD SERVICE "{service_name}" TO TIER "{tier_name}";"#));
+            }
+        }
+
         // add migration context
         for migration_env in &plugin.migration_context {
             queries.push(format!(
@@ -198,13 +205,6 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
         queries.push(format!(
             r#"ALTER PLUGIN "{plugin_name}" MIGRATE TO {plugin_version};"#
         ));
-
-        // add services to tiers
-        for (service_name, service) in &plugin.services {
-            for tier_name in &service.tiers {
-                queries.push(format!(r#"ALTER PLUGIN "{plugin_name}" {plugin_version} ADD SERVICE "{service_name}" TO TIER "{tier_name}";"#));
-            }
-        }
 
         // enable plugin
         queries.push(format!(
