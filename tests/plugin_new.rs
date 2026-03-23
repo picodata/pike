@@ -16,6 +16,7 @@ fn test_cargo_plugin_new() {
     assert!(root_dir.join(".git").exists());
     assert!(root_dir.join("plugin_config.yaml").exists());
     assert!(root_dir.join("manifest.yaml.template").exists());
+    assert!(root_dir.join("CLAUDE.md.template").exists());
 
     cleanup_dir(root_dir);
 
