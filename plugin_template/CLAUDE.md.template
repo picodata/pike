@@ -1,0 +1,198 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+All common tasks are defined in `Justfile` and run via `just`:
+
+```sh
+just lint          # cargo fmt --check + clippy (-D warnings)
+just unit          # cargo test (unit tests only)
+just integration   # runs tests from tests/ with --test-threads=5 (requires picodata in PATH)
+just test          # unit + integration
+just pack          # cargo pike plugin pack → produces target/release/<name>_*.tar.gz
+just apply_config  # cargo pike config apply (pushes plugin_config.yaml to running cluster)
+```
+
+Run a specific test by name:
+```sh
+just unit test_name
+just integration test_name
+```
+
+Local cluster lifecycle (requires `picodata` in PATH):
+```sh
+cargo pike run [--topology topology.toml]   # start local test cluster
+cargo pike stop                              # stop cluster
+cargo pike clean                             # purge cluster data
+```
+
+## Plugin architecture (Picodata)
+
+### Entry point and registration
+
+Every plugin exposes a `#[service_registrar]` function in `src/lib.rs` that registers one or more services into `ServiceRegistry`. Each service implements the `picodata_plugin::plugin::prelude::Service` trait.
+
+### Service lifecycle
+
+Five callbacks, all must be **idempotent** (may fire multiple times):
+
+| Callback | When |
+|---|---|
+| `on_start` | Service initializes on a node; register HTTP routes and RPC handlers here |
+| `on_stop` | Graceful shutdown; cancel background jobs |
+| `on_config_change` | Runtime config updated; receives old and new `Config` values |
+| `on_leader_change` | Replicaset leader changed |
+| `on_health_check` | Periodic liveness probe |
+
+### Configuration
+
+The `Config` associated type on `Service` maps to a YAML-backed struct. Defaults live in `manifest.yaml`. Runtime values are stored in `_pico_plugin_config` and changed via:
+- SQL: `ALTER PLUGIN <name> <ver> SET <service>.<key>='<val>';`
+- CLI: `cargo pike config apply` (reads `plugin_config.yaml`)
+
+Use `Config = ()` when the plugin needs no configuration.
+
+### Tiers
+
+Services bind to tiers, not individual nodes (`ALTER PLUGIN ... ADD SERVICE ... TO TIER <tier>`). The plugin `.so` must be present on **all** cluster nodes even if used only on some tiers.
+
+### Migrations
+
+SQL files in `migrations/` annotated with `-- pico.UP` (required) and `-- pico.DOWN` (optional). Executed on `ALTER PLUGIN ... MIGRATE TO <ver>` and rolled back on `DROP PLUGIN ... WITH DATA`.
+
+## SDK API reference
+
+Full rustdoc: https://docs.rs/picodata-plugin/latest/picodata_plugin/
+
+### `internal::instance_info() -> Result<InstanceInfo>`
+
+Current instance metadata — getters: `raft_id()`, `advertise_address()`, `name()`, `uuid()`, `replicaset_name()`, `replicaset_uuid()`, `cluster_name()`, `current_state()`, `target_state()`, `tier()`.
+
+### `internal::raft_info() -> RaftInfo`
+
+RAFT state — `id()`, `term()`, `applied()`, `leader_id()`, `state()` (`RaftState`: Follower / Candidate / Leader / PreCandidate).
+
+### RPC
+
+**Sending:**
+```rust
+use picodata_plugin::transport::rpc::{self, RequestBuilder, RequestTarget};
+
+let req = rpc::Request::encode_rmp_unnamed(&payload)?;
+let resp = RequestBuilder::new(RequestTarget::InstanceName("i1"))
+    .plugin_service(PLUGIN_NAME, SERVICE_NAME)
+    .plugin_version(env!("CARGO_PKG_VERSION"))
+    // alternatively: .pico_context(context)
+    .path("/my_rpc")
+    .input(req)
+    .timeout(Duration::from_millis(300))
+    .send()?;
+let result = rpc::Response::decode_rmp::<MyType>(&resp)?;
+```
+
+**`RequestTarget` variants** (`#[non_exhaustive]`):
+- `Any` — any instance running the service
+- `InstanceName(&str)` — specific instance by name
+- `BucketId(u64, bool)` — instance holding bucket; `bool` = master-only
+- `TierAndBucketId(&str, u64, bool)` — same, scoped to a tier
+- `ReplicasetName(&str, bool)` — instance in named replicaset; `bool` = master-only
+
+**Receiving:**
+```rust
+use picodata_plugin::transport::rpc::RouteBuilder;
+
+RouteBuilder::from_pico_context(context)
+    .path("/my_rpc")
+    .register(|req, _ctx| {
+        let _payload = rpc::Request::decode_rmp_unnamed::<MyType>(&req)?;
+        Ok(rpc::Response::encode_rmp(&result)?)
+    })?;
+```
+
+### SQL
+
+```rust
+picodata_plugin::sql::query("SELECT ... WHERE x = ?")
+    .bind(value)
+    .fetch::<(String, u64)>()?   // Vec of typed tuples
+```
+
+Use `query_raw` for uncached queries. Picodata system tables relevant to plugins:
+`_pico_plugin`, `_pico_plugin_config`, `_pico_service`, `_pico_service_route`,
+`_pico_instance`, `_pico_peer_address`.
+
+### Metrics
+
+```rust
+picodata_plugin::metrics::register_metrics_handler(|| -> String {
+    // return Prometheus text-format string
+    // called on every GET /metrics on Picodata's built-in HTTP daemon
+});
+```
+
+### Background jobs
+
+```rust
+use picodata_plugin::background::{ServiceWorkerManager, CancellationToken};
+
+// obtain manager from PicoContext in on_start
+manager.register_job(|cancel: CancellationToken| {
+    while cancel.wait_timeout(Duration::from_secs(1)).is_err() {
+        // polling work
+    }
+})?;
+
+// tag-based cancellation
+manager.register_tagged_job(job_fn, &["my-tag"])?;
+manager.cancel_tagged(&["my-tag"], Duration::from_secs(5))?;
+```
+
+### HTTP server (inbound) — `shors` crate
+
+```rust
+use shors::transport::http::{server::Server, route::Builder};
+
+// thread-local server, initialized once
+thread_local! {
+    static HTTP_SERVER: LazyLock<Server> = LazyLock::new(Server::new);
+}
+
+// register in on_start
+HTTP_SERVER.with(|srv| {
+    let route = Builder::new()
+        .with_method("GET")
+        .with_path("/v1/my/endpoint")
+        .with_middleware(error_middleware)  // optional
+        .build(handler_fn);
+    srv.register(Box::new(route));
+});
+
+// handler signature
+fn handler(_ctx: &mut Context, _req: Request) -> anyhow::Result<Response> { ... }
+```
+
+### HTTP client (outbound) — `fibreq` crate
+
+Use `fibreq` for all outbound HTTP calls. Standard async runtimes (`reqwest`, `hyper`, tokio) are **incompatible** with Tarantool's fiber scheduler.
+
+### Version pinning
+
+`picodata-plugin` in `Cargo.toml` must **exactly match** the running Picodata version (e.g. `=25.5.2`). Mismatch causes installation failure.
+
+## Project-specific architecture
+
+<!-- Fill this in with /init or manually after scaffolding -->
+
+### What this plugin does
+
+TODO
+
+### Request / data flow
+
+TODO
+
+### Non-obvious design decisions
+
+TODO
