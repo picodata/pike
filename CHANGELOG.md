@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [3.2.1]
+
+### Fixed
+
+- Bump tar-rs to 0.4.45 with fixed [CVE](https://github.com/advisories/GHSA-j4xf-2g29-59ph)
+- Re-order plugin installation sequence
+
+### Changed
+
+- Add template for Claude AI
+
 ## [3.2.0]
 
 ### Added
