@@ -18,7 +18,7 @@ resolver = "3"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-toml = "1.0"
+toml = "1.1"
 serde = { version = "1", features = ["derive"] }
 include_dir = "0.7"
 liquid = "0.26"
