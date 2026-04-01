@@ -368,22 +368,6 @@ impl PicodataInstance {
         let mut child = Command::new(&run_params.picodata_path);
         child.envs(&env_vars);
 
-        let picodata_version = get_picodata_version(&run_params.picodata_path)?;
-        let data_dir_flag = if picodata_version.contains("picodata 24.6") {
-            warn!(
-                "You are using old version of picodata: {picodata_version} In the next major release it WILL NOT BE SUPPORTED"
-            );
-            "--data-dir"
-        } else {
-            "--instance-dir"
-        };
-
-        let listen_flag = if picodata_version.contains("picodata 24.6") {
-            "--listen"
-        } else {
-            "--iproto-listen"
-        };
-
         let first_instance_bin_ipv4 =
             get_ipv4_from_liquid_var(&first_env_vars, "PICODATA_IPROTO_LISTEN")
                 .unwrap_or(format!("127.0.0.1:{}", run_params.base_bin_port + 1).parse()?);
@@ -396,9 +380,9 @@ impl PicodataInstance {
 
         child.args([
             "run",
-            data_dir_flag,
+            "--instance-dir",
             instance_data_dir.to_str().expect("unreachable"),
-            listen_flag,
+            "--iproto-listen",
             &bin_ipv4.to_string(),
             "--peer",
             &first_instance_bin_ipv4.to_string(),
@@ -430,7 +414,7 @@ impl PicodataInstance {
 
         if let Some(plugins_dir) = plugins_dir {
             child.args([
-                "--plugin-dir",
+                "--share-dir",
                 plugins_dir.to_str().unwrap_or("target/debug"),
             ]);
         }
@@ -1032,7 +1016,7 @@ pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
             .find_plugin_versions(plugins_dir.as_ref().unwrap())?;
     } else if params.topology.has_external_plugins() {
         // Нет родительского плагина, но есть внешние плагины.
-        // Готовим их в служебной директории кластера и используем её как --plugin-dir
+        // Готовим их в служебной директории кластера и используем её как --share-dir
         let run_plugins_dir = cluster_dir.join("plugins");
         fs::create_dir_all(&run_plugins_dir).with_context(|| {
             format!(
