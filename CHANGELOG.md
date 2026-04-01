@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Changed
+
+- Bump Picodata version to 26.1.1 in plugin template and CI
+
 ## [3.2.1]
 
 ### Fixed

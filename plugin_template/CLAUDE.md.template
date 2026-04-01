@@ -179,7 +179,7 @@ Use `fibreq` for all outbound HTTP calls. Standard async runtimes (`reqwest`, `h
 
 ### Version pinning
 
-`picodata-plugin` in `Cargo.toml` must **exactly match** the running Picodata version (e.g. `=25.5.2`). Mismatch causes installation failure.
+`picodata-plugin` in `Cargo.toml` must **exactly match** the running Picodata version (e.g. `=26.1.1`). Mismatch causes installation failure.
 
 ## Project-specific architecture
 
