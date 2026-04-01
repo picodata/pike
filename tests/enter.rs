@@ -1,7 +1,7 @@
 mod helpers;
 use helpers::{run_cluster, CmdArguments, PLUGIN_NAME, TESTS_DIR};
 use std::{
-    io::Read,
+    io::{Read, Write},
     process::{Command, Stdio},
     time::Duration,
 };
@@ -28,8 +28,12 @@ fn test_enter_instance() {
         .spawn()
         .expect("failed to execute pike");
 
-    let stdin = pike_child.stdin.take().expect("Failed to open stdin");
+    let mut stdin = pike_child.stdin.take().expect("Failed to open stdin");
     let mut stdout = pike_child.stdout.take().expect("Failed to open stdout");
+
+    stdin
+        .write_all(r"SELECT 12345;".as_bytes())
+        .expect("Failed to write data into admin socket");
 
     // Here we are dropping stdin, which is equal to sending Ctrl+D singnal to pike enter proccess
     drop(stdin);
@@ -46,7 +50,7 @@ fn test_enter_instance() {
         .expect("Failed to read output");
 
     assert!(
-        output.contains("Connected to admin console by socket path"),
+        output.contains("12345"),
         "Failed to enter picodata instance"
     );
 }
