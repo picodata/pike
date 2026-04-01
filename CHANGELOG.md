@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Changed
 
 - Bump Picodata version to 26.1.1 in plugin template and CI
+- Bump Picotest to 1.9.1 in plugin template
 
 ## [3.2.1]
 
