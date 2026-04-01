@@ -388,7 +388,6 @@ pub fn run_cluster(
         let queries = vec![
             r"SELECT enabled FROM _pico_plugin;",
             r"SELECT current_state FROM _pico_instance;",
-            r"\help;",
         ];
 
         // New scope to avoid infinite cycle while reading picodata stdout
@@ -401,7 +400,6 @@ pub fn run_cluster(
         }
 
         let mut plugin_ready = false;
-        let mut can_connect = false;
         let mut online_instances_counter = 0;
 
         let reader = BufReader::new(stdout);
@@ -410,9 +408,6 @@ pub fn run_cluster(
             if line.contains("true") {
                 plugin_ready = true;
             }
-            if line.contains("Connected to admin console by socket") {
-                can_connect = true;
-            }
             if line.contains("Online") {
                 online_instances_counter += 1;
             }
@@ -420,7 +415,7 @@ pub fn run_cluster(
 
         picodata_admin.kill().unwrap();
 
-        if can_connect && plugin_ready && online_instances_counter == total_instances {
+        if plugin_ready && online_instances_counter == total_instances {
             return Ok(cluster_handle);
         }
 
