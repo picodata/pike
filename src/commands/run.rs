@@ -25,7 +25,8 @@ use crate::commands::lib::instance_info::{
 };
 use crate::commands::lib::{
     cargo_build, copy_directory_tree, find_active_socket_path, get_cluster_dir,
-    run_query_in_picodata_admin, spawn_picodata_admin, unpack_shipping_archive,
+    log_instance_skipped, log_instance_started, run_query_in_picodata_admin, spawn_picodata_admin,
+    unpack_shipping_archive,
 };
 use crate::commands::lib::{get_active_socket_path, BuildType};
 use crate::commands::lib::{is_plugin_archive, is_plugin_dir, is_plugin_shipping_dir};
@@ -333,12 +334,12 @@ impl PicodataInstance {
     #[allow(clippy::too_many_lines)]
     fn new(
         instance_id: u16,
-        plugins_dir: Option<&Path>,
+        plugins_dir: Option<&PathBuf>,
         tier: &str,
         run_params: &Params,
     ) -> Result<Self> {
         // Properties
-        let mut instance_name = format!("i{instance_id}");
+        let mut instance_name = Self::make_name(instance_id);
         let tiers_config = get_merged_cluster_tier_config(
             &run_params.plugin_path,
             &run_params.config_path,
@@ -624,6 +625,10 @@ impl PicodataInstance {
         let mut file = File::create(pid_location)?;
         writeln!(file, "{pid}")?;
         Ok(())
+    }
+
+    fn make_name(id: u16) -> String {
+        format!("i{id}")
     }
 
     fn kill(&mut self) -> Result<()> {
@@ -982,17 +987,16 @@ fn apply_web_auth_setting(params: &Params, cluster_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn run_single_instance(mut params: Params) -> anyhow::Result<Vec<PicodataInstance>> {
+fn run_single_instance(
+    params: &Params,
+    plugins_dir: Option<&PathBuf>,
+) -> anyhow::Result<Vec<PicodataInstance>> {
     let instance_name = params.instance_name.as_ref().unwrap().clone();
     let cluster_dir = params.get_cluster_dir();
 
     // Check whether instance is already started.
     if get_active_socket_path(&cluster_dir, &instance_name).is_some() {
-        info!(
-            "running picodata instance {} - {}",
-            instance_name,
-            "SKIPPED".yellow()
-        );
+        log_instance_skipped(instance_name);
         return Ok(vec![]);
     }
 
@@ -1005,8 +1009,6 @@ pub fn run_single_instance(mut params: Params) -> anyhow::Result<Vec<PicodataIns
         "running picodata cluster instance '{instance_name}', data folder: {}",
         cluster_dir.join(&instance_name).to_string_lossy()
     );
-
-    let plugins_dir = prepare_directory_with_plugins(&mut params)?;
 
     // Find directory that belongs to instance.
     let mut instance_dir = dirs
@@ -1051,46 +1053,28 @@ pub fn run_single_instance(mut params: Params) -> anyhow::Result<Vec<PicodataIns
         }
     }
 
-    let pico_instance = PicodataInstance::new(
-        instance_id,
-        plugins_dir.as_deref(),
-        instance_tier_name,
-        &params,
-    )?;
+    let pico_instance =
+        PicodataInstance::new(instance_id, plugins_dir, instance_tier_name, params)?;
 
-    info!(
-        "running picodata instance {instance_name} - {}",
-        "OK".green()
-    );
+    log_instance_started(instance_name);
 
-    apply_web_auth_setting(&params, &cluster_dir)?;
+    apply_web_auth_setting(params, &cluster_dir)?;
 
     Ok(vec![pico_instance])
 }
 
-pub fn run_cluster(mut params: Params) -> anyhow::Result<Vec<PicodataInstance>> {
+fn run_cluster(
+    params: &Params,
+    plugins_dir: Option<&PathBuf>,
+) -> anyhow::Result<Vec<PicodataInstance>> {
     assert!(params.instance_name.is_none(), "invariant");
 
     let cluster_dir = params.get_cluster_dir();
-    let plugins_dir = prepare_directory_with_plugins(&mut params)?;
     let picodata_version = get_picodata_version(&params.picodata_path)?;
 
     info!("Running the cluster with {picodata_version}...");
     let start_cluster_run = Instant::now();
-
-    let mut instance_id = 0;
-    let mut picodata_processes = vec![];
-    for (tier_name, tier) in &params.topology.tiers {
-        for _ in 0..(tier.replicasets * tier.replication_factor) {
-            instance_id += 1;
-            let pico_instance =
-                PicodataInstance::new(instance_id, plugins_dir.as_deref(), tier_name, &params)?;
-
-            picodata_processes.push(pico_instance);
-
-            info!("i{instance_id} - started");
-        }
-    }
+    let mut picodata_processes = start_instances_in_tiers(params, plugins_dir)?;
 
     // Check whether cluster leader is known at this point.
     // If yes, just skip this step. Otherwise, try to resolve it through
@@ -1116,7 +1100,7 @@ pub fn run_cluster(mut params: Params) -> anyhow::Result<Vec<PicodataInstance>> 
         }
     }
 
-    apply_web_auth_setting(&params, &cluster_dir)?;
+    apply_web_auth_setting(params, &cluster_dir)?;
     if !params.disable_plugin_install && !params.topology.plugins.is_empty() {
         if plugins_dir.is_none() {
             bail!("failed to enable plugins: directory with plugins is missing.")
@@ -1134,14 +1118,54 @@ pub fn run_cluster(mut params: Params) -> anyhow::Result<Vec<PicodataInstance>> 
     }
 
     info!(
-        "Picodata cluster has started (launch time: {} sec, total instances: {instance_id})",
-        start_cluster_run.elapsed().as_secs()
+        "Picodata cluster has started (launch time: {} sec, total instances: {})",
+        start_cluster_run.elapsed().as_secs(),
+        picodata_processes.len()
     );
 
     Ok(picodata_processes)
 }
 
-pub fn prepare_directory_with_plugins(params: &mut Params) -> anyhow::Result<Option<PathBuf>> {
+/// Spins up Picodata instances for all tiers defined in the provided topology.
+///
+/// This routine iterates over all configured tiers and ensures that the expected
+/// number of instances (`replicasets * replication_factor`) are running for each tier.
+///
+/// # Returns
+///
+/// Returns a vector of [`PicodataInstance`] representing **only the instances
+/// that were started during this invocation**.
+///
+fn start_instances_in_tiers(
+    params: &Params,
+    plugins_dir: Option<&PathBuf>,
+) -> anyhow::Result<Vec<PicodataInstance>> {
+    let cluster_dir = params.get_cluster_dir();
+    let mut picodata_processes = vec![];
+    let mut instance_id = 0;
+
+    for (tier_name, tier) in &params.topology.tiers {
+        info!("Starting instances in tier '{tier_name}' ...");
+        for _ in 0..(tier.replicasets * tier.replication_factor) {
+            instance_id += 1;
+            let instance_name = PicodataInstance::make_name(instance_id);
+
+            if get_active_socket_path(&cluster_dir, &instance_name).is_some() {
+                log_instance_skipped(instance_name);
+                continue;
+            }
+
+            let pico_instance = PicodataInstance::new(instance_id, plugins_dir, tier_name, params)?;
+            picodata_processes.push(pico_instance);
+
+            log_instance_started(instance_name);
+        }
+    }
+
+    Ok(picodata_processes)
+}
+
+fn prepare_directory_with_plugins(params: &mut Params) -> anyhow::Result<Option<PathBuf>> {
     if is_plugin_dir(&params.plugin_path) {
         let plugins_dir = params.get_plugins_dir();
         let build_profile = params.get_build_profile();
@@ -1182,19 +1206,21 @@ pub fn prepare_directory_with_plugins(params: &mut Params) -> anyhow::Result<Opt
     Ok(None)
 }
 
-pub fn cluster(params: Params) -> Result<Vec<PicodataInstance>> {
+pub fn cluster(mut params: Params) -> Result<Vec<PicodataInstance>> {
+    let plugins_dir = prepare_directory_with_plugins(&mut params)?;
+
     if params.instance_name.is_some() {
-        return run_single_instance(params);
+        info!("Starting single cluster instance");
+        return run_single_instance(&params, plugins_dir.as_ref());
     }
 
     if let Some(sock_path) = find_active_socket_path(&params.get_cluster_dir())? {
-        bail!(
-            "cluster has already started, can connect via {}",
-            sock_path.display()
-        );
+        info!("Cluster is running (connected via {})", sock_path.display());
+        // Reviving terminated instances and exit.
+        return start_instances_in_tiers(&params, plugins_dir.as_ref());
     }
 
-    run_cluster(params)
+    run_cluster(&params, plugins_dir.as_ref())
 }
 
 pub fn cmd(params: Params) -> Result<()> {

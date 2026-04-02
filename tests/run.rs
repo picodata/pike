@@ -194,7 +194,7 @@ fn test_topology_struct_run() {
 }
 
 #[test]
-fn test_multiple_run_attempt() {
+fn test_multiple_run_attempt_are_idempotent() {
     let plugin_path = Path::new(PLUGIN_DIR);
 
     init_plugin(PLUGIN_NAME);
@@ -237,38 +237,18 @@ fn test_multiple_run_attempt() {
         .build()
         .unwrap();
 
-    run(params.clone()).unwrap();
-
-    let start = Instant::now();
-    let mut cluster_started = false;
-    while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_instance");
-        let pico_plugin = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_plugin");
-
-        // Compare with 8, because table gives current state and target state
-        // both of them should be online
-        if pico_instance.matches("Online").count() == 8 && pico_plugin.contains("true") {
-            cluster_started = true;
-            break;
-        }
+    // Execute pike run twice to ensure sequential runs
+    // are idempotent.
+    for _ in 0..1 {
+        run(params.clone()).expect("Failed to run cluster");
+        assert!(wait_cluster_start_completed(plugin_path, |state| {
+            assert_eq!(state.pico_instance.matches("Online").count(), 8);
+            assert!(state.pico_plugin.contains("true"));
+            true
+        }));
     }
 
-    // Ensure that we stop picodata cluster before panicing
-    let res = run(params);
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
-
-    assert!(
-        res.is_err(),
-        "Expected to fail while trying to run multiple clusters"
-    );
-
-    let err_str = res.unwrap_err().to_string();
-    assert!(
-        err_str.contains("cluster has already started, can connect via"),
-        "Wrong error message while trying to run multiple clusters: {err_str}"
-    );
-
-    assert!(cluster_started);
 }
 
 #[test]
@@ -1113,6 +1093,52 @@ fn run_specific_instance() {
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
+}
+
+#[test]
+fn revive_terminated_instances() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+    let data_dir = plugin_path.join("tmp").join("cluster");
+    init_plugin(PLUGIN_NAME);
+    let terminated_instances = ["i1", "i2"];
+
+    let _cluster_handle = run_cluster(
+        Duration::from_secs(120),
+        TOTAL_INSTANCES,
+        CmdArguments::default(),
+    )
+    .expect("Failed to run the cluster");
+
+    // Stop instances. They have to be revived
+    // during sequential "pike run execution"
+    for i in &terminated_instances {
+        exec_pike(["stop", "--plugin-path", PLUGIN_NAME, "--instance-name", i]);
+
+        let start = Instant::now();
+        let timeout = Duration::from_secs(60);
+        let instance_dir = data_dir.join(i);
+
+        while is_instance_running(&instance_dir) {
+            thread::sleep(Duration::from_secs(1));
+
+            assert!(
+                Instant::now().duration_since(start) < timeout,
+                "Timeout has reached. Instance '{i}' was not stopped."
+            );
+        }
+    }
+
+    // Execute "pike run" once again.
+    // Terminated instances must be running after this call.
+    exec_pike(["run", "--plugin-path", PLUGIN_NAME, "--daemon"]);
+
+    let cluster_started = wait_cluster_start_completed(plugin_path, |state| {
+        assert_eq!(state.pico_instance.matches("Online").count(), 8);
+        true
+    });
+
+    assert!(cluster_started);
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 }
 
 #[test]
