@@ -1,6 +1,8 @@
 use anyhow::{bail, Context, Result};
+use colored::Colorize;
 use flate2::bufread::GzDecoder;
 use fs_extra::dir;
+use log::info;
 use std::fmt::Display;
 use std::fs::{self, File, FileType};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -16,6 +18,14 @@ pub const LIB_EXT: &str = "so";
 
 #[cfg(target_os = "macos")]
 pub const LIB_EXT: &str = "dylib";
+
+pub fn log_instance_skipped(name: impl Display) {
+    info!("{name} - {}", "SKIPPED".yellow());
+}
+
+pub fn log_instance_started(name: impl Display) {
+    info!("{name} - {}", "started".green());
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum BuildType {

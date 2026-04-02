@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Breaking Changes
+
+- Change API of `pike::cluster::run` to consume input parameters instead of referencing them and copying inside [e99166e81](https://github.com/picodata/pike/commit/e99166e8121fe587417b121be97c067bd8dc916d)
+
+### Added
+
+- Revival of terminated instances in sequential pike run commands [#319](https://github.com/picodata/pike/issues/319)
+
 ### Changed
 
 - Bump Picodata version to 26.1.1 in plugin template and CI
