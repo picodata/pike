@@ -48,7 +48,7 @@ fn test_pre_install_sql_execution() {
         .build()
         .unwrap();
 
-    let _instances = run(&params).expect("Cluster run failed");
+    let _instances = run(params).expect("Cluster run failed");
 
     let start = Instant::now();
     let mut check_passed = false;
