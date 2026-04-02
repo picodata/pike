@@ -410,7 +410,7 @@ fn main() -> Result<()> {
                 .with_audit(with_audit)
                 .build()
                 .unwrap();
-            commands::run::cmd(&params).context("failed to execute Run command")?;
+            commands::run::cmd(params).context("failed to execute Run command")?;
         }
         Command::Stop {
             data_dir,

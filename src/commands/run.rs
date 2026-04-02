@@ -925,6 +925,16 @@ impl Params {
             BuildType::Debug
         }
     }
+
+    pub fn get_plugins_dir(&self) -> PathBuf {
+        let build_profile = self.get_build_profile();
+        self.plugin_path
+            .join(self.target_dir.join(build_profile.to_string()))
+    }
+
+    pub fn get_cluster_dir(&self) -> PathBuf {
+        get_cluster_dir(&self.plugin_path, &self.data_dir)
+    }
 }
 
 fn configure_web_auth<F>(
@@ -972,208 +982,226 @@ fn apply_web_auth_setting(params: &Params, cluster_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
-pub fn cluster(params: &Params) -> Result<Vec<PicodataInstance>> {
-    let cluster_dir = get_cluster_dir(&params.plugin_path, &params.data_dir);
-    let run_single_instance = params.instance_name.is_some();
-    let instance_name = params.instance_name.as_ref();
+pub fn run_single_instance(mut params: Params) -> anyhow::Result<Vec<PicodataInstance>> {
+    let instance_name = params.instance_name.as_ref().unwrap().clone();
+    let cluster_dir = params.get_cluster_dir();
 
-    if run_single_instance && get_active_socket_path(&cluster_dir, instance_name.unwrap()).is_some()
-    {
+    // Check whether instance is already started.
+    if get_active_socket_path(&cluster_dir, &instance_name).is_some() {
         info!(
             "running picodata instance {} - {}",
-            instance_name.unwrap(),
+            instance_name,
             "SKIPPED".yellow()
         );
         return Ok(vec![]);
-    } else if !run_single_instance {
-        if let Some(sock_path) = find_active_socket_path(&cluster_dir)? {
-            bail!(
-                "cluster has already started, can connect via {}",
-                sock_path.display()
-            );
-        }
     }
 
-    let mut params = params.clone();
+    let dirs = fs::read_dir(&cluster_dir).context(format!(
+        "cluster data dir with path {} does not exist",
+        cluster_dir.to_string_lossy()
+    ))?;
 
-    let mut plugins_dir = None;
-    if is_plugin_dir(&params.plugin_path) {
-        let build_type = params.get_build_profile();
-        if params.use_release {
-            plugins_dir = Some(params.plugin_path.join(params.target_dir.join("release")));
-        } else {
-            plugins_dir = Some(params.plugin_path.join(params.target_dir.join("debug")));
-        }
+    info!(
+        "running picodata cluster instance '{instance_name}', data folder: {}",
+        cluster_dir.join(&instance_name).to_string_lossy()
+    );
 
-        prepare_external_plugins(&params, plugins_dir.as_ref().unwrap())?;
-        if !params.no_build {
-            cargo_build(build_type, &params.target_dir, &params.plugin_path)?;
-        }
+    let plugins_dir = prepare_directory_with_plugins(&mut params)?;
 
-        params
-            .topology
-            .find_plugin_versions(plugins_dir.as_ref().unwrap())?;
-    } else if params.topology.has_external_plugins() {
-        // Нет родительского плагина, но есть внешние плагины.
-        // Готовим их в служебной директории кластера и используем её как --share-dir
-        let run_plugins_dir = cluster_dir.join("plugins");
-        fs::create_dir_all(&run_plugins_dir).with_context(|| {
-            format!(
-                "failed to create plugins working directory at {}",
-                run_plugins_dir.display()
-            )
+    // Find directory that belongs to instance.
+    let mut instance_dir = dirs
+        .into_iter()
+        .find_map(|result| {
+            let dir_entry = result.ok()?;
+            let filename = dir_entry.file_name();
+
+            let Some(dir_name) = filename.to_str() else {
+                // skip non UTF-8 strings
+                return None;
+            };
+
+            if dir_name != instance_name {
+                return None;
+            }
+
+            Some(dir_entry.path())
+        })
+        .ok_or({
+            anyhow::anyhow!("failed to locate directory of the instance '{instance_name}")
         })?;
-        prepare_external_plugins(&params, &run_plugins_dir)?;
-        params.topology.find_plugin_versions(&run_plugins_dir)?;
-        plugins_dir = Some(run_plugins_dir);
-    } else if !params.topology.plugins.is_empty() {
-        bail!(
-            "failed to prepare plugins: plugin directory is unknown.\n\
-            If you use external plugins, ensure they are prepared or run from a pike plugin project"
-        );
+
+    if instance_dir.is_symlink() {
+        instance_dir = fs::read_link(instance_dir)?;
+    }
+    let pico_instance_name = instance_dir
+        .file_name()
+        .expect("unreachable: canonicalized path cannot have .. as filename")
+        .to_str();
+    let instance_id = pico_instance_name
+        .expect("unreachable: instance path should be convertible to str")[1..]
+        .parse::<u16>()?;
+
+    let mut instance_id_counter = 0;
+    let mut instance_tier_name = &String::new();
+    for (tier_name, tier) in &params.topology.tiers {
+        instance_id_counter += u16::from(tier.replicasets * tier.replication_factor);
+        if instance_id <= instance_id_counter {
+            instance_tier_name = tier_name;
+            break;
+        }
     }
 
-    let mut picodata_processes = vec![];
+    let pico_instance = PicodataInstance::new(
+        instance_id,
+        plugins_dir.as_deref(),
+        instance_tier_name,
+        &params,
+    )?;
+
+    info!(
+        "running picodata instance {instance_name} - {}",
+        "OK".green()
+    );
+
+    apply_web_auth_setting(&params, &cluster_dir)?;
+
+    Ok(vec![pico_instance])
+}
+
+pub fn run_cluster(mut params: Params) -> anyhow::Result<Vec<PicodataInstance>> {
+    assert!(params.instance_name.is_none(), "invariant");
+
+    let cluster_dir = params.get_cluster_dir();
+    let plugins_dir = prepare_directory_with_plugins(&mut params)?;
+    let picodata_version = get_picodata_version(&params.picodata_path)?;
+
+    info!("Running the cluster with {picodata_version}...");
+    let start_cluster_run = Instant::now();
 
     let mut instance_id = 0;
-    if run_single_instance {
-        let instance_name = instance_name.unwrap().as_str();
-        let dirs = fs::read_dir(&cluster_dir).context(format!(
-            "cluster data dir with path {} does not exist",
-            cluster_dir.to_string_lossy()
-        ))?;
+    let mut picodata_processes = vec![];
+    for (tier_name, tier) in &params.topology.tiers {
+        for _ in 0..(tier.replicasets * tier.replication_factor) {
+            instance_id += 1;
+            let pico_instance =
+                PicodataInstance::new(instance_id, plugins_dir.as_deref(), tier_name, &params)?;
+
+            picodata_processes.push(pico_instance);
+
+            info!("i{instance_id} - started");
+        }
+    }
+
+    // Check whether cluster leader is known at this point.
+    // If yes, just skip this step. Otherwise, try to resolve it through
+    // any available socket in the cluster.
+    {
+        let timeout = TIMEOUT_WAITING_FOR_CLUSTER_ID;
+        let start = Instant::now();
 
         info!(
-            "running picodata cluster instance '{instance_name}', data folder: {}",
-            cluster_dir.join(instance_name).to_string_lossy()
+            "Waiting for cluster RAFT leader to be negotiated (timeout {}s)",
+            timeout.as_secs()
         );
 
-        // Find directory that belongs to instance.
-        let mut instance_dir = dirs
-            .into_iter()
-            .find_map(|result| {
-                let dir_entry = result.ok()?;
-                if dir_entry.file_name() != instance_name {
-                    return None;
-                }
+        while Instant::now().duration_since(start) < timeout {
+            let raft_leader_id = get_cluster_leader_id(&params.picodata_path, &cluster_dir)?;
 
-                Some(dir_entry.path())
-            })
-            .ok_or({
-                anyhow::anyhow!("failed to locate directory of the instance '{instance_name}")
-            })?;
-
-        if instance_dir.is_symlink() {
-            instance_dir = fs::read_link(instance_dir)?;
-        }
-        let pico_instance_name = instance_dir
-            .file_name()
-            .expect("unreachable: canonicalized path cannot have .. as filename")
-            .to_str();
-        let instance_id = pico_instance_name
-            .expect("unreachable: instance path should be convertible to str")[1..]
-            .parse::<u16>()?;
-
-        let mut instance_id_counter = 0;
-        let mut instance_tier_name = &String::new();
-        for (tier_name, tier) in &params.topology.tiers {
-            instance_id_counter += u16::from(tier.replicasets * tier.replication_factor);
-            if instance_id <= instance_id_counter {
-                instance_tier_name = tier_name;
+            if raft_leader_id != 0 {
+                info!("Cluster leader id is {raft_leader_id}");
                 break;
             }
+
+            thread::sleep(Duration::from_millis(100));
         }
-
-        let pico_instance = PicodataInstance::new(
-            instance_id,
-            plugins_dir.as_deref(),
-            instance_tier_name,
-            &params,
-        )?;
-
-        picodata_processes.push(pico_instance);
-
-        info!(
-            "running picodata instance {instance_name} - {}",
-            "OK".green()
-        );
-
-        apply_web_auth_setting(&params, &cluster_dir)?;
-    } else {
-        let picodata_version = get_picodata_version(&params.picodata_path)?;
-        info!("Running the cluster with {picodata_version}...");
-        let start_cluster_run = Instant::now();
-
-        for (tier_name, tier) in &params.topology.tiers {
-            for _ in 0..(tier.replicasets * tier.replication_factor) {
-                instance_id += 1;
-                let pico_instance =
-                    PicodataInstance::new(instance_id, plugins_dir.as_deref(), tier_name, &params)?;
-
-                picodata_processes.push(pico_instance);
-
-                info!("i{instance_id} - started");
-            }
-        }
-
-        // Check whether cluster leader is known at this point.
-        // If yes, just skip this step. Otherwise, try to resolve it through
-        // any available socket in the cluster.
-        {
-            let timeout = TIMEOUT_WAITING_FOR_CLUSTER_ID;
-            let start = Instant::now();
-
-            info!(
-                "Waiting for cluster RAFT leader to be negotiated (timeout {}s)",
-                timeout.as_secs()
-            );
-
-            while Instant::now().duration_since(start) < timeout {
-                let raft_leader_id = get_cluster_leader_id(&params.picodata_path, &cluster_dir)?;
-
-                if raft_leader_id != 0 {
-                    info!("Cluster leader id is {raft_leader_id}");
-                    break;
-                }
-
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
-
-        apply_web_auth_setting(&params, &cluster_dir)?;
-        if !params.disable_plugin_install && !params.topology.plugins.is_empty() {
-            if plugins_dir.is_none() {
-                bail!("failed to enable plugins: directory with plugins is missing.")
-            }
-            info!("Enabling plugins...");
-            let result = enable_plugins(&params.topology, &cluster_dir, &params.picodata_path);
-            if let Err(e) = result {
-                for process in &mut picodata_processes {
-                    process.kill().unwrap_or_else(|e| {
-                        error!("failed to kill picodata instances: {e:#}");
-                    });
-                }
-                bail!("failed to enable plugins: {e}");
-            }
-        }
-
-        info!(
-            "Picodata cluster has started (launch time: {} sec, total instances: {instance_id})",
-            start_cluster_run.elapsed().as_secs()
-        );
     }
+
+    apply_web_auth_setting(&params, &cluster_dir)?;
+    if !params.disable_plugin_install && !params.topology.plugins.is_empty() {
+        if plugins_dir.is_none() {
+            bail!("failed to enable plugins: directory with plugins is missing.")
+        }
+        info!("Enabling plugins...");
+        let result = enable_plugins(&params.topology, &cluster_dir, &params.picodata_path);
+        if let Err(e) = result {
+            for process in &mut picodata_processes {
+                process.kill().unwrap_or_else(|e| {
+                    error!("failed to kill picodata instances: {e:#}");
+                });
+            }
+            bail!("failed to enable plugins: {e}");
+        }
+    }
+
+    info!(
+        "Picodata cluster has started (launch time: {} sec, total instances: {instance_id})",
+        start_cluster_run.elapsed().as_secs()
+    );
 
     Ok(picodata_processes)
 }
 
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::fn_params_excessive_bools)]
-#[allow(clippy::cast_possible_wrap)]
-pub fn cmd(params: &Params) -> Result<()> {
+pub fn prepare_directory_with_plugins(params: &mut Params) -> anyhow::Result<Option<PathBuf>> {
+    if is_plugin_dir(&params.plugin_path) {
+        let plugins_dir = params.get_plugins_dir();
+        let build_profile = params.get_build_profile();
+
+        if !params.no_build {
+            cargo_build(build_profile, &params.target_dir, &params.plugin_path)?;
+        }
+
+        prepare_external_plugins(params, &plugins_dir)?;
+        params.topology.find_plugin_versions(&plugins_dir)?;
+        return Ok(Some(plugins_dir));
+    }
+
+    if params.topology.has_external_plugins() {
+        // Нет родительского плагина, но есть внешние плагины.
+        // Готовим их в служебной директории кластера и используем её как --share-dir
+        let plugins_dir = params.get_cluster_dir().join("plugins");
+
+        fs::create_dir_all(&plugins_dir).with_context(|| {
+            format!(
+                "failed to create directory for external plugins at {}",
+                plugins_dir.display()
+            )
+        })?;
+
+        prepare_external_plugins(params, &plugins_dir)?;
+        params.topology.find_plugin_versions(&plugins_dir)?;
+        return Ok(Some(plugins_dir));
+    }
+
+    if !params.topology.plugins.is_empty() {
+        bail!(
+            "failed to prepare plugins: plugin directory is unknown.\n\
+            If you use external plugins, ensure they are prepared or run from a pike plugin project"
+        )
+    }
+
+    Ok(None)
+}
+
+pub fn cluster(params: Params) -> Result<Vec<PicodataInstance>> {
+    if params.instance_name.is_some() {
+        return run_single_instance(params);
+    }
+
+    if let Some(sock_path) = find_active_socket_path(&params.get_cluster_dir())? {
+        bail!(
+            "cluster has already started, can connect via {}",
+            sock_path.display()
+        );
+    }
+
+    run_cluster(params)
+}
+
+pub fn cmd(params: Params) -> Result<()> {
+    let is_daemon_mode = params.daemon;
     let mut pico_instances = cluster(params)?;
 
-    if params.daemon {
+    if is_daemon_mode {
         return Ok(());
     }
 
@@ -1185,7 +1213,7 @@ pub fn cmd(params: &Params) -> Result<()> {
         info!("received Ctrl+C. Shutting down ...");
 
         for &pid in &picodata_pids {
-            let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
+            let _ = kill(Pid::from_raw(pid.cast_signed()), Signal::SIGKILL);
         }
     })
     .context("failed to set Ctrl+c handler")?;

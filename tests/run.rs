@@ -172,7 +172,7 @@ fn test_topology_struct_run() {
         .build()
         .unwrap();
 
-    run(&params).unwrap();
+    run(params).unwrap();
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -237,7 +237,7 @@ fn test_multiple_run_attempt() {
         .build()
         .unwrap();
 
-    run(&params).unwrap();
+    run(params.clone()).unwrap();
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -254,7 +254,7 @@ fn test_multiple_run_attempt() {
     }
 
     // Ensure that we stop picodata cluster before panicing
-    let res = run(&params);
+    let res = run(params);
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(
@@ -309,7 +309,7 @@ fn test_cluster_failure() {
         .build()
         .unwrap();
 
-    let cluster_status = run(&params);
+    let cluster_status = run(params);
     assert!(cluster_status.is_err(), "Expected migration error");
 
     let err = cluster_status.unwrap_err();
@@ -347,7 +347,7 @@ fn test_topology_struct_one_tier() {
         .build()
         .unwrap();
 
-    run(&params).unwrap();
+    run(params).unwrap();
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -394,7 +394,7 @@ fn test_topology_struct_run_no_plugin() {
         .build()
         .unwrap();
 
-    run(&params).unwrap();
+    run(params).unwrap();
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -459,7 +459,7 @@ fn test_picodata_instance_interaction() {
         .build()
         .unwrap();
 
-    let pico_instances = run(&params).unwrap();
+    let pico_instances = run(params).unwrap();
     let properties = pico_instances.first().unwrap().properties();
     let data_dir = properties.data_dir.to_str().unwrap();
 
@@ -522,7 +522,7 @@ fn test_quickstart_pipeline() {
         .unwrap();
 
     // Run cluster and check successful plugin installation
-    run(&params).unwrap();
+    run(params).unwrap();
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -610,7 +610,7 @@ fn test_workspace_pipeline() {
         .unwrap();
 
     // Run cluster and check successful plugin installation
-    run(&params).unwrap();
+    run(params).unwrap();
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -700,7 +700,7 @@ fn test_run_without_plugin_directory() {
         .build()
         .unwrap();
 
-    run(&params).unwrap();
+    run(params).unwrap();
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -860,7 +860,7 @@ fn run_with_external_plugin_directory() {
         .build()
         .unwrap();
 
-    run(&params).unwrap();
+    run(params).unwrap();
 
     let cluster_started = wait_cluster_start_completed(our_plugin_path, |state| {
         assert_eq!(state.pico_instance.matches("Online").count(), 8);
@@ -911,7 +911,7 @@ fn run_with_external_plugin_archive() {
         .build()
         .unwrap();
 
-    run(&params).unwrap();
+    run(params).unwrap();
 
     let cluster_started =
         wait_cluster_start_completed(Path::new("./tests/tmp/test-plugin"), |state| {
@@ -958,7 +958,7 @@ fn run_with_external_plugin_project() {
         .build()
         .unwrap();
 
-    run(&params).unwrap();
+    run(params).unwrap();
 
     let cluster_started = wait_cluster_start_completed(our_plugin_path, |state| {
         assert_eq!(state.pico_instance.matches("Online").count(), 8);
@@ -1006,7 +1006,7 @@ fn run_with_external_plugin_workspace() {
     ]);
     let params = make_ext_run_params(plugin_path, plugins).build().unwrap();
 
-    run(&params).unwrap();
+    run(params).unwrap();
 
     let cluster_started = wait_cluster_start_completed(plugin_path, |state| {
         assert_eq!(state.pico_instance.matches("Online").count(), 8);
@@ -1173,7 +1173,7 @@ fn run_with_env_variables() {
         .build()
         .unwrap();
 
-    let pico_instances = run(&params).unwrap();
+    let pico_instances = run(params).unwrap();
     let properties = pico_instances.first().unwrap().properties();
 
     assert_eq!(properties.bin_port, &3301);

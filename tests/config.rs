@@ -174,7 +174,7 @@ fn test_workspace_config_apply() {
         .unwrap();
 
     // Run cluster and check successful plugin installation
-    run(&params).unwrap();
+    run(params).unwrap();
 
     let start = Instant::now();
     let mut is_cluster_valid = false;
