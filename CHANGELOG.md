@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Breaking Changes
 
 - Change API of `pike::cluster::run` to consume input parameters instead of referencing them and copying inside [e99166e81](https://github.com/picodata/pike/commit/e99166e8121fe587417b121be97c067bd8dc916d)
+- Command `pike run` is checking readiness of cluster instances via HTTP probes introduced in Picodata 26.1 [#308](https://github.com/picodata/pike/issues/308)
 
 ### Added
 

@@ -1,10 +1,9 @@
-use crate::commands::lib::{find_active_socket_path, run_query_in_picodata_admin};
-use anyhow::{anyhow, bail, Context, Result};
+use crate::commands::lib::run_query_in_picodata_admin;
+use anyhow::{bail, Result};
 use std::{path::Path, str::FromStr};
 
 const GET_INSTANCE_NAME: &str = "\\lua\npico.instance_info().name";
 const GET_INSTANCE_CURRENT_STATE: &str = "\\lua\npico.instance_info().current_state.variant";
-const GET_CLUSTER_LEADER_ID: &str = "\\lua\nbox.func[\".proc_runtime_info\"]:call().raft.leader_id";
 
 #[derive(Clone, Copy, Debug)]
 pub enum InstanceState {
@@ -65,14 +64,4 @@ pub fn get_instance_current_state(
 
     get_lua_single_line_output(picodata_path, &instance_socket, GET_INSTANCE_CURRENT_STATE)
         .and_then(|state| state.parse())
-}
-
-pub fn get_cluster_leader_id(picodata_path: &Path, cluster_dir: &Path) -> Result<usize> {
-    let Some(socket_path) = find_active_socket_path(cluster_dir)? else {
-        bail!("failed to get cluster leader id information: no active socket found")
-    };
-
-    get_lua_single_line_output(picodata_path, &socket_path, GET_CLUSTER_LEADER_ID)
-        .and_then(|str| str.parse().context("failed to parse leader id from string"))
-        .map_err(|err| anyhow!("unable to get cluster leader id: {err}"))
 }

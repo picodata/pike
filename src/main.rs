@@ -12,6 +12,7 @@ use toml_edit::{DocumentMut, Item, Value};
 use crate::commands::ride;
 
 mod commands;
+mod healthcheck;
 
 const CK_CHECK_PARRENT_INTERVAL_SEC: u64 = 3;
 
