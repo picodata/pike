@@ -488,16 +488,6 @@ impl PicodataInstance {
         Ok(pico_instance)
     }
 
-    #[allow(dead_code)]
-    #[allow(clippy::must_use_candidate)]
-    #[deprecated(
-        since = "2.3.2",
-        note = "Use properties() function to get all info about instance at once"
-    )]
-    pub fn pg_port(&self) -> &u16 {
-        &self.pg_port
-    }
-
     pub(crate) fn http_port(&self) -> u16 {
         self.http_port
     }
