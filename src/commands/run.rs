@@ -1,3 +1,5 @@
+mod readiness;
+
 use anyhow::{anyhow, bail, Context, Result};
 use colored::Colorize;
 use derive_builder::Builder;
@@ -20,9 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::commands::lib::instance_info::{
-    get_cluster_leader_id, get_instance_current_state, get_instance_name,
-};
+use crate::commands::lib::instance_info::{get_instance_current_state, get_instance_name};
 use crate::commands::lib::{
     cargo_build, copy_directory_tree, find_active_socket_path, get_cluster_dir,
     log_instance_skipped, log_instance_started, run_query_in_picodata_admin, spawn_picodata_admin,
@@ -51,7 +51,6 @@ const BAFFLED_WHALE: &str = r"
                                  `-.,'
  ";
 
-const TIMEOUT_WAITING_FOR_CLUSTER_ID: Duration = Duration::from_secs(15);
 const TIMEOUT_WAITING_FOR_INSTANCE_READINESS: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Deserialize, Clone)]
@@ -497,6 +496,10 @@ impl PicodataInstance {
     )]
     pub fn pg_port(&self) -> &u16 {
         &self.pg_port
+    }
+
+    pub(crate) fn http_port(&self) -> u16 {
+        self.http_port
     }
 
     #[allow(dead_code)]
@@ -1063,10 +1066,7 @@ fn run_single_instance(
     Ok(vec![pico_instance])
 }
 
-fn run_cluster(
-    params: &Params,
-    plugins_dir: Option<&PathBuf>,
-) -> anyhow::Result<Vec<PicodataInstance>> {
+fn run_cluster(params: &Params, plugins_dir: Option<&PathBuf>) -> Result<Vec<PicodataInstance>> {
     assert!(params.instance_name.is_none(), "invariant");
 
     let cluster_dir = params.get_cluster_dir();
@@ -1076,30 +1076,7 @@ fn run_cluster(
     let start_cluster_run = Instant::now();
     let mut picodata_processes = start_instances_in_tiers(params, plugins_dir)?;
 
-    // Check whether cluster leader is known at this point.
-    // If yes, just skip this step. Otherwise, try to resolve it through
-    // any available socket in the cluster.
-    {
-        let timeout = TIMEOUT_WAITING_FOR_CLUSTER_ID;
-        let start = Instant::now();
-
-        info!(
-            "Waiting for cluster RAFT leader to be negotiated (timeout {}s)",
-            timeout.as_secs()
-        );
-
-        while Instant::now().duration_since(start) < timeout {
-            let raft_leader_id = get_cluster_leader_id(&params.picodata_path, &cluster_dir)?;
-
-            if raft_leader_id != 0 {
-                info!("Cluster leader id is {raft_leader_id}");
-                break;
-            }
-
-            thread::sleep(Duration::from_millis(100));
-        }
-    }
-
+    readiness::wait_instances_ready(&picodata_processes)?;
     apply_web_auth_setting(params, &cluster_dir)?;
     if !params.disable_plugin_install && !params.topology.plugins.is_empty() {
         if plugins_dir.is_none() {
