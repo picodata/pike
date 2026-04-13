@@ -1215,3 +1215,29 @@ fn run_with_env_variables() {
 
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 }
+
+#[test]
+#[ignore = "https://github.com/picodata/pike/issues/329"]
+fn run_with_wait_vshard_discovery() {
+    let _cluster_handle = run_cluster(
+        Duration::from_secs(360),
+        TOTAL_INSTANCES,
+        CmdArguments {
+            run_args: vec![
+                "--wait-vshard-discovery".to_string(),
+                "--wait-vshard-discovery-timeout".to_string(),
+                "360".to_string(),
+            ],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let cluster_started = wait_cluster_start_completed(Path::new(PLUGIN_DIR), |state| {
+        assert_eq!(state.pico_instance.matches("Online").count(), 8);
+        assert!(state.pico_plugin.contains("true"));
+        true
+    });
+
+    assert!(cluster_started);
+}

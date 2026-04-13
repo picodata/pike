@@ -502,6 +502,10 @@ impl PicodataInstance {
         self.http_port
     }
 
+    pub(crate) fn data_dir(&self) -> &Path {
+        &self.data_dir
+    }
+
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
     pub fn properties(&self) -> PicodataInstanceProperties<'_> {
@@ -923,6 +927,10 @@ pub struct Params {
     with_web_auth: bool,
     #[builder(default = "false")]
     with_audit: bool,
+    #[builder(default = "false")]
+    wait_vshard_discovery: bool,
+    #[builder(default = "30")]
+    wait_vshard_discovery_timeout: u64,
 }
 
 impl Params {
@@ -1078,6 +1086,11 @@ fn run_cluster(params: &Params, plugins_dir: Option<&PathBuf>) -> Result<Vec<Pic
 
     readiness::wait_instances_ready(&picodata_processes)?;
     apply_web_auth_setting(params, &cluster_dir)?;
+
+    if params.wait_vshard_discovery {
+        readiness::wait_vshard_discovery(&picodata_processes, params)?;
+    }
+
     if !params.disable_plugin_install && !params.topology.plugins.is_empty() {
         if plugins_dir.is_none() {
             bail!("failed to enable plugins: directory with plugins is missing.")

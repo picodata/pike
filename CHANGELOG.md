@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Added
 
 - Revival of terminated instances in sequential pike run commands [#319](https://github.com/picodata/pike/issues/319)
+- Add optional waiting of vshard discovery during cluster startup in `pike run` [#307](https://github.com/picodata/pike/issues/307)
 
 ### Changed
 

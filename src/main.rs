@@ -130,6 +130,12 @@ enum Command {
         /// named `audit.log` within its respective instance directory.
         #[arg(long, value_name = "WITH_AUDIT", default_value_t = false)]
         with_audit: bool,
+        /// Wait for vshard discovery to complete
+        #[arg(long, default_value_t = false)]
+        wait_vshard_discovery: bool,
+        /// Timeout in seconds for waiting vshard discovery to complete.
+        #[arg(long, value_name = "SECONDS", default_value_t = 30)]
+        wait_vshard_discovery_timeout: u64,
     },
     /// Stop Picodata cluster or a specific instance
     Stop {
@@ -382,6 +388,8 @@ fn main() -> Result<()> {
             instance_name,
             with_web_auth,
             with_audit,
+            wait_vshard_discovery,
+            wait_vshard_discovery_timeout,
         } => {
             is_required_path_exists(&plugin_path, &topology, CARING_PIKE, 1);
 
@@ -409,6 +417,8 @@ fn main() -> Result<()> {
                 .instance_name(instance_name)
                 .with_web_auth(with_web_auth)
                 .with_audit(with_audit)
+                .wait_vshard_discovery(wait_vshard_discovery)
+                .wait_vshard_discovery_timeout(wait_vshard_discovery_timeout)
                 .build()
                 .unwrap();
             commands::run::cmd(params).context("failed to execute Run command")?;
