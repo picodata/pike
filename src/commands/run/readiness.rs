@@ -42,8 +42,6 @@ pub(super) fn wait_instances_ready(instances: &[PicodataInstance]) -> Result<()>
             .filter(|&ready| ready)
             .count();
 
-        println!("WTF: ready count: {ready_count}");
-
         if ready_count == instances.len() {
             info!("All {} instance(s) are ready", instances.len());
             return Ok(());
@@ -86,15 +84,11 @@ pub(super) fn wait_vshard_discovery(instances: &[PicodataInstance], params: &Par
                 );
             }
 
-            println!("WTF: search for: {needle}");
-
             let output = run_query_in_picodata_admin(
                 &params.picodata_path,
                 &socket_path,
                 "\\lua\nvshard.router",
             );
-
-            println!("WTF: vshard.router output: {output:?}");
 
             match output {
                 Ok(stdout) if stdout.contains(&needle) => break,
@@ -132,28 +126,6 @@ fn fetch_instance_buckets(
         }
 
         let statuses: Vec<_> = instances.iter().map(api::get_health_status).collect();
-
-        {
-            let ts = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis();
-            for (inst, status) in instances.iter().zip(statuses.iter()) {
-                match status {
-                    Ok(s) => println!(
-                        "{ts} - WTF - instance port={} status={:?} buckets.active={} buckets.total={}",
-                        inst.http_port(),
-                        s.status,
-                        s.buckets.active,
-                        s.buckets.total,
-                    ),
-                    Err(e) => println!(
-                        "{ts} - WTF - instance port={} status=ERROR err={e}",
-                        inst.http_port(),
-                    ),
-                }
-            }
-        }
 
         let all_healthy = statuses
             .iter()
