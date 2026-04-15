@@ -73,10 +73,10 @@ pub(super) fn wait_vshard_discovery(instances: &[PicodataInstance], params: &Par
         let socket_path = instance.data_dir().join("admin.sock");
         let start = Instant::now();
 
-        let active_buckets = fetch_instance_buckets(instances, instance, &start, timeout)?;
-        let needle = format!("bucket_count: {active_buckets}");
-
         loop {
+            let active_buckets = fetch_instance_buckets(instances, instance, &start, timeout)?;
+            let needle = format!("bucket_count: {active_buckets}");
+
             if start.elapsed() >= timeout {
                 bail!(
                     "vshard discovery timed out: '{needle}' not found in vshard.router output \
