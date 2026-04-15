@@ -86,11 +86,15 @@ pub(super) fn wait_vshard_discovery(instances: &[PicodataInstance], params: &Par
                 );
             }
 
+            println!("WTF: search for: {needle}");
+
             let output = run_query_in_picodata_admin(
                 &params.picodata_path,
                 &socket_path,
                 "\\lua\nvshard.router",
             );
+
+            println!("WTF: vshard.router output: {output:?}");
 
             match output {
                 Ok(stdout) if stdout.contains(&needle) => break,
