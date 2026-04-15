@@ -70,7 +70,8 @@ pub(super) fn wait_vshard_discovery(instances: &[PicodataInstance], params: &Par
     for instance in instances {
         let socket_path = instance.data_dir().join("admin.sock");
         let start = Instant::now();
-        let active_buckets = api::get_health_status(instance)?.buckets.active;
+
+        let active_buckets = fetch_instance_buckets(instances, instance, &start, timeout)?;
         let needle = format!("bucket_count: {active_buckets}");
 
         loop {
@@ -106,4 +107,44 @@ pub(super) fn wait_vshard_discovery(instances: &[PicodataInstance], params: &Par
 
     info!("vshard discovery has been completed on all instances");
     Ok(())
+}
+
+/// Polls `/api/v1/health/status` until **all** instances report `Healthy`,
+/// then returns `buckets.active` for the requested instance.
+fn fetch_instance_buckets(
+    instances: &[PicodataInstance],
+    instance: &PicodataInstance,
+    start: &Instant,
+    timeout: Duration,
+) -> Result<usize> {
+    loop {
+        if start.elapsed() >= timeout {
+            bail!(
+                "vshard discovery timed out: not all instances became healthy within {}s",
+                timeout.as_secs()
+            );
+        }
+
+        let statuses: Vec<_> = instances.iter().map(api::get_health_status).collect();
+
+        let all_healthy = statuses
+            .iter()
+            .all(|s| matches!(s, Ok(s) if s.status == api::HealthStatusLevel::Healthy));
+
+        if all_healthy {
+            let active = statuses
+                .into_iter()
+                .zip(instances.iter())
+                .find(|(_, i)| i.http_port() == instance.http_port())
+                .expect("instance must be in the list")
+                .0?
+                .buckets
+                .active;
+            return Ok(active);
+        }
+
+        debug!("not all instances are healthy yet, retrying...");
+
+        thread::sleep(CHECK_INTERVAL);
+    }
 }
