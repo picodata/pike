@@ -2,13 +2,30 @@
 
 use crate::commands::run::PicodataInstance;
 use anyhow::{bail, Result};
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 const SESSION_ENDPOINT: &str = "api/v1/session";
 const READINESS_ENDPOINT: &str = "api/v1/health/ready";
+const STARTUP_ENDPOINT: &str = "api/v1/health/startup";
 const HEALTH_STATUS_ENDPOINT: &str = "api/v1/health/status";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Debug)]
+enum Probe {
+    Readiness,
+    Startup,
+}
+
+impl Probe {
+    fn path(&self) -> &'static str {
+        match self {
+            Probe::Startup => STARTUP_ENDPOINT,
+            Probe::Readiness => READINESS_ENDPOINT,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -92,6 +109,24 @@ fn build_client() -> Result<reqwest::blocking::Client> {
         .map_err(Into::into)
 }
 
+/// Assembles URL of instance probe.
+fn build_probe_url(i: &PicodataInstance, probe: &Probe) -> String {
+    format!("http://127.0.0.1:{}/{}", i.http_port(), probe.path())
+}
+
+/// Performs the specified probe on the instance via HTTP.
+/// Returns `true` if the response status is successful.
+fn check_instance_probe(
+    http_client: &Client,
+    instance: &PicodataInstance,
+    probe: &Probe,
+) -> Result<bool> {
+    let url = build_probe_url(instance, probe);
+    let response = http_client.get(url).send()?;
+
+    Ok(response.status().is_success())
+}
+
 /// Authenticates against `/api/v1/session` and returns JWT tokens.
 pub fn get_session_token(http_port: u16, username: &str, password: &str) -> Result<SessionToken> {
     let url = format!("http://127.0.0.1:{http_port}/{SESSION_ENDPOINT}");
@@ -123,16 +158,16 @@ pub fn get_health_status(instance: &PicodataInstance) -> Result<HealthStatus> {
     Ok(resp.json::<HealthStatus>()?)
 }
 
-/// Checks `GET /api/v1/health/ready` for the given instance.
-/// Returns `true` if the instance is ready (`HTTP_OK` received).
+/// Instance is ready, when it's started and ready to accept incoming traffic.
+///
+/// This routine polls "/startup" endpoint and on success polls "/ready".
+///
+/// Returns "true" if both returned `HTTP_OK`.
+///
 pub fn is_instance_ready(instance: &PicodataInstance) -> Result<bool> {
-    let url = format!(
-        "http://127.0.0.1:{}/{READINESS_ENDPOINT}",
-        instance.http_port()
-    );
-    let client = build_client()?;
-    match client.get(&url).send() {
-        Ok(resp) => Ok(resp.status().is_success()),
-        Err(e) => Err(e.into()),
-    }
+    let http_client = build_client()?;
+    let check_probe = |p| check_instance_probe(&http_client, instance, p);
+    let is_ready = check_probe(&Probe::Startup)? && check_probe(&Probe::Readiness)?;
+
+    Ok(is_ready)
 }
