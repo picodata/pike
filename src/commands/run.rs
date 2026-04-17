@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::commands::lib::instance_info::{get_instance_current_state, get_instance_name};
+use crate::commands::lib::instance_info::InstanceSocketClient;
 use crate::commands::lib::{
     cargo_build, copy_directory_tree, find_active_socket_path, get_cluster_dir,
     log_instance_skipped, log_instance_started, run_query_in_picodata_admin, spawn_picodata_admin,
@@ -437,17 +437,18 @@ impl PicodataInstance {
         let start = Instant::now();
         while Instant::now().duration_since(start) < TIMEOUT_WAITING_FOR_INSTANCE_READINESS {
             thread::sleep(Duration::from_millis(100));
-            let Ok(new_instance_name) =
-                get_instance_name(&run_params.picodata_path, &instance_data_dir)
-                    .inspect_err(|err| log::debug!("failed to get name of the instance: {err}"))
+            let socket_client =
+                InstanceSocketClient::new(&instance_data_dir, &run_params.picodata_path);
+            let Ok(new_instance_name) = socket_client
+                .instance_name()
+                .inspect_err(|err| log::debug!("failed to get name of the instance: {err}"))
             else {
                 continue;
             };
 
             // If name is already known, then socket is ready, i.e. we assume
             // call below should return without error.
-            let instance_current_state =
-                get_instance_current_state(&run_params.picodata_path, &instance_data_dir)?;
+            let instance_current_state = socket_client.current_state()?;
             if !instance_current_state.is_online() {
                 info!("Waiting for '{new_instance_name}' to become 'Online'");
                 continue;
