@@ -493,8 +493,8 @@ impl PicodataInstance {
         self.http_port
     }
 
-    pub(crate) fn data_dir(&self) -> &Path {
-        &self.data_dir
+    pub(crate) fn socket_client<'a>(&self, picodata_path: &'a PathBuf) -> InstanceSocketClient<'a> {
+        InstanceSocketClient::new(&self.data_dir, picodata_path)
     }
 
     #[allow(dead_code)]
