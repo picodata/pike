@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
-### Added
+## [4.0.1]
+
+### Fixed
 
 - Check cluster readiness using both `/startup` and `/ready` probes
 - Improve handling of vshard discovery completion [#330](https://github.com/picodata/pike/issues/330)
