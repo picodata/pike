@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Changed
 
 - Switch tls in request to native-tls
+- Increase timeout on vshard-readiness to 300 seconds
 
 ## [4.0.1]
 
