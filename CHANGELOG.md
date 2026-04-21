@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Changed
+
+- Switch tls in request to native-tls
+
 ## [4.0.1]
 
 ### Fixed
