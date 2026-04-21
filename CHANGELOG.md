@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [4.0.2]
+
 ### Changed
 
 - Switch tls in request to native-tls
