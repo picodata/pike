@@ -920,7 +920,7 @@ pub struct Params {
     with_audit: bool,
     #[builder(default = "false")]
     wait_vshard_discovery: bool,
-    #[builder(default = "30")]
+    #[builder(default = "300")]
     wait_vshard_discovery_timeout: u64,
 }
 

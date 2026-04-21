@@ -134,7 +134,7 @@ enum Command {
         #[arg(long, default_value_t = false)]
         wait_vshard_discovery: bool,
         /// Timeout in seconds for waiting vshard discovery to complete.
-        #[arg(long, value_name = "SECONDS", default_value_t = 30)]
+        #[arg(long, value_name = "SECONDS", default_value_t = 300)]
         wait_vshard_discovery_timeout: u64,
     },
     /// Stop Picodata cluster or a specific instance
