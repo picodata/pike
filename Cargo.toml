@@ -21,7 +21,6 @@ clap = { version = "4", features = ["derive"] }
 toml = "1.1"
 serde = { version = "1", features = ["derive"] }
 include_dir = "0.7"
-liquid = "0.26"
 tar = "0.4"
 flate2 = "1"
 serde_yaml = "0.9"
@@ -41,6 +40,7 @@ regex = "1.12.3"
 serde_ignored = "0.1.14"
 terminal_size = "0.4.4"
 ureq = { version = "3.3.0", features = ["json", "native-tls", "gzip"], default-features = false }
+minijinja = "2.19.0"
 
 [lib]
 name = "pike"

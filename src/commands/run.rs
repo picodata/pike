@@ -269,7 +269,7 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
     Ok(())
 }
 
-fn get_ipv4_from_liquid_var(
+fn get_ipv4_from_template_var(
     env_vars: &BTreeMap<String, String>,
     variable: &str,
 ) -> Option<SocketAddrV4> {
@@ -353,29 +353,36 @@ impl PicodataInstance {
 
         fs::create_dir_all(&instance_data_dir).context("Failed to create instance data dir")?;
 
-        let env_templates_ctx = liquid::object!({
-            "instance_id": instance_id,
-        });
-        let env_vars: BTreeMap<String, String> =
-            Self::compute_env_vars(&run_params.topology.enviroment, &env_templates_ctx)?;
+        let mut template_env = minijinja::Environment::new();
 
-        let first_env_templates_ctx = liquid::object!({
-            "instance_id": 1,
-        });
-        let first_env_vars: BTreeMap<String, String> =
-            Self::compute_env_vars(&run_params.topology.enviroment, &first_env_templates_ctx)?;
+        for x in &run_params.topology.enviroment {
+            template_env.add_template(x.0.as_str(), x.1.as_str())?;
+        }
+
+        let env_templates_ctx = minijinja::context! {
+            instance_id => instance_id,
+        };
+        let env_vars: BTreeMap<String, String> =
+            Self::compute_env_vars(&template_env, &env_templates_ctx)?;
+
+        let first_env_vars: BTreeMap<String, String> = Self::compute_env_vars(
+            &template_env,
+            &minijinja::context! {
+                instance_id => 1,
+            },
+        )?;
 
         let mut child = Command::new(&run_params.picodata_path);
         child.envs(&env_vars);
 
         let first_instance_bin_ipv4 =
-            get_ipv4_from_liquid_var(&first_env_vars, "PICODATA_IPROTO_LISTEN")
+            get_ipv4_from_template_var(&first_env_vars, "PICODATA_IPROTO_LISTEN")
                 .unwrap_or(format!("127.0.0.1:{}", run_params.base_bin_port + 1).parse()?);
-        let bin_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_IPROTO_LISTEN")
+        let bin_ipv4 = get_ipv4_from_template_var(&env_vars, "PICODATA_IPROTO_LISTEN")
             .unwrap_or(format!("127.0.0.1:{}", run_params.base_bin_port + instance_id).parse()?);
-        let http_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_HTTP_LISTEN")
+        let http_ipv4 = get_ipv4_from_template_var(&env_vars, "PICODATA_HTTP_LISTEN")
             .unwrap_or(format!("0.0.0.0:{}", run_params.base_http_port + instance_id).parse()?);
-        let pg_ipv4 = get_ipv4_from_liquid_var(&env_vars, "PICODATA_PG_LISTEN")
+        let pg_ipv4 = get_ipv4_from_template_var(&env_vars, "PICODATA_PG_LISTEN")
             .unwrap_or(format!("127.0.0.1:{}", run_params.base_pg_port + instance_id).parse()?);
 
         child.args([
@@ -512,24 +519,24 @@ impl PicodataInstance {
     }
 
     fn compute_env_vars(
-        env_templates: &BTreeMap<String, String>,
-        ctx: &liquid::Object,
+        template_env: &minijinja::Environment,
+        ctx: &minijinja::Value,
     ) -> Result<BTreeMap<String, String>> {
-        env_templates
-            .iter()
-            .map(|(k, v)| {
-                let tpl = liquid::ParserBuilder::with_stdlib().build()?.parse(v)?;
-                Ok((k.clone(), tpl.render(ctx)?))
-            })
-            .collect()
+        let mut result = BTreeMap::new();
+
+        for (name, template) in template_env.templates() {
+            result.insert(name.into(), template.render(ctx)?);
+        }
+
+        Ok(result)
     }
 
-    /// Templates a picodata.yaml config file with Liquid variables (e.g., `instance_id`).
+    /// Templates a picodata.yaml config file with jinja variables (e.g., `instance_id`).
     /// Returns the path to the templated config file in the instance data directory.
     fn template_config(
         config_path: &Path,
         instance_data_dir: &Path,
-        ctx: &liquid::Object,
+        ctx: &minijinja::Value,
     ) -> Result<PathBuf> {
         let config_content = fs::read_to_string(config_path).with_context(|| {
             format!(
@@ -538,16 +545,11 @@ impl PicodataInstance {
             )
         })?;
 
-        let parser = liquid::ParserBuilder::with_stdlib()
-            .build()
-            .context("failed to build Liquid parser")?;
+        let mut parser = minijinja::Environment::new();
 
-        let template = parser.parse(&config_content).with_context(|| {
-            format!(
-                "failed to parse picodata config as Liquid template at {}",
-                config_path.display()
-            )
-        })?;
+        parser.add_template("config", &config_content)?;
+
+        let template = parser.get_template("config")?;
 
         let rendered = template.render(ctx).with_context(|| {
             format!(

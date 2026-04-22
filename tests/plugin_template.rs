@@ -65,7 +65,7 @@ fn test_picodata_config_template_rendering() {
     let plugin_path = Path::new("./tests/tmp/plugin-template-config-test");
     init_plugin("plugin-template-config-test");
 
-    // Create a picodata.yaml config template with Liquid variables
+    // Create a picodata.yaml config template with jinja variables
     let config_path = plugin_path.join("picodata.yaml");
     let template_content = r#"cluster:
   name: "test-cluster"
@@ -87,25 +87,24 @@ instance:
 
     let config_content = fs::read_to_string(&config_path).expect("Failed to read picodata.yaml");
 
-    // Verify that the template contains Liquid template variables
+    // Verify that the template contains jinja template variables
     assert!(
         config_content.contains("{{ instance_id }}"),
         "picodata.yaml should contain {{ instance_id }} template variable"
     );
 
-    // Test template rendering with Liquid
-    let parser = liquid::ParserBuilder::with_stdlib()
-        .build()
-        .expect("Failed to build Liquid parser");
-
-    let template = parser
-        .parse(&config_content)
-        .expect("Failed to parse picodata.yaml as Liquid template");
+    // Test template rendering
+    let mut env = minijinja::Environment::new();
+    env.add_template("config", &config_content)
+        .expect("Failed to parse picodata.yaml as jinja template");
+    let template = env
+        .get_template("config")
+        .expect("We've just added template");
 
     // Render with instance_id = 1
-    let ctx = liquid::object!({
-        "instance_id": 1,
-    });
+    let ctx = minijinja::context! {
+        instance_id => 1,
+    };
     let rendered = template
         .render(&ctx)
         .expect("Failed to render template with instance_id=1");
@@ -121,9 +120,9 @@ instance:
     );
 
     // Render with instance_id = 42
-    let ctx = liquid::object!({
-        "instance_id": 42,
-    });
+    let ctx = minijinja::context! {
+        instance_id => 42,
+    };
     let rendered = template
         .render(&ctx)
         .expect("Failed to render template with instance_id=42");

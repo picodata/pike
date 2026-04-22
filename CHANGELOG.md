@@ -6,9 +6,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Breaking Changes
+
+- Switch from liquid to minininja to reduce dependency footprint
+
 ### Changed
 
-- Switch reqwest to ureq to reduce dependency footprint
+- Switch from reqwest to ureq to reduce dependency footprint
 
 ## [4.0.2]
 
