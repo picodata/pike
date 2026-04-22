@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Changed
+
+- Switch reqwest to ureq to reduce dependency footprint
+
 ## [4.0.2]
 
 ### Changed

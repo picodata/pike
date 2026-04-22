@@ -2,7 +2,6 @@
 
 use crate::commands::run::PicodataInstance;
 use anyhow::{bail, Result};
-use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -102,11 +101,16 @@ pub struct SessionToken {
     pub refresh: String,
 }
 
-fn build_client() -> Result<reqwest::blocking::Client> {
-    reqwest::blocking::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
+fn build_client() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .provider(ureq::tls::TlsProvider::NativeTls)
+                .build(),
+        )
+        .timeout_global(Some(REQUEST_TIMEOUT))
         .build()
-        .map_err(Into::into)
+        .into()
 }
 
 /// Assembles URL of instance probe.
@@ -117,12 +121,12 @@ fn build_probe_url(i: &PicodataInstance, probe: &Probe) -> String {
 /// Performs the specified probe on the instance via HTTP.
 /// Returns `true` if the response status is successful.
 fn check_instance_probe(
-    http_client: &Client,
+    http_client: &ureq::Agent,
     instance: &PicodataInstance,
     probe: &Probe,
 ) -> Result<bool> {
     let url = build_probe_url(instance, probe);
-    let response = http_client.get(url).send()?;
+    let response = http_client.get(url).call()?;
 
     Ok(response.status().is_success())
 }
@@ -130,11 +134,11 @@ fn check_instance_probe(
 /// Authenticates against `/api/v1/session` and returns JWT tokens.
 pub fn get_session_token(http_port: u16, username: &str, password: &str) -> Result<SessionToken> {
     let url = format!("http://127.0.0.1:{http_port}/{SESSION_ENDPOINT}");
-    let tokens = build_client()?
+    let tokens = build_client()
         .post(&url)
-        .json(&LoginRequest { username, password })
-        .send()?
-        .json::<SessionToken>()?;
+        .send_json(&LoginRequest { username, password })?
+        .body_mut()
+        .read_json::<SessionToken>()?;
     Ok(tokens)
 }
 
@@ -148,14 +152,14 @@ pub fn get_health_status(instance: &PicodataInstance) -> Result<HealthStatus> {
         "http://127.0.0.1:{}/{HEALTH_STATUS_ENDPOINT}",
         instance.http_port()
     );
-    let resp = build_client()?.get(&url).send()?;
+    let mut resp = build_client().get(&url).call()?;
     if !resp.status().is_success() {
         bail!(
             "health status request failed with status: {}",
             resp.status()
         );
     }
-    Ok(resp.json::<HealthStatus>()?)
+    Ok(resp.body_mut().read_json::<HealthStatus>()?)
 }
 
 /// Instance is ready, when it's started and ready to accept incoming traffic.
@@ -165,7 +169,7 @@ pub fn get_health_status(instance: &PicodataInstance) -> Result<HealthStatus> {
 /// Returns "true" if both returned `HTTP_OK`.
 ///
 pub fn is_instance_ready(instance: &PicodataInstance) -> Result<bool> {
-    let http_client = build_client()?;
+    let http_client = build_client();
     let check_probe = |p| check_instance_probe(&http_client, instance, p);
     let is_ready = check_probe(&Probe::Startup)? && check_probe(&Probe::Readiness)?;
 
