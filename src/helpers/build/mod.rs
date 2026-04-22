@@ -229,16 +229,18 @@ pub fn main(params: &Params) {
         let template = fs::read_to_string(template_path)
             .inspect_err(|e| println!("cargo::error=Read error for manifest.yaml.template: {e}"))
             .expect("template for manifest plugin can not be read");
-        let template = liquid::ParserBuilder::with_stdlib()
-            .build()
-            .unwrap()
-            .parse(&template)
+        let mut template_env = minijinja::Environment::new();
+        template_env
+            .add_template("manifest", &template)
             .expect("invalid manifest template");
+        let template = template_env
+            .get_template("manifest")
+            .expect("we just registered template");
 
-        let template_ctx = liquid::object!({
-            "version": pkg_version,
-            "migrations": migrations,
-        });
+        let template_ctx = minijinja::context! {
+            version => pkg_version,
+            migrations => migrations,
+        };
 
         fs::write(&out_manifest_path, template.render(&template_ctx).unwrap()).unwrap();
     } else {

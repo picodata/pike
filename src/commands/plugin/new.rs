@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use fs_extra::{dir, file};
+use minijinja::Value;
 use std::{
     env,
     ffi::OsStr,
@@ -28,23 +29,23 @@ static WS_PATHS_TO_MOVE: [&str; 6] = [
     "tmp/",
 ];
 
-fn place_file(target_path: &Path, t_ctx: &liquid::Object, entries: &[DirEntry<'_>]) -> Result<()> {
+fn place_file(
+    target_path: &Path,
+    t_ctx: &minijinja::Value,
+    entries: &[DirEntry<'_>],
+) -> Result<()> {
     for entry in entries {
         match entry {
             DirEntry::Dir(inner_dir) => place_file(target_path, t_ctx, inner_dir.entries())?,
             DirEntry::File(inner_file) => {
-                let template = liquid::ParserBuilder::with_stdlib()
-                    .build()
-                    .context("couldn't build from template")?
-                    .parse(
-                        inner_file
-                            .contents_utf8()
-                            .context("couldn't extract file contents")?,
-                    )
-                    .context(format!(
-                        "invalid template {}",
-                        inner_file.path().to_string_lossy()
-                    ))?;
+                let mut env = minijinja::Environment::new();
+                env.add_template(
+                    "name",
+                    inner_file
+                        .contents_utf8()
+                        .context("couldn't extract file contents")?,
+                )?;
+                let template = env.get_template("name")?;
 
                 // crutch for prevent excluding plugin_template directory from package
                 // https://github.com/rust-lang/cargo/issues/8597
@@ -63,7 +64,7 @@ fn place_file(target_path: &Path, t_ctx: &liquid::Object, entries: &[DirEntry<'_
                 fs::write(
                     &dest_path,
                     template
-                        .render(&t_ctx)
+                        .render(t_ctx)
                         .context("failed to render the file")?,
                 )
                 .context(format!("couldn't write to {}", dest_path.display()))?;
@@ -87,19 +88,21 @@ where
     Ok(())
 }
 
-fn workspace_init(root_path: &Path, project_name: &str, t_ctx: &liquid::Object) -> Result<()> {
+fn workspace_init(root_path: &Path, project_name: &str, t_ctx: &Value) -> Result<()> {
     let cargo_toml_path = root_path.join("Cargo.toml");
 
     let mut cargo_toml =
         File::create(cargo_toml_path).context("failed to create Cargo.toml for workspace")?;
 
-    let ws_template = liquid::ParserBuilder::with_stdlib()
-        .build()
-        .context("couldn't build from template")?
-        .parse(WS_CARGO_MANIFEST_TEMPLATE)
-        .unwrap();
+    let mut ws_env = minijinja::Environment::new();
+    ws_env
+        .add_template("cargo_manifect", WS_CARGO_MANIFEST_TEMPLATE)
+        .expect("Can't parse cargo manifest template");
+    let ws_template = ws_env
+        .get_template("cargo_manifect")
+        .expect("We just registered template for cargo manifest");
 
-    cargo_toml.write_all(ws_template.render(&t_ctx).unwrap().as_bytes())?;
+    cargo_toml.write_all(ws_template.render(t_ctx).unwrap().as_bytes())?;
 
     let subcrate_path = root_path.join(project_name);
 
@@ -165,9 +168,9 @@ pub fn cmd(path: Option<&Path>, without_git: bool, init_workspace: bool) -> Resu
     std::fs::create_dir_all(&plugin_path)
         .context(format!("failed to create {}", plugin_path.display()))?;
 
-    let templates_ctx = liquid::object!({
-        "project_name": project_name,
-    });
+    let templates_ctx = minijinja::context! {
+        project_name => project_name,
+    };
 
     place_file(&plugin_path, &templates_ctx, PLUGIN_TEMPLATE.entries())
         .context("failed to place the template")?;

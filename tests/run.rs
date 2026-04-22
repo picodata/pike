@@ -1174,15 +1174,15 @@ fn run_with_env_variables() {
     let enviroment = BTreeMap::from_iter([
         (
             String::from("PICODATA_HTTP_LISTEN"),
-            String::from("0.0.0.0:{{ instance_id | plus: 18000 }}"),
+            String::from("0.0.0.0:{{ instance_id + 18000 }}"),
         ),
         (
             String::from("PICODATA_PG_LISTEN"),
-            String::from("127.0.0.1:{{ instance_id | plus: 5400 }}"),
+            String::from("127.0.0.1:{{ instance_id + 5400 }}"),
         ),
         (
             String::from("PICODATA_IPROTO_LISTEN"),
-            String::from("127.0.0.1:{{ instance_id | plus: 3300 }}"),
+            String::from("127.0.0.1:{{ instance_id + 3300 }}"),
         ),
     ]);
 
