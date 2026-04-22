@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Changed
 
 - Switch from reqwest to ureq to reduce dependency footprint
+- Bumped picodata-plugin to 26.1.2
 
 ## [4.0.2]
 
