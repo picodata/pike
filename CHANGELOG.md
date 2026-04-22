@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [5.0.0]
+
 ### Breaking Changes
 
 - Switch from liquid to minininja to reduce dependency footprint
