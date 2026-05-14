@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Fixed
+
+- Skip symlinked instance directories during cluster shutdown in `pike stop` [#342](https://github.com/picodata/pike/issues/342)
+
 ## [5.0.0]
 
 ### Breaking Changes

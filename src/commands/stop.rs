@@ -3,10 +3,11 @@ use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use derive_builder::Builder;
 use log::info;
+use nix::sys::signal::{kill, Signal};
+use nix::unistd::Pid;
 use std::fs::{self};
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 #[derive(Debug, Builder)]
 pub struct Params {
@@ -61,9 +62,8 @@ pub fn cmd(params: &Params) -> Result<()> {
         for current_dir in dirs {
             let instance_dir = current_dir?.path();
 
-            // To get the actual instance name, we look
-            // only on simlinks
-            if !fs::symlink_metadata(&instance_dir)?.is_symlink() {
+            // Skip symlinks.
+            if fs::symlink_metadata(&instance_dir)?.is_symlink() {
                 continue;
             }
 
@@ -105,9 +105,10 @@ fn stop_instance(params: &Params, instance_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    if let Err(e) = kill_process_by_pid(pid) {
+    if let Err(e) = kill(pid, Signal::SIGKILL) {
         bail!("failed to stop picodata instance with PID {pid}. Error: {e}");
     }
+
     info!(
         "stopping picodata instance: {} - {}",
         link_name.to_string_lossy(),
@@ -117,28 +118,18 @@ fn stop_instance(params: &Params, instance_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn read_pid_from_file(pid_file_path: &Path) -> Result<u32> {
+fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
     let file = fs::File::open(pid_file_path)?;
 
     let mut lines = io::BufReader::new(file).lines();
     let pid_line = lines.next().context("PID file is empty")??;
 
-    let pid = pid_line.trim().parse::<u32>().context(format!(
+    let pid = pid_line.trim().parse::<i32>().context(format!(
         "failed to parse PID from file {}",
         pid_file_path.display()
     ))?;
 
-    Ok(pid)
-}
+    assert!(pid > 0);
 
-fn kill_process_by_pid(pid: u32) -> Result<()> {
-    let output = Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .output()?;
-
-    if !output.status.success() {
-        bail!("failed to kill picodata instance (pid: {pid}): {output:?}");
-    }
-
-    Ok(())
+    Ok(Pid::from_raw(pid))
 }
