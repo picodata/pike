@@ -11,25 +11,19 @@ use std::{
 use crate::helpers::is_instance_running;
 
 const TOTAL_INSTANCES: i32 = 4;
+const CLUSTER_STOP_TIMEOUT: Duration = Duration::from_secs(60);
+const CLUSTER_START_TIMEOUT: Duration = Duration::from_secs(120);
 
-#[test]
-fn test_pike_stop() {
-    let _cluster_handle = run_cluster(
-        Duration::from_secs(120),
-        TOTAL_INSTANCES,
-        CmdArguments::default(),
-    )
-    .unwrap();
-
-    // Stop picodata cluster
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
-
+fn assert_cluster_stopped(timeout: Duration) {
     let start = Instant::now();
-    while Instant::now().duration_since(start) < Duration::from_secs(60) {
+    let delay = Duration::from_millis(200);
+
+    while Instant::now().duration_since(start) < timeout {
         // Search for PID's of picodata instances and check their liveness
         let mut cluster_stopped = true;
-        for instance_dir in fs::read_dir(Path::new(PLUGIN_DIR).join("tmp").join("cluster")).unwrap()
-        {
+        let cluster_dir = Path::new(PLUGIN_DIR).join("tmp").join("cluster");
+
+        for instance_dir in fs::read_dir(cluster_dir).unwrap() {
             // Check if proccess of picodata is still running
             if is_instance_running(&instance_dir.unwrap().path()) {
                 cluster_stopped = false;
@@ -41,12 +35,66 @@ fn test_pike_stop() {
             return;
         }
 
-        thread::sleep(Duration::from_secs(1));
+        thread::sleep(delay);
     }
 
     panic!(
         "Timeouted while trying to stop cluster, processes with associated PID's are still running"
     );
+}
+
+#[test]
+fn test_pike_stop_default() {
+    let _cluster_handle = run_cluster(
+        CLUSTER_START_TIMEOUT,
+        TOTAL_INSTANCES,
+        CmdArguments::default(),
+    )
+    .unwrap();
+
+    // Stop picodata cluster
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+
+    assert_cluster_stopped(CLUSTER_STOP_TIMEOUT);
+}
+
+#[test]
+fn test_pike_stop_daemon_cluster() {
+    let cmd_args = CmdArguments {
+        run_args: ["--daemon"].iter().map(|&s| s.into()).collect(),
+        ..Default::default()
+    };
+    let _cluster_handle = run_cluster(CLUSTER_START_TIMEOUT, TOTAL_INSTANCES, cmd_args)
+        .expect("Failed to start cluster");
+
+    // Stop picodata cluster
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+
+    assert_cluster_stopped(CLUSTER_STOP_TIMEOUT);
+}
+
+#[test]
+fn test_pike_stop_sigterm_with_timeout() {
+    let _cluster_handle = run_cluster(
+        CLUSTER_START_TIMEOUT,
+        TOTAL_INSTANCES,
+        CmdArguments::default(),
+    )
+    .expect("Failed to start cluster");
+
+    // Stop picodata cluster
+    exec_pike([
+        "stop",
+        "--signal",
+        "SIGTERM",
+        "--timeout",
+        "5",
+        "--plugin-path",
+        PLUGIN_NAME,
+    ]);
+
+    // A bit more than specified in --timeout.
+    assert_cluster_stopped(Duration::from_secs(10));
 }
 
 #[test]

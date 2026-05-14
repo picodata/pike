@@ -2,12 +2,21 @@ use crate::commands::lib::{get_active_socket_path, get_cluster_dir};
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use derive_builder::Builder;
-use log::info;
+use log::{info, warn};
+use nix::errno::Errno;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
+use procfs::process::{ProcState, Process};
 use std::fs::{self};
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
+use std::thread::sleep;
+use std::time::{Duration, Instant};
+
+// Default signal sent by unix kill command during `pike stop` command.
+pub const DEFAULT_STOP_SIGNAL: Signal = Signal::SIGKILL;
+// Default timeout for graceful process shutdown.
+pub const DEFAULT_PROCESS_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Builder)]
 pub struct Params {
@@ -17,6 +26,10 @@ pub struct Params {
     plugin_path: PathBuf,
     #[builder(default)]
     instance_name: Option<String>,
+    #[builder(default = DEFAULT_STOP_SIGNAL)]
+    signal: Signal,
+    #[builder(default = DEFAULT_PROCESS_SHUTDOWN_TIMEOUT)]
+    timeout: Duration,
 }
 
 pub fn cmd(params: &Params) -> Result<()> {
@@ -105,7 +118,7 @@ fn stop_instance(params: &Params, instance_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    if let Err(e) = kill(pid, Signal::SIGKILL) {
+    if let Err(e) = send_signal_and_wait(pid, params.signal, params.timeout) {
         bail!("failed to stop picodata instance with PID {pid}. Error: {e}");
     }
 
@@ -132,4 +145,51 @@ fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
     assert!(pid > 0);
 
     Ok(Pid::from_raw(pid))
+}
+
+/// Send signal to process and wait until it exits.
+///
+/// If the process does not terminate within the specified timeout,
+/// SIGKILL is sent as a fallback.
+fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::Result<()> {
+    kill(pid, signal)?;
+
+    let Ok(process) = Process::new(pid.into()) else {
+        // Process doesn't exist or we can't read /proc.
+        return Ok(());
+    };
+
+    let start = Instant::now();
+    let delay = Duration::from_millis(100);
+
+    while start.elapsed() < timeout {
+        sleep(delay);
+
+        match kill(pid, None) {
+            Err(Errno::ESRCH) => {
+                // Process no longer exists.
+                return Ok(());
+            }
+            Err(err) => bail!(err),
+            Ok(()) => {}
+        }
+
+        let Ok(state) = process.stat().and_then(|s| s.state()) else {
+            // We can't check process state or
+            // there is not such process in /proc.
+            return Ok(());
+        };
+
+        if state == ProcState::Zombie {
+            // Process is terminated, but not
+            // reaped by parent.
+            return Ok(());
+        }
+    }
+
+    warn!("Process {pid} did not terminate within {timeout:?}. Sending SIGKILL...");
+
+    kill(pid, Signal::SIGKILL)?;
+
+    Ok(())
 }
