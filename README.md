@@ -110,7 +110,7 @@ cargo pike run --topology topology.toml --data-dir ./tmp
 - `--instance-name` - Название инстанса, которого хотим запустить, если параметр не указан - запускается весь кластер
 - `--with-web-auth` - Оставить включённой аутентификацию WebUI. По умолчанию Pike отключает WebUI auth для локальной разработки запросом `ALTER SYSTEM SET jwt_secret = ''`
 - `--with-audit` - Включить логи аудита. По умолчанию, они отключены. Если параметр указан - каждый инстанс кластера хранит собственный лог аудита под именем `audit.log` в своей директории.
-- `--wait-vshard-discovery` - Ожидать завершения vshard discovery перед запуском plugin SQL. Значение по умолчанию: отключено.
+- `--wait-vshard-discovery` - Ожидать завершения vshard discovery перед запуском plugin SQL. Значение по умолчанию: включено.
 - `--wait-vshard-discovery-timeout` - Таймаут ожидания завершения vshard discovery в секундах. По умолчанию: 300.
 
 
