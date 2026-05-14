@@ -1,6 +1,13 @@
+use crate::commands::{
+    ride,
+    stop::{DEFAULT_PROCESS_SHUTDOWN_TIMEOUT, DEFAULT_STOP_SIGNAL},
+};
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use nix::unistd::{fork, ForkResult};
+use nix::{
+    sys::signal::Signal,
+    unistd::{fork, ForkResult},
+};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -8,8 +15,6 @@ use std::{
     time::Duration,
 };
 use toml_edit::{DocumentMut, Item, Value};
-
-use crate::commands::ride;
 
 mod commands;
 mod healthcheck;
@@ -153,6 +158,23 @@ enum Command {
         /// will stop all instances in the cluster.
         #[arg(long, value_name = "INSTANCE_NAME", default_value = None)]
         instance_name: Option<String>,
+        /// Signal used to stop the cluster instances.
+        #[arg(
+            long,
+            value_name = "SIGNAL", 
+            default_value_t = DEFAULT_STOP_SIGNAL,
+            help = "Unix signal (e.g. SIGTERM, SIGKILL, SIGINT)"
+        )]
+        signal: Signal,
+        /// Graceful shutdown timeout used to wait for process termination
+        /// after sending the signal.
+        #[arg(
+            long,
+            value_name = "TIMEOUT_SECS",
+            default_value_t = DEFAULT_PROCESS_SHUTDOWN_TIMEOUT.as_secs(),
+            help = "Graceful shutdown timeout in seconds"
+        )]
+        timeout: u64,
     },
     /// Remove all data files of previous cluster run
     Clean {
@@ -431,14 +453,19 @@ fn main() -> Result<()> {
             data_dir,
             plugin_path,
             instance_name,
+            signal,
+            timeout,
         } => {
             is_required_path_exists(&plugin_path, &data_dir, CARING_PIKE, 1);
 
             run_child_killer();
+            let timeout = Duration::from_secs(timeout);
             let params = commands::stop::ParamsBuilder::default()
                 .data_dir(data_dir)
                 .plugin_path(plugin_path)
                 .instance_name(instance_name)
+                .signal(signal)
+                .timeout(timeout)
                 .build()
                 .unwrap();
             commands::stop::cmd(&params).context("failed to execute \"stop\" command")?;

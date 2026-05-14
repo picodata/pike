@@ -317,11 +317,38 @@ cargo pike stop --data-dir ./tmp --instance-name i2
 [*] stopping picodata instance: i2 - OK
 ```
 
+Также можно указать Unix-сигнал, который будет отправлен инстансам, при помощи опции `--signal`.
+По умолчанию используется `SIGKILL`.
+
+Например, для корректного завершения инстансов через `SIGTERM`:
+
+```bash
+cargo pike stop --data-dir ./tmp --signal SIGTERM
+```
+
+Пикодата использует timeout при graceful shutdown кластера. Таймаут задается через переменную окружения `PICODATA_INTERNAL_ON_SHUTDOWN_TIMEOUT` в секундах:
+
+```bash
+export PICODATA_INTERNAL_ON_SHUTDOWN_TIMEOUT="3.0"
+```
+
+Соответственно, при завершении кластера через `SIGTERM` инстансы будут завершаться в течение времени, указанного в переменной `PICODATA_INTERNAL_ON_SHUTDOWN_TIMEOUT`.
+
+Команда `cargo pike stop` также использует собственный timeout ожидания завершения процесса. Он задается через опцию `--timeout`. Если процесс не завершится в течение указанного времени, ему будет отправлен `SIGKILL`.
+
+Например:
+
+```bash
+cargo pike stop --data-dir ./tmp --signal SIGTERM --timeout 10
+```
+
 #### Доступные опции
 
 - `--data-dir <DATA_DIR>` - Путь к директории хранения файлов кластера. Значение по умолчанию: `./tmp`
 - `--plugin-path` - Путь до директории **проекта** плагина. Значение по умолчанию: `./`
 - `--instance-name <INSTANCE_NAME>` - Название инстанса Пикодаты. По умолчанию игнорируется.
+- `--signal <SIGNAL>` - Unix-сигнал, который будет отправлен процессам. По умолчанию: `SIGKILL`.
+- `--timeout <TIMEOUT_SECS>` - timeout ожидания завершения процесса. По умолчанию: `30 секунд`.
 
 ### `enter`
 
