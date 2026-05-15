@@ -131,7 +131,11 @@ enum Command {
         #[arg(long, value_name = "WITH_AUDIT", default_value_t = false)]
         with_audit: bool,
         /// Wait for vshard discovery to complete
-        #[arg(long, default_value_t = true)]
+        #[arg(long,
+            num_args = 0..=1,
+            default_value_t = true,
+            value_parser = clap::value_parser!(bool)
+        )]
         wait_vshard_discovery: bool,
         /// Timeout in seconds for waiting vshard discovery to complete.
         #[arg(long, value_name = "SECONDS", default_value_t = 300)]
