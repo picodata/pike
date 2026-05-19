@@ -1,5 +1,6 @@
 mod readiness;
 
+use crate::healthcheck::api::get_health_status;
 use anyhow::{anyhow, bail, Context, Result};
 use colored::Colorize;
 use derive_builder::Builder;
@@ -1206,9 +1207,33 @@ pub fn cluster(mut params: Params) -> Result<Vec<PicodataInstance>> {
     run_cluster(&params, plugins_dir.as_ref())
 }
 
+fn print_webui_url(pico_instances: &[PicodataInstance]) {
+    let Some(first) = pico_instances.first() else {
+        return;
+    };
+
+    // Prefer the raft leader's HTTP port
+    // Fall back to the first instance if the leader is unknown for any reason
+    // e.g. election still in progress or the health query fails.
+    let leader_name = get_health_status(first)
+        .ok()
+        .map(|s| s.raft.leader_name)
+        .unwrap_or_default();
+    // Find the leader instance by name; an empty name means no leader elected yet.
+    let leader_instance = pico_instances
+        .iter()
+        .find(|i| !leader_name.is_empty() && i.properties().instance_name == leader_name);
+    let port = leader_instance.unwrap_or(first).http_port();
+
+    let url = format!("http://localhost:{port}").bold();
+    println!("\nCluster is running. To open Web UI, visit:\n  {url}\n");
+}
+
 pub fn cmd(params: Params) -> Result<()> {
     let is_daemon_mode = params.daemon;
     let mut pico_instances = cluster(params)?;
+
+    print_webui_url(&pico_instances);
 
     if is_daemon_mode {
         return Ok(());
