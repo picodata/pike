@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [5.2.0]
+
+### Added
+
+- Print Web UI link on cluster start [#347](https://github.com/picodata/pike/issues/347)
+
+### Fixed
+
+- Add aliases for field names in healthcheck response [#333](https://github.com/picodata/pike/issues/333)
+
+### Changed
+
+- Bump picodata-plugin to 26.1.3
+
 ## [5.1.0]
 
 ### Fixed
