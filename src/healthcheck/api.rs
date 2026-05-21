@@ -32,7 +32,8 @@ pub enum HealthStatusLevel {
     Healthy,
     Degraded,
     #[default]
-    Unhealthy,
+    #[serde(alias = "unhealthy")]
+    Broken,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -70,7 +71,8 @@ pub struct ClusterStatus {
 #[serde(default, rename_all = "camelCase")]
 pub struct HealthStatus {
     pub status: HealthStatusLevel,
-    pub reasons: Vec<String>,
+    #[serde(alias = "reasons")]
+    pub issues: Vec<String>,
     pub timestamp: u64,
     pub uptime_seconds: u64,
     pub name: String,
