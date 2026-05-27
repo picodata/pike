@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [5.3.0]
+
+### Added
+
+- Add signal & timeout selection to `pike stop` command [#340](https://github.com/picodata/pike/issues/340)
+
+### Fixed
+
+- Disable treating "bad" HTTP codes as errors [#357](https://github.com/picodata/pike/issues/357)
+- Kill instance on drop to avoid infinite waiting of alive process [#355](https://github.com/picodata/pike/issues/355)
+
 ## [5.2.0]
 
 ### Added
