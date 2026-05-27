@@ -111,6 +111,7 @@ fn build_client() -> ureq::Agent {
                 .build(),
         )
         .timeout_global(Some(REQUEST_TIMEOUT))
+        .http_status_as_error(false)
         .build()
         .into()
 }
