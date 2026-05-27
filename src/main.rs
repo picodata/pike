@@ -1,6 +1,6 @@
 use crate::commands::{
     ride,
-    stop::{DEFAULT_PROCESS_SHUTDOWN_TIMEOUT, DEFAULT_STOP_SIGNAL},
+    stop::{DEFAULT_STOP_SIGNAL, DEFAULT_STOP_TIMEOUT},
 };
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
@@ -166,12 +166,13 @@ enum Command {
             help = "Unix signal (e.g. SIGTERM, SIGKILL, SIGINT)"
         )]
         signal: Signal,
-        /// Graceful shutdown timeout used to wait for process termination
-        /// after sending the signal.
+        /// Maximum time to wait for graceful cluster termination.
+        /// If exceeded, instances will be killed with SIGKILL.
         #[arg(
             long,
+            short,
             value_name = "TIMEOUT_SECS",
-            default_value_t = DEFAULT_PROCESS_SHUTDOWN_TIMEOUT.as_secs(),
+            default_value_t = DEFAULT_STOP_TIMEOUT.as_secs(),
             help = "Graceful shutdown timeout in seconds"
         )]
         timeout: u64,
