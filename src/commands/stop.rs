@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 // Default signal sent by unix kill command during `pike stop` command.
 pub const DEFAULT_STOP_SIGNAL: Signal = Signal::SIGKILL;
 // Default timeout for graceful process shutdown.
-pub const DEFAULT_PROCESS_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Builder)]
 pub struct Params {
@@ -28,7 +28,7 @@ pub struct Params {
     instance_name: Option<String>,
     #[builder(default = DEFAULT_STOP_SIGNAL)]
     signal: Signal,
-    #[builder(default = DEFAULT_PROCESS_SHUTDOWN_TIMEOUT)]
+    #[builder(default = DEFAULT_STOP_TIMEOUT)]
     timeout: Duration,
 }
 
@@ -39,7 +39,17 @@ pub fn cmd(params: &Params) -> Result<()> {
         instances_path.to_string_lossy()
     ))?;
 
-    if let Some(instance_name) = &params.instance_name {
+    let Params {
+        data_dir,
+        plugin_path,
+        instance_name,
+        signal,
+        timeout,
+    } = params;
+
+    let cluster_dir = get_cluster_dir(plugin_path, data_dir);
+
+    if let Some(instance_name) = instance_name {
         info!(
             "stopping picodata cluster instance '{instance_name}', data folder: {}",
             instances_path.join(instance_name).to_string_lossy()
@@ -62,16 +72,17 @@ pub fn cmd(params: &Params) -> Result<()> {
             bail!("failed to locate directory of the instance '{instance_name}'");
         };
 
-        stop_instance(params, &instance_dir)
+        stop_instance(&cluster_dir, &instance_dir, *signal, *timeout)
     } else {
         info!(
             "stopping picodata cluster, data folder: {}",
             params.data_dir.to_string_lossy()
         );
 
-        // Iterate through instance folders and
-        // search for "pid" file. After the pid
-        // is known - kill the instance
+        // Iterate through instance folders and collect
+        // them into vector.
+        let mut instance_dirs = vec![];
+
         for current_dir in dirs {
             let instance_dir = current_dir?.path();
 
@@ -80,14 +91,40 @@ pub fn cmd(params: &Params) -> Result<()> {
                 continue;
             }
 
-            stop_instance(params, &instance_dir)?;
+            instance_dirs.push(instance_dir);
         }
+
+        if instance_dirs.is_empty() {
+            info!("cluster is empty");
+            return Ok(());
+        }
+
+        info!(
+            "stopping {} instance(s) (timeout = {timeout:?})",
+            instance_dirs.len()
+        );
+
+        // Calculate timeout per picodata process.
+        let start = Instant::now();
+        let timeout_per_instance = *timeout / u32::try_from(instance_dirs.len())?;
+
+        // Iterate over instances and stop them one-by-one.
+        for instance_dir in instance_dirs {
+            stop_instance(&cluster_dir, &instance_dir, *signal, timeout_per_instance)?;
+        }
+
+        info!("cluster stopped in {:?}", start.elapsed());
 
         Ok(())
     }
 }
 
-fn stop_instance(params: &Params, instance_dir: &Path) -> Result<()> {
+fn stop_instance(
+    cluster_dir: &Path,
+    instance_dir: &Path,
+    signal: Signal,
+    timeout: Duration,
+) -> Result<()> {
     if !instance_dir.is_dir() {
         bail!("{} is not a directory", instance_dir.to_string_lossy());
     }
@@ -107,9 +144,8 @@ fn stop_instance(params: &Params, instance_dir: &Path) -> Result<()> {
     }
 
     let pid = read_pid_from_file(&pid_file_path).context("failed to read the PID file")?;
-    let cluster_dir = get_cluster_dir(&params.plugin_path, &params.data_dir);
 
-    if get_active_socket_path(&cluster_dir, link_name.to_str().unwrap()).is_none() {
+    if get_active_socket_path(cluster_dir, link_name.to_str().unwrap()).is_none() {
         info!(
             "stopping picodata instance: {} - {}",
             link_name.to_string_lossy(),
@@ -118,7 +154,7 @@ fn stop_instance(params: &Params, instance_dir: &Path) -> Result<()> {
         return Ok(());
     }
 
-    if let Err(e) = send_signal_and_wait(pid, params.signal, params.timeout) {
+    if let Err(e) = send_signal_and_wait(pid, signal, timeout) {
         bail!("failed to stop picodata instance with PID {pid}. Error: {e}");
     }
 
