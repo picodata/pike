@@ -653,6 +653,10 @@ impl Drop for PicodataInstance {
             return;
         }
 
+        // Send kill to avoid infinite
+        // waiting of blocking processes.
+        let _ = self.child.kill();
+
         self.child
             .wait()
             .expect("Failed to wait for picodata instance");
