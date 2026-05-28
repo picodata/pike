@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [5.3.1]
+
+### Fixed
+
+- Fix MacOs compatibility issue due to `procfs` usage [552c00cdb](https://github.com/picodata/pike/commit/552c00cdba8c3bc36de0acf56562a5a522e1ac86)
+
 ## [5.3.0]
 
 ### Added
