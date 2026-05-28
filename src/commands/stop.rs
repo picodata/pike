@@ -6,7 +6,6 @@ use log::{info, warn};
 use nix::errno::Errno;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
-use procfs::process::{ProcState, Process};
 use std::fs::{self};
 use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
@@ -190,11 +189,6 @@ fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
 fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::Result<()> {
     kill(pid, signal)?;
 
-    let Ok(process) = Process::new(pid.into()) else {
-        // Process doesn't exist or we can't read /proc.
-        return Ok(());
-    };
-
     let start = Instant::now();
     let delay = Duration::from_millis(100);
 
@@ -210,22 +204,25 @@ fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::
             Ok(()) => {}
         }
 
-        let Ok(state) = process.stat().and_then(|s| s.state()) else {
-            // We can't check process state or
-            // there is not such process in /proc.
-            return Ok(());
-        };
-
-        if state == ProcState::Zombie {
-            // Process is terminated, but not
-            // reaped by parent.
+        #[cfg(target_os = "linux")]
+        if is_zombie(pid) {
             return Ok(());
         }
     }
 
     warn!("Process {pid} did not terminate within {timeout:?}. Sending SIGKILL...");
-
     kill(pid, Signal::SIGKILL)?;
-
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn is_zombie(pid: Pid) -> bool {
+    use procfs::process::{ProcState, Process};
+    // Returns true if the process doesn't exist or we can't read /proc.
+    Process::new(pid.into())
+        .and_then(|p| p.stat())
+        .and_then(|s| s.state())
+        // Process is terminated, but not reaped by parent.
+        // Or we can't check process state or there is not such process in /proc.
+        .map_or(true, |state| state == ProcState::Zombie)
 }
