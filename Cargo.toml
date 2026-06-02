@@ -28,7 +28,7 @@ serde_json = "1"
 ctrlc = "3.5"
 anyhow = "1.0"
 colog = "1.4.0"
-log = "0.4.30"
+log = "0.4.31"
 fs_extra = "1"
 libc = "0.2.186"
 nix = { version = "0.31.3", features = ["signal"] }
