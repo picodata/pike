@@ -1,6 +1,6 @@
 mod helpers;
 
-use helpers::{get_picodata_table, init_plugin, PLUGIN_DIR, PLUGIN_NAME};
+use helpers::{get_picodata_table, init_plugin, Cluster, PLUGIN_DIR, PLUGIN_NAME};
 use std::{
     collections::BTreeMap,
     path::Path,
@@ -49,6 +49,7 @@ fn test_pre_install_sql_execution() {
         .unwrap();
 
     let _instances = run(params).expect("Cluster run failed");
+    let _cluster = Cluster::manage(plugin_path);
 
     let start = Instant::now();
     let mut check_passed = false;
@@ -67,14 +68,6 @@ fn test_pre_install_sql_execution() {
 
         std::thread::sleep(Duration::from_secs(1));
     }
-
-    pike::cluster::stop(
-        &pike::cluster::StopParamsBuilder::default()
-            .plugin_path(plugin_path.to_path_buf())
-            .build()
-            .unwrap(),
-    )
-    .unwrap();
 
     assert!(
         check_passed,
