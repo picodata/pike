@@ -36,7 +36,7 @@ use toml_edit::DocumentMut;
 ///     // Mapping of properties corresponding to the service
 ///     HashMap::from([(
 ///         "http_server".to_string(),
-///         serde_yaml::to_value(HashMap::from([(
+///         serde_norway::to_value(HashMap::from([(
 ///             "url".to_string(),
 ///             // URL is overridden for testing.
 ///             "localhost:29092".to_string(),
@@ -45,7 +45,7 @@ use toml_edit::DocumentMut;
 ///     )]),
 /// )]);
 /// ```
-pub type ConfigMap = HashMap<String, HashMap<String, serde_yaml::Value>>;
+pub type ConfigMap = HashMap<String, HashMap<String, serde_norway::Value>>;
 
 const DEFAULT_PLUGIN_CONFIG_PATH: &str = "plugin_config.yaml";
 const WISE_PIKE: &str = r"
@@ -66,7 +66,7 @@ o      ______/~/~/~/__           /((
  ";
 
 fn read_config_from_path(path: &PathBuf) -> Result<ConfigMap> {
-    serde_yaml::from_str(
+    serde_norway::from_str(
         &fs::read_to_string(path)
             .context(format!("failed to read config file at {}", path.display()))?,
     )
@@ -80,7 +80,7 @@ fn apply_service_config(
     plugin_name: &str,
     plugin_version: &str,
     service_name: &str,
-    config: &HashMap<String, serde_yaml::Value>,
+    config: &HashMap<String, serde_norway::Value>,
     admin_socket: &Path,
     picodata_path: &Path,
 ) -> Result<()> {
@@ -313,10 +313,10 @@ mod tests {
 
     #[test]
     fn apply_service_config_uses_custom_picodata_path_and_fails_cleanly() {
-        let mut service_cfg: HashMap<String, serde_yaml::Value> = HashMap::new();
+        let mut service_cfg: HashMap<String, serde_norway::Value> = HashMap::new();
         service_cfg.insert(
             "k".to_string(),
-            serde_yaml::to_value("v").expect("serialize test value"),
+            serde_norway::to_value("v").expect("serialize test value"),
         );
 
         let bogus_picodata = PathBuf::from("/this/does/not/exist/picodata-bogus");
