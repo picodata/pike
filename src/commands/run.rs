@@ -9,7 +9,7 @@ use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
 use rand::RngExt;
 use serde::Deserialize;
-use serde_yaml::{Mapping, Value};
+use serde_norway::{Mapping, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::fs::{File, OpenOptions};
@@ -687,7 +687,7 @@ fn get_merged_cluster_tier_config(
             if raw.trim().is_empty() {
                 Value::Mapping(Mapping::new())
             } else {
-                serde_yaml::from_str::<Value>(&raw).with_context(|| {
+                serde_norway::from_str::<Value>(&raw).with_context(|| {
                     format!(
                         "invalid YAML in picodata config at {}",
                         picodata_conf_path.display()

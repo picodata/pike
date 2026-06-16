@@ -47,7 +47,7 @@ const TOTAL_INSTANCES: i32 = 4;
             "example_service".to_string(),
             [(
                 "value".to_string(),
-                serde_yaml::to_value("changed").unwrap(),
+                serde_norway::to_value("changed").unwrap(),
             )].iter().cloned().collect(),
         )]))
         .clone()
