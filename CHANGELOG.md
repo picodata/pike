@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [5.3.2]
+
+### Changed
+
+- Replace unmaintained serde_yaml with maintained fork [serde_norway](https://github.com/cafkafk/serde-norway) ([47cab00808](https://github.com/picodata/pike/commit/47cab00808a70224a1f46bf554e91bd8ffba51eb))
+
 ## [5.3.1]
 
 ### Fixed
