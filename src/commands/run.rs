@@ -172,13 +172,6 @@ impl Topology {
 fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path) -> Result<()> {
     let mut queries: Vec<String> = Vec::new();
 
-    if !topology.pre_install_sql.is_empty() {
-        info!("Executing pre-install SQL scripts...");
-        for query in &topology.pre_install_sql {
-            queries.push(query.clone());
-        }
-    }
-
     for (plugin_name, plugin) in &topology.plugins {
         let Some(plugin_version) = plugin.version.as_ref() else {
             bail!("plugin version is missing for '{plugin_name}'");
@@ -222,8 +215,24 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
         }
     }
 
-    let admin_socket = cluster_dir.join("i1").join("admin.sock");
+    execute_sql(cluster_dir, picodata_path, queries)?;
 
+    for (plugin_name, plugin) in &topology.plugins {
+        info!(
+            "Plugin {plugin_name}:{} has been enabled",
+            plugin.version.as_ref().unwrap()
+        );
+    }
+
+    Ok(())
+}
+
+fn execute_sql(
+    cluster_dir: &Path,
+    picodata_path: &Path,
+    queries: Vec<String>,
+) -> Result<(), anyhow::Error> {
+    let admin_socket = cluster_dir.join("i1").join("admin.sock");
     for query in queries {
         info!("picodata admin: {query}");
 
@@ -268,14 +277,6 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
             bail!("failed to execute picodata query {query}");
         }
     }
-
-    for (plugin_name, plugin) in &topology.plugins {
-        info!(
-            "Plugin {plugin_name}:{} has been enabled",
-            plugin.version.as_ref().unwrap()
-        );
-    }
-
     Ok(())
 }
 
@@ -1096,6 +1097,15 @@ fn run_cluster(params: &Params, plugins_dir: Option<&PathBuf>) -> Result<Vec<Pic
 
     if params.wait_vshard_discovery {
         readiness::wait_vshard_discovery(&picodata_processes, params)?;
+    }
+
+    if !params.topology.pre_install_sql.is_empty() {
+        info!("Executing pre-install SQL scripts...");
+        let mut queries: Vec<String> = Vec::new();
+        for query in &params.topology.pre_install_sql {
+            queries.push(query.clone());
+        }
+        execute_sql(&cluster_dir, &params.picodata_path, queries)?;
     }
 
     if !params.disable_plugin_install && !params.topology.plugins.is_empty() {
