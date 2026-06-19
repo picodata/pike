@@ -118,6 +118,8 @@ pub struct Topology {
     pub enviroment: BTreeMap<String, String>,
     #[serde(default)]
     pub pre_install_sql: Vec<String>,
+    #[serde(default)]
+    pub post_install_sql: Vec<String>,
 }
 
 impl Topology {
@@ -211,6 +213,13 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
         queries.push(format!(
             r#"ALTER PLUGIN "{plugin_name}" {plugin_version} ENABLE;"#
         ));
+    }
+
+    if !topology.post_install_sql.is_empty() {
+        info!("Executing post-install SQL scripts...");
+        for query in &topology.post_install_sql {
+            queries.push(query.clone());
+        }
     }
 
     let admin_socket = cluster_dir.join("i1").join("admin.sock");
@@ -1490,6 +1499,7 @@ mod tests {
             },
             enviroment: BTreeMap::new(),
             pre_install_sql: vec![],
+            post_install_sql: vec![],
         };
         let cluster_dir = temp_dir_unique("pike_test_cluster");
         let picodata_path = Path::new("picodata");
@@ -1676,6 +1686,36 @@ mod tests {
         assert_eq!(
             topology.pre_install_sql[2].trim(),
             "ALTER SYSTEM SET multiline = 'test';"
+        );
+    }
+
+    #[test]
+    fn test_topology_deserialization_with_post_install_sql() {
+        let toml_str = r#"
+        post_install_sql = [
+            'INSERT INTO "t" VALUES (1);',
+            "INSERT INTO \"t\" VALUES (2);",
+            '''
+            INSERT INTO "t" VALUES (3);
+            '''
+        ]
+        [tier.default]
+        replicasets = 1
+        replication_factor = 1
+        "#;
+        let topology: Topology = toml::from_str(toml_str).unwrap();
+        assert_eq!(topology.post_install_sql.len(), 3);
+        assert_eq!(
+            topology.post_install_sql[0].trim(),
+            "INSERT INTO \"t\" VALUES (1);"
+        );
+        assert_eq!(
+            topology.post_install_sql[1].trim(),
+            "INSERT INTO \"t\" VALUES (2);"
+        );
+        assert_eq!(
+            topology.post_install_sql[2].trim(),
+            "INSERT INTO \"t\" VALUES (3);"
         );
     }
 }
