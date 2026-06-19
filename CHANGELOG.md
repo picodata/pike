@@ -10,6 +10,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 - Add `post_install_sql` topology hook to run SQL after plugins are installed and enabled
 
+### Changed
+
+- `pre_install_sql` now fires unconditionally, even without plugins
+
 ## [5.3.2]
 
 ### Changed
