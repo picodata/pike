@@ -14,7 +14,7 @@ use pike::cluster::Tier;
 use pike::cluster::Topology;
 
 #[test]
-fn test_pre_install_sql_execution() {
+fn test_post_install_sql_execution() {
     init_plugin(PLUGIN_NAME);
 
     let plugin_path = Path::new(PLUGIN_DIR);
@@ -30,16 +30,14 @@ fn test_pre_install_sql_execution() {
     let mut plugins = BTreeMap::new();
     plugins.insert(PLUGIN_NAME.to_string(), Plugin::default());
 
+    // 'using ldap' to avoid false positives by security scanners on
+    // "embedded password in the code"
     let topology = Topology {
         tiers,
         plugins,
         enviroment: BTreeMap::new(),
-        pre_install_sql: vec![
-            r#"CREATE TABLE "pre_install_check" ("id" INTEGER PRIMARY KEY, "val" TEXT);"#
-                .to_string(),
-            r#"INSERT INTO "pre_install_check" VALUES (1, 'success');"#.to_string(),
-        ],
-        post_install_sql: vec![],
+        pre_install_sql: vec![],
+        post_install_sql: vec![r#"CREATE USER "post_install_user" USING ldap;"#.to_string()],
     };
 
     let params = RunParamsBuilder::default()
@@ -56,11 +54,11 @@ fn test_pre_install_sql_execution() {
 
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
         let result = std::panic::catch_unwind(|| {
-            get_picodata_table(plugin_path, Path::new("tmp"), "\"pre_install_check\"")
+            get_picodata_table(plugin_path, Path::new("tmp"), "_pico_user")
         });
 
         if let Ok(output) = result {
-            if output.contains("success") {
+            if output.contains("post_install_user") {
                 check_passed = true;
                 break;
             }
@@ -79,6 +77,6 @@ fn test_pre_install_sql_execution() {
 
     assert!(
         check_passed,
-        "Pre-install SQL scripts were not executed or data is missing"
+        "Post-install SQL scripts were not executed or user is missing"
     );
 }

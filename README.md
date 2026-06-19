@@ -73,6 +73,10 @@ pre_install_sql = [
     'ALTER SYSTEM SET raft_wal_count_max = 10000;'
 ]
 
+post_install_sql = [
+    '''GRANT some_role to my_user;'''
+]
+
 [tier.default]
 replicasets = 2
 replication_factor = 2
@@ -127,6 +131,14 @@ pre_install_sql = [
     'ALTER SYSTEM SET raft_wal_count_max = 10000;',
     '''CREATE USER "my_user" WITH PASSWORD 'secret';''',
     '''CREATE TABLE "init_table" ("id" INT PRIMARY KEY, "val" TEXT) DISTRIBUTED GLOBALLY;'''
+]
+
+# SQL-скрипты, которые будут выполнены после установки и включения плагинов.
+# Полезно для наполнения данными таблиц, созданных миграциями плагинов,
+# или выдачи ролей, созданных миграциями, пользователям, созданным на этапе pre_install_sql
+# Выполняются только если установка и включение всех плагинов прошли успешно.
+post_install_sql = [
+    '''GRANT some_role to my_user;'''
 ]
 
 # описание количества репликасетов и фактора репликации тира
