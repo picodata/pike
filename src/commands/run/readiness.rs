@@ -38,7 +38,7 @@ pub(super) fn wait_instances_ready(instances: &[PicodataInstance]) -> Result<()>
         let ready_count = instances
             .iter()
             .map(api::is_instance_ready)
-            .collect::<Result<Vec<_>>>()?
+            .collect::<Vec<_>>()
             .into_iter()
             .filter(|&ready| ready)
             .count();

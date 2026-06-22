@@ -2,6 +2,7 @@
 
 use crate::commands::run::PicodataInstance;
 use anyhow::{bail, Result};
+use log::debug;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -127,11 +128,16 @@ fn check_instance_probe(
     http_client: &ureq::Agent,
     instance: &PicodataInstance,
     probe: &Probe,
-) -> Result<bool> {
+) -> bool {
     let url = build_probe_url(instance, probe);
-    let response = http_client.get(url).call()?;
 
-    Ok(response.status().is_success())
+    match http_client.get(&url).call() {
+        Ok(response) => response.status().is_success(),
+        Err(err) => {
+            debug!("HTTP GET to `{url}` returned an error: {err}");
+            false
+        }
+    }
 }
 
 /// Authenticates against `/api/v1/session` and returns JWT tokens.
@@ -171,10 +177,10 @@ pub fn get_health_status(instance: &PicodataInstance) -> Result<HealthStatus> {
 ///
 /// Returns "true" if both returned `HTTP_OK`.
 ///
-pub fn is_instance_ready(instance: &PicodataInstance) -> Result<bool> {
+#[must_use]
+pub fn is_instance_ready(instance: &PicodataInstance) -> bool {
     let http_client = build_client();
     let check_probe = |p| check_instance_probe(&http_client, instance, p);
-    let is_ready = check_probe(&Probe::Startup)? && check_probe(&Probe::Readiness)?;
 
-    Ok(is_ready)
+    check_probe(&Probe::Startup) && check_probe(&Probe::Readiness)
 }

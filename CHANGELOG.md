@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Fixed
+
+- Make the HTTP probe check infallible. It now returns `false` unless the HTTP status code is 200. [#365](https://github.com/picodata/pike/issues/365)
+
 ## [5.3.2]
 
 ### Changed
