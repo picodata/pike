@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- Add `post_install_sql` topology hook to run SQL after plugins are installed and enabled
+
+### Changed
+
+- `pre_install_sql` now fires unconditionally, even without plugins
+
 ### Fixed
 
 - Make the HTTP probe check infallible. It now returns `false` unless the HTTP status code is 200. [#365](https://github.com/picodata/pike/issues/365)

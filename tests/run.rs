@@ -1191,6 +1191,7 @@ fn run_with_env_variables() {
         plugins,
         tiers,
         pre_install_sql: vec![],
+        post_install_sql: vec![],
     };
     let params = RunParamsBuilder::default()
         .topology(topology)
