@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [5.4.0]
+
 ### Added
 
 - Add `post_install_sql` topology hook to run SQL after plugins are installed and enabled
