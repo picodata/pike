@@ -124,7 +124,7 @@ enum Command {
         config_path: PathBuf,
         /// Name of the instance to run. If not specified, this command
         /// will run all instances in the cluster.
-        #[arg(long, value_name = "INSTANCE_NAME", default_value = None)]
+        #[arg(short = 'i', long, value_name = "INSTANCE_NAME", default_value = None)]
         instance_name: Option<String>,
         /// Keep `WebUI` authentication enabled (opt-in). By default, Pike disables `WebUI` auth
         /// for local development via `ALTER SYSTEM SET jwt_secret = ''`.
@@ -156,7 +156,7 @@ enum Command {
         plugin_path: PathBuf,
         /// Name of the instance to stop. If not specified, this command
         /// will stop all instances in the cluster.
-        #[arg(long, value_name = "INSTANCE_NAME", default_value = None)]
+        #[arg(short = 'i', long, value_name = "INSTANCE_NAME", default_value = None)]
         instance_name: Option<String>,
         /// Signal used to stop the cluster instances.
         #[arg(
