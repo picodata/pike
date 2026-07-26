@@ -19,6 +19,15 @@ use toml_edit::{DocumentMut, Item, Value};
 mod commands;
 mod healthcheck;
 
+// Only `cargo_manifest` is needed by the binary target (via `commands::config::apply`
+// and `commands::plugin::pack`, both of which are compiled here and into the `pike`
+// library crate). The rest of `src/helpers` (e.g. `build`) is library-only public API,
+// so it is deliberately not pulled in here to avoid dead-code warnings on the binary.
+mod helpers {
+    #[path = "cargo_manifest.rs"]
+    pub(crate) mod cargo_manifest;
+}
+
 const CK_CHECK_PARRENT_INTERVAL_SEC: u64 = 3;
 
 // Translation of work Pike can also mean Щука.
