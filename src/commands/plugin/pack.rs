@@ -1,25 +1,14 @@
 use crate::commands::lib::{cargo_build, BuildType, LIB_EXT};
+use crate::helpers::cargo_manifest::{read_package_info, read_toml_document};
 use anyhow::{anyhow, bail, Context, Result};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use log::{debug, info, warn};
-use serde::Deserialize;
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 use tar::Builder;
 use toml_edit::DocumentMut;
-
-#[derive(Deserialize)]
-struct PackageInfo {
-    name: String,
-    version: String,
-}
-
-#[derive(Deserialize)]
-struct CargoManifest {
-    package: PackageInfo,
-}
 
 /// Validate that pre-built plugin shipping directory contains required files
 /// Required: manifest.yaml and `lib{normalized_package_name}.{LIB_EXT}`
@@ -96,12 +85,7 @@ pub fn cmd(
     };
 
     let cargo_toml_path = root_dir.join("Cargo.toml");
-    let cargo_toml_content = fs::read_to_string(&cargo_toml_path)
-        .with_context(|| format!("Failed to read Cargo.toml in {}", cargo_toml_path.display()))?;
-
-    let parsed_toml: DocumentMut = cargo_toml_content
-        .parse()
-        .context("Failed to parse Cargo.toml")?;
+    let parsed_toml: DocumentMut = read_toml_document(&cargo_toml_path)?;
 
     if let Some(workspace) = parsed_toml.get("workspace") {
         if archive_name.is_some() {
@@ -120,7 +104,7 @@ pub fn cmd(
                 let member_path = root_dir.join(member_str);
                 if member_path.join("manifest.yaml.template").exists() {
                     info!("Packing workspace member plugin: {}", member_path.display());
-                    create_plugin_archive(&build_root, &member_path, None)?;
+                    create_plugin_archive(&build_root, &member_path, &root_dir, None)?;
                     packaged_any = true;
                 } else {
                     debug!(
@@ -138,34 +122,28 @@ pub fn cmd(
         return Ok(());
     }
 
-    create_plugin_archive(&build_root, &root_dir, archive_name)
+    create_plugin_archive(&build_root, &root_dir, &root_dir, archive_name)
 }
 
 fn create_plugin_archive(
     build_dir: &Path,
     plugin_dir: &Path,
+    workspace_root: &Path,
     archive_name: Option<&PathBuf>,
 ) -> Result<()> {
-    let plugin_version = get_latest_plugin_version(plugin_dir)?;
-    let cargo_manifest: CargoManifest = toml::from_str(
-        &fs::read_to_string(plugin_dir.join("Cargo.toml"))
-            .context("failed to read Cargo.toml for packaging")?,
-    )
-    .context("failed to parse Cargo.toml for packaging")?;
+    let package_info = read_package_info(plugin_dir, workspace_root)
+        .context("failed to resolve package info for packaging")?;
 
-    let package_name = cargo_manifest.package.name;
+    let package_name = package_info.name;
+    let plugin_version = package_info.version;
     let normalized_package_name = package_name.replace('-', "_");
     let plugin_build_dir = build_dir.join(&package_name).join(&plugin_version);
     let root_in_archive = Path::new(&package_name).join(&plugin_version);
 
     validate_plugin_build_tree(&plugin_build_dir, &normalized_package_name)?;
 
-    let compressed_file_path = resolve_archive_path(
-        build_dir,
-        archive_name,
-        &package_name,
-        &cargo_manifest.package.version,
-    )?;
+    let compressed_file_path =
+        resolve_archive_path(build_dir, archive_name, &package_name, &plugin_version)?;
 
     if !plugin_build_dir.exists() {
         bail!(
@@ -445,27 +423,6 @@ fn archive_if_exists(
     }
 
     Ok(())
-}
-
-fn get_latest_plugin_version(plugin_dir: &Path) -> Result<String> {
-    let cargo_toml_path = plugin_dir.join("Cargo.toml");
-    let cargo_toml = fs::read_to_string(&cargo_toml_path)
-        .with_context(|| format!("Failed to read {}", cargo_toml_path.display()))?;
-
-    let parsed: DocumentMut = cargo_toml.parse().context("Failed to parse Cargo.toml")?;
-
-    let version = parsed
-        .get("package")
-        .and_then(|p| p.get("version"))
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| {
-            anyhow!(
-                "Couldn't resolve version in Cargo.toml at {}",
-                cargo_toml_path.display()
-            )
-        })?;
-
-    Ok(version.to_string())
 }
 
 #[cfg(test)]

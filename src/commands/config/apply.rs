@@ -1,7 +1,6 @@
 use anyhow::{bail, Context, Result};
 use derive_builder::Builder;
 use log::info;
-use serde::Deserialize;
 use std::{
     collections::HashMap,
     env, fs,
@@ -10,6 +9,8 @@ use std::{
     process::{self, Command, Stdio},
 };
 use toml_edit::DocumentMut;
+
+use crate::helpers::cargo_manifest::{read_package_info, read_toml_document};
 
 /// Mapping of plugin service names to their properties specified in
 /// [plugin configuration](https://github.com/picodata/pike?tab=readme-ov-file#config-apply).
@@ -147,9 +148,8 @@ fn apply_service_config(
 }
 
 fn apply_plugin_config(params: &Params, current_plugin_path: &str) -> Result<()> {
-    let cur_plugin_dir = env::current_dir()?
-        .join(&params.plugin_path)
-        .join(current_plugin_path);
+    let workspace_root = env::current_dir()?.join(&params.plugin_path);
+    let cur_plugin_dir = workspace_root.join(current_plugin_path);
 
     let admin_socket = params
         .plugin_path
@@ -158,11 +158,8 @@ fn apply_plugin_config(params: &Params, current_plugin_path: &str) -> Result<()>
         .join("i1")
         .join("admin.sock");
 
-    let cargo_manifest: &CargoManifest = &toml::from_str(
-        &fs::read_to_string(cur_plugin_dir.join("Cargo.toml"))
-            .context("failed to read Cargo.toml")?,
-    )
-    .context("failed to parse Cargo.toml")?;
+    let package_info = read_package_info(&cur_plugin_dir, &workspace_root)
+        .context("failed to resolve package info from Cargo.toml")?;
 
     let config: ConfigMap = match &params.config_source {
         ConfigSource::Map(map) => map.clone(),
@@ -171,8 +168,8 @@ fn apply_plugin_config(params: &Params, current_plugin_path: &str) -> Result<()>
 
     for (service_name, service_config) in config {
         apply_service_config(
-            &cargo_manifest.package.name,
-            &cargo_manifest.package.version,
+            &package_info.name,
+            &package_info.version,
             &service_name,
             &service_config,
             &admin_socket,
@@ -184,17 +181,6 @@ fn apply_plugin_config(params: &Params, current_plugin_path: &str) -> Result<()>
     }
 
     Ok(())
-}
-
-#[derive(Debug, Deserialize)]
-struct Package {
-    name: String,
-    version: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CargoManifest {
-    package: Package,
 }
 
 #[derive(Debug, Clone)]
@@ -248,14 +234,7 @@ pub fn cmd(params: &Params) -> Result<()> {
     let root_dir = env::current_dir()?.join(&params.plugin_path);
 
     let cargo_toml_path = root_dir.join("Cargo.toml");
-    let cargo_toml_content = fs::read_to_string(&cargo_toml_path).context(format!(
-        "Failed to read Cargo.toml in {}",
-        &cargo_toml_path.display()
-    ))?;
-
-    let parsed_toml: DocumentMut = cargo_toml_content
-        .parse()
-        .context("Failed to parse Cargo.toml")?;
+    let parsed_toml: DocumentMut = read_toml_document(&cargo_toml_path)?;
 
     if let Some(workspace) = parsed_toml.get("workspace") {
         if let ConfigSource::Path(config_path) = &params.config_source {

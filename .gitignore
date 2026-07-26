@@ -1,9 +1,11 @@
 **/.DS_Store
 /target
 /local
+/tmp
 /tests/tmp/*
 !/tests/tmp/.keep
 /tests/tmp_ext/*
 !/tests/tmp_ext/.keep
 
 .idea/
+.serena
