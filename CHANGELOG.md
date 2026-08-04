@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [5.5.0]
+
 ### Added
 
 - Pike can read workspace.inherited version for plugin now
