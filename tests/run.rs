@@ -4,7 +4,9 @@ use helpers::{
     build_plugin, cleanup_dir, exec_pike, exec_pike_in, get_picodata_table, init_plugin,
     init_plugin_with_args, init_plugin_workspace, run_cluster, wait_cluster_start_completed,
 };
-use helpers::{CmdArguments, TestPluginInitParams, LIB_EXT, PLUGIN_DIR, PLUGIN_NAME, TESTS_DIR};
+use helpers::{
+    Cluster, CmdArguments, TestPluginInitParams, LIB_EXT, PLUGIN_DIR, PLUGIN_NAME, TESTS_DIR,
+};
 use pike::cluster::{run, MigrationContextVar, Plugin, RunParamsBuilder, Service, Tier, Topology};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
@@ -61,7 +63,7 @@ fn test_cluster_setup_debug() {
     let _cluster_handle = run_cluster(
         Duration::from_secs(120),
         TOTAL_INSTANCES,
-        CmdArguments::default(),
+        &CmdArguments::default(),
     )
     .unwrap();
 }
@@ -73,15 +75,11 @@ fn test_cluster_setup_release() {
             .iter()
             .map(|&s| s.into())
             .collect(),
-        stop_args: ["--data-dir", "new_data_dir"]
-            .iter()
-            .map(|&s| s.into())
-            .collect(),
         ..Default::default()
     };
 
     let _cluster_handle =
-        run_cluster(Duration::from_secs(120), TOTAL_INSTANCES, run_params).unwrap();
+        run_cluster(Duration::from_secs(120), TOTAL_INSTANCES, &run_params).unwrap();
 }
 
 // Using as much command line arguments in this test as we can
@@ -107,11 +105,10 @@ fn test_cluster_daemon_and_arguments() {
             .map(|&s| s.into())
             .collect(),
         plugin_args: vec!["--workspace".to_string()],
-        ..Default::default()
     };
 
     let _cluster_handle =
-        run_cluster(Duration::from_secs(120), TOTAL_INSTANCES, run_params).unwrap();
+        run_cluster(Duration::from_secs(120), TOTAL_INSTANCES, &run_params).unwrap();
 
     // Validate each instances's PID
     for entry in fs::read_dir(Path::new(PLUGIN_DIR).join("tmp").join("cluster")).unwrap() {
@@ -173,6 +170,8 @@ fn test_topology_struct_run() {
         .unwrap();
 
     run(params).unwrap();
+    // RAII cleanup: stops the cluster on scope exit, including a panic below.
+    let _cluster = Cluster::manage(plugin_path);
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -187,8 +186,6 @@ fn test_topology_struct_run() {
             break;
         }
     }
-
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
 }
@@ -237,6 +234,10 @@ fn test_multiple_run_attempt_are_idempotent() {
         .build()
         .unwrap();
 
+    // The guard is acquired before the first run; the cluster persists across
+    // idempotent re-runs and is stopped once when the test ends or panics.
+    let _cluster = Cluster::manage(plugin_path);
+
     // Execute pike run twice to ensure sequential runs
     // are idempotent.
     for _ in 0..1 {
@@ -247,8 +248,6 @@ fn test_multiple_run_attempt_are_idempotent() {
             true
         }));
     }
-
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 }
 
 #[test]
@@ -328,6 +327,7 @@ fn test_topology_struct_one_tier() {
         .unwrap();
 
     run(params).unwrap();
+    let _cluster = Cluster::manage(plugin_path);
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -342,8 +342,6 @@ fn test_topology_struct_one_tier() {
             break;
         }
     }
-
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
 }
@@ -375,6 +373,7 @@ fn test_topology_struct_run_no_plugin() {
         .unwrap();
 
     run(params).unwrap();
+    let _cluster = Cluster::manage(plugin_path);
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -388,8 +387,6 @@ fn test_topology_struct_run_no_plugin() {
             break;
         }
     }
-
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
 }
@@ -440,6 +437,8 @@ fn test_picodata_instance_interaction() {
         .unwrap();
 
     let pico_instances = run(params).unwrap();
+    let _cluster = Cluster::manage(plugin_path);
+
     let properties = pico_instances.first().unwrap().properties();
     let data_dir = properties.data_dir.to_str().unwrap();
 
@@ -454,8 +453,6 @@ fn test_picodata_instance_interaction() {
         Path::new(data_dir).join("audit.log").to_str().unwrap(),
         "./tests/tmp/test-plugin/./tmp/cluster/i1/audit.log"
     );
-
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 }
 
 #[test]
@@ -503,6 +500,7 @@ fn test_quickstart_pipeline() {
 
     // Run cluster and check successful plugin installation
     run(params).unwrap();
+    let _cluster = Cluster::manage(&quickstart_path);
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -591,6 +589,7 @@ fn test_workspace_pipeline() {
 
     // Run cluster and check successful plugin installation
     run(params).unwrap();
+    let _cluster = Cluster::manage(&workspace_path);
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -681,6 +680,7 @@ fn test_run_without_plugin_directory() {
         .unwrap();
 
     run(params).unwrap();
+    let _cluster = Cluster::manage(&plugin_dir);
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -697,8 +697,6 @@ fn test_run_without_plugin_directory() {
         thread::sleep(Duration::from_secs(1));
     }
 
-    exec_pike(["stop", "--plugin-path", "test_run_without_plugin_directory"]);
-
     assert!(cluster_started);
 }
 
@@ -713,7 +711,7 @@ fn test_run_with_several_tiers() {
         ..Default::default()
     };
 
-    let _cluster_handle = run_cluster(Duration::from_secs(120), 6, run_params).unwrap();
+    let _cluster_handle = run_cluster(Duration::from_secs(120), 6, &run_params).unwrap();
 
     let start = Instant::now();
     let mut cluster_started = false;
@@ -841,14 +839,13 @@ fn run_with_external_plugin_directory() {
         .unwrap();
 
     run(params).unwrap();
+    let _cluster = Cluster::manage(our_plugin_path);
 
     let cluster_started = wait_cluster_start_completed(our_plugin_path, |state| {
         assert_eq!(state.pico_instance.matches("Online").count(), 8);
         assert_eq!(state.pico_plugin.matches("true").count(), 2);
         true
     });
-
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
 }
@@ -892,6 +889,7 @@ fn run_with_external_plugin_archive() {
         .unwrap();
 
     run(params).unwrap();
+    let _cluster = Cluster::manage(Path::new("./tests/tmp/test-plugin"));
 
     let cluster_started =
         wait_cluster_start_completed(Path::new("./tests/tmp/test-plugin"), |state| {
@@ -899,8 +897,6 @@ fn run_with_external_plugin_archive() {
             assert_eq!(state.pico_plugin.matches("true").count(), 2);
             true
         });
-
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
 }
@@ -939,14 +935,13 @@ fn run_with_external_plugin_project() {
         .unwrap();
 
     run(params).unwrap();
+    let _cluster = Cluster::manage(our_plugin_path);
 
     let cluster_started = wait_cluster_start_completed(our_plugin_path, |state| {
         assert_eq!(state.pico_instance.matches("Online").count(), 8);
         assert_eq!(state.pico_plugin.matches("true").count(), 2);
         true
     });
-
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
 }
@@ -987,14 +982,13 @@ fn run_with_external_plugin_workspace() {
     let params = make_ext_run_params(plugin_path, plugins).build().unwrap();
 
     run(params).unwrap();
+    let _cluster = Cluster::manage(plugin_path);
 
     let cluster_started = wait_cluster_start_completed(plugin_path, |state| {
         assert_eq!(state.pico_instance.matches("Online").count(), 8);
         assert_eq!(state.pico_plugin.matches("true").count(), 3);
         true
     });
-
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
     assert!(cluster_started);
 }
@@ -1008,7 +1002,7 @@ fn run_specific_instance() {
     let _cluster_handle = run_cluster(
         Duration::from_secs(120),
         TOTAL_INSTANCES,
-        CmdArguments::default(),
+        &CmdArguments::default(),
     )
     .unwrap();
 
@@ -1090,8 +1084,6 @@ fn run_specific_instance() {
         true
     });
 
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
-
     assert!(cluster_started);
 }
 
@@ -1105,7 +1097,7 @@ fn revive_terminated_instances() {
     let _cluster_handle = run_cluster(
         Duration::from_secs(120),
         TOTAL_INSTANCES,
-        CmdArguments::default(),
+        &CmdArguments::default(),
     )
     .expect("Failed to run the cluster");
 
@@ -1138,7 +1130,6 @@ fn revive_terminated_instances() {
     });
 
     assert!(cluster_started);
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 }
 
 #[test]
@@ -1201,6 +1192,8 @@ fn run_with_env_variables() {
         .unwrap();
 
     let pico_instances = run(params).unwrap();
+    let _cluster = Cluster::manage(plugin_path);
+
     let properties = pico_instances.first().unwrap().properties();
 
     assert_eq!(properties.bin_port, &3301);
@@ -1213,8 +1206,6 @@ fn run_with_env_variables() {
         properties.data_dir.to_str().unwrap(),
         "./tests/tmp/test-plugin/./tmp/cluster/i1"
     );
-
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 }
 
 #[test]
@@ -1223,7 +1214,7 @@ fn run_with_wait_vshard_discovery() {
     let _cluster_handle = run_cluster(
         Duration::from_secs(360),
         TOTAL_INSTANCES,
-        CmdArguments {
+        &CmdArguments {
             run_args: vec![
                 "--wait-vshard-discovery".to_string(),
                 "--wait-vshard-discovery-timeout".to_string(),
