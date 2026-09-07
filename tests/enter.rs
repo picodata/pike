@@ -13,7 +13,7 @@ fn test_enter_instance() {
     let _cluster_handle = run_cluster(
         Duration::from_secs(120),
         TOTAL_INSTANCES,
-        CmdArguments::default(),
+        &CmdArguments::default(),
     )
     .unwrap();
 

@@ -48,7 +48,7 @@ fn test_pike_stop_default() {
     let _cluster_handle = run_cluster(
         CLUSTER_START_TIMEOUT,
         TOTAL_INSTANCES,
-        CmdArguments::default(),
+        &CmdArguments::default(),
     )
     .unwrap();
 
@@ -64,7 +64,7 @@ fn test_pike_stop_daemon_cluster() {
         run_args: ["--daemon"].iter().map(|&s| s.into()).collect(),
         ..Default::default()
     };
-    let _cluster_handle = run_cluster(CLUSTER_START_TIMEOUT, TOTAL_INSTANCES, cmd_args)
+    let _cluster_handle = run_cluster(CLUSTER_START_TIMEOUT, TOTAL_INSTANCES, &cmd_args)
         .expect("Failed to start cluster");
 
     // Stop picodata cluster
@@ -78,7 +78,7 @@ fn test_pike_stop_sigterm_with_timeout() {
     let _cluster_handle = run_cluster(
         CLUSTER_START_TIMEOUT,
         TOTAL_INSTANCES,
-        CmdArguments::default(),
+        &CmdArguments::default(),
     )
     .expect("Failed to start cluster");
 
@@ -104,7 +104,7 @@ fn test_pike_stop_of_specific_instance() {
     let _cluster_handle = run_cluster(
         Duration::from_secs(120),
         TOTAL_INSTANCES,
-        CmdArguments::default(),
+        &CmdArguments::default(),
     )
     .unwrap();
 
