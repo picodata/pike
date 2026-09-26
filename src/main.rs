@@ -10,6 +10,7 @@ use nix::{
 };
 use std::{
     env, fs,
+    net::Ipv4Addr,
     path::{Path, PathBuf},
     process, thread,
     time::Duration,
@@ -98,6 +99,10 @@ enum Command {
         /// Disable the automatic installation of plugins
         #[arg(long)]
         disable_install_plugins: bool,
+        /// Loopback address for every instance's iproto, HTTP and pgproto listeners.
+        /// By default iproto and pgproto listen on 127.0.0.1 and HTTP on 0.0.0.0.
+        #[arg(long, value_name = "HOST", value_parser = parse_loopback)]
+        host: Option<Ipv4Addr>,
         /// Base iproto port for picodata instances
         #[arg(long, default_value = "3000")]
         base_bin_port: u16,
@@ -400,6 +405,14 @@ fn modify_workspace(plugin_name: &str, plugin_path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn parse_loopback(s: &str) -> Result<Ipv4Addr> {
+    let ip: Ipv4Addr = s.parse()?;
+    if !ip.is_loopback() {
+        bail!("{ip} is not a loopback address (127.0.0.0/8)");
+    }
+    Ok(ip)
+}
+
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<()> {
     colog::init();
@@ -410,6 +423,7 @@ fn main() -> Result<()> {
             topology,
             data_dir,
             disable_install_plugins: disable_plugin_install,
+            host,
             base_bin_port,
             base_http_port,
             picodata_path,
@@ -439,6 +453,7 @@ fn main() -> Result<()> {
                 .topology(topology)
                 .data_dir(data_dir)
                 .disable_plugin_install(disable_plugin_install)
+                .host(host)
                 .base_bin_port(base_bin_port)
                 .base_http_port(base_http_port)
                 .picodata_path(picodata_path)
@@ -587,4 +602,20 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_loopback;
+
+    #[test]
+    fn host_must_be_a_loopback_address() {
+        assert_eq!(
+            parse_loopback("127.1.2.3").unwrap().octets(),
+            [127, 1, 2, 3]
+        );
+        assert!(parse_loopback("0.0.0.0").is_err());
+        assert!(parse_loopback("192.168.0.1").is_err());
+        assert!(parse_loopback("localhost").is_err());
+    }
 }

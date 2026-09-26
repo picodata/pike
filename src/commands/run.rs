@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
-use std::net::SocketAddrV4;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -338,6 +338,7 @@ pub struct PicodataInstance {
     pg_port: u16,
     bin_port: u16,
     http_port: u16,
+    http_addr: SocketAddrV4,
 }
 
 impl PicodataInstance {
@@ -386,15 +387,22 @@ impl PicodataInstance {
         let mut child = Command::new(&run_params.picodata_path);
         child.envs(&env_vars);
 
+        // Without `--host`, iproto and pgproto listen on 127.0.0.1 and HTTP on every
+        // interface, so the Web UI is reachable from other machines.
+        let host = run_params.host.unwrap_or(Ipv4Addr::LOCALHOST);
+        let http_host = run_params.host.unwrap_or(Ipv4Addr::UNSPECIFIED);
         let first_instance_bin_ipv4 =
             get_ipv4_from_template_var(&first_env_vars, "PICODATA_IPROTO_LISTEN")
-                .unwrap_or(format!("127.0.0.1:{}", run_params.base_bin_port + 1).parse()?);
-        let bin_ipv4 = get_ipv4_from_template_var(&env_vars, "PICODATA_IPROTO_LISTEN")
-            .unwrap_or(format!("127.0.0.1:{}", run_params.base_bin_port + instance_id).parse()?);
-        let http_ipv4 = get_ipv4_from_template_var(&env_vars, "PICODATA_HTTP_LISTEN")
-            .unwrap_or(format!("0.0.0.0:{}", run_params.base_http_port + instance_id).parse()?);
-        let pg_ipv4 = get_ipv4_from_template_var(&env_vars, "PICODATA_PG_LISTEN")
-            .unwrap_or(format!("127.0.0.1:{}", run_params.base_pg_port + instance_id).parse()?);
+                .unwrap_or(SocketAddrV4::new(host, run_params.base_bin_port + 1));
+        let bin_ipv4 = get_ipv4_from_template_var(&env_vars, "PICODATA_IPROTO_LISTEN").unwrap_or(
+            SocketAddrV4::new(host, run_params.base_bin_port + instance_id),
+        );
+        let http_ipv4 = get_ipv4_from_template_var(&env_vars, "PICODATA_HTTP_LISTEN").unwrap_or(
+            SocketAddrV4::new(http_host, run_params.base_http_port + instance_id),
+        );
+        let pg_ipv4 = get_ipv4_from_template_var(&env_vars, "PICODATA_PG_LISTEN").unwrap_or(
+            SocketAddrV4::new(host, run_params.base_pg_port + instance_id),
+        );
 
         child.args([
             "run",
@@ -494,6 +502,7 @@ impl PicodataInstance {
             pg_port: pg_ipv4.port(),
             bin_port: bin_ipv4.port(),
             http_port: http_ipv4.port(),
+            http_addr: http_ipv4,
             instance_id,
         };
 
@@ -507,8 +516,14 @@ impl PicodataInstance {
         Ok(pico_instance)
     }
 
-    pub(crate) fn http_port(&self) -> u16 {
-        self.http_port
+    /// Where pike reaches the instance's HTTP server: the address it listens on, or
+    /// 127.0.0.1 when it listens on every interface.
+    pub(crate) fn http_addr(&self) -> SocketAddrV4 {
+        if self.http_addr.ip().is_unspecified() {
+            SocketAddrV4::new(Ipv4Addr::LOCALHOST, self.http_addr.port())
+        } else {
+            self.http_addr
+        }
     }
 
     pub(crate) fn socket_client<'a>(&self, picodata_path: &'a PathBuf) -> InstanceSocketClient<'a> {
@@ -907,6 +922,10 @@ pub struct Params {
     data_dir: PathBuf,
     #[builder(default = "false")]
     disable_plugin_install: bool,
+    /// Loopback address every instance listens on, instead of 127.0.0.1 for iproto and
+    /// pgproto and 0.0.0.0 for HTTP. `PICODATA_*_LISTEN` in the topology still wins.
+    #[builder(default)]
+    host: Option<Ipv4Addr>,
     #[builder(default = "3000")]
     base_bin_port: u16,
     #[builder(default = "8000")]
@@ -1246,9 +1265,9 @@ fn print_webui_url(pico_instances: &[PicodataInstance]) {
     let leader_instance = pico_instances
         .iter()
         .find(|i| !leader_name.is_empty() && i.properties().instance_name == leader_name);
-    let port = leader_instance.unwrap_or(first).http_port();
+    let addr = leader_instance.unwrap_or(first).http_addr();
 
-    let url = format!("http://localhost:{port}").bold();
+    let url = format!("http://{addr}").bold();
     println!("\nCluster is running. To open Web UI, visit:\n  {url}\n");
 }
 

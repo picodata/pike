@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- `pike run --host <IPV4>` puts every instance's iproto, HTTP and pgproto listeners on one loopback address, so clusters on different addresses can use the same ports
+
+### Fixed
+
+- Readiness and health checks use the address the instance's HTTP server listens on instead of `127.0.0.1`, so `PICODATA_HTTP_LISTEN` on another loopback address no longer times out
+
 ## [5.5.0]
 
 ### Added
