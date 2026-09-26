@@ -9,6 +9,7 @@ use pike::cluster::{run, MigrationContextVar, Plugin, RunParamsBuilder, Service,
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::Command;
 use std::{
@@ -454,6 +455,49 @@ fn test_picodata_instance_interaction() {
         Path::new(data_dir).join("audit.log").to_str().unwrap(),
         "./tests/tmp/test-plugin/./tmp/cluster/i1/audit.log"
     );
+
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+}
+
+#[test]
+fn test_cluster_on_another_loopback_address() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+    init_plugin(PLUGIN_NAME);
+
+    // Another cluster holds 127.0.0.1 on the same ports. Its HTTP port accepts connections
+    // and never answers, so a probe sent there instead of to 127.0.0.2 never succeeds.
+    let _held: Vec<TcpListener> = [3001, 5433, 8001]
+        .into_iter()
+        .map(|port| TcpListener::bind(("127.0.0.1", port)).unwrap())
+        .collect();
+
+    let host = Ipv4Addr::new(127, 0, 0, 2);
+    let topology = Topology {
+        tiers: BTreeMap::from([(
+            "default".to_string(),
+            Tier {
+                replicasets: 1,
+                replication_factor: 1,
+            },
+        )]),
+        ..Default::default()
+    };
+    let params = RunParamsBuilder::default()
+        .topology(topology)
+        .daemon(true)
+        .disable_plugin_install(true)
+        .plugin_path(plugin_path.into())
+        .host(Some(host))
+        .build()
+        .unwrap();
+
+    let pico_instances = run(params).unwrap();
+    let properties = pico_instances.first().unwrap().properties();
+    assert_eq!(properties.bin_port, &3001);
+    assert_eq!(properties.http_port, &8001);
+    for port in [3001, 5433, 8001] {
+        TcpStream::connect(SocketAddrV4::new(host, port)).unwrap();
+    }
 
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 }

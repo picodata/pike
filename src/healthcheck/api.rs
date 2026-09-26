@@ -119,7 +119,7 @@ fn build_client() -> ureq::Agent {
 
 /// Assembles URL of instance probe.
 fn build_probe_url(i: &PicodataInstance, probe: &Probe) -> String {
-    format!("http://127.0.0.1:{}/{}", i.http_port(), probe.path())
+    format!("http://{}/{}", i.http_addr(), probe.path())
 }
 
 /// Performs the specified probe on the instance via HTTP.
@@ -157,10 +157,7 @@ pub fn get_session_token(http_port: u16, username: &str, password: &str) -> Resu
 /// attaches the resulting Bearer token. When `false`, the request is sent
 /// without authentication (assumes JWT auth is disabled).
 pub fn get_health_status(instance: &PicodataInstance) -> Result<HealthStatus> {
-    let url = format!(
-        "http://127.0.0.1:{}/{HEALTH_STATUS_ENDPOINT}",
-        instance.http_port()
-    );
+    let url = format!("http://{}/{HEALTH_STATUS_ENDPOINT}", instance.http_addr());
     let mut resp = build_client().get(&url).call()?;
     if !resp.status().is_success() {
         bail!(
