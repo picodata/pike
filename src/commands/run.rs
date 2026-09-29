@@ -52,7 +52,7 @@ const BAFFLED_WHALE: &str = r"
                                  `-.,'
  ";
 
-const TIMEOUT_WAITING_FOR_INSTANCE_READINESS: Duration = Duration::from_secs(10);
+const TIMEOUT_WAITING_FOR_INSTANCE_ONLINE: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Tier {
@@ -342,15 +342,28 @@ pub struct PicodataInstance {
 }
 
 impl PicodataInstance {
+    /// Start the picodata process and wait for it to become Online.
+    fn spawn_and_wait_online(
+        instance_id: u16,
+        plugins_dir: Option<&PathBuf>,
+        tier: &str,
+        run_params: &Params,
+    ) -> Result<Self> {
+        let mut pico_instance = Self::spawn(instance_id, plugins_dir, tier, run_params)?;
+        pico_instance.wait_online(&run_params.picodata_path)?;
+        Ok(pico_instance)
+    }
+
+    /// Start the picodata process and return without waiting for it to join the cluster.
     #[allow(clippy::too_many_lines)]
-    fn new(
+    fn spawn(
         instance_id: u16,
         plugins_dir: Option<&PathBuf>,
         tier: &str,
         run_params: &Params,
     ) -> Result<Self> {
         // Properties
-        let mut instance_name = Self::make_name(instance_id);
+        let instance_name = Self::make_name(instance_id);
         let tiers_config = get_merged_cluster_tier_config(
             &run_params.plugin_path,
             &run_params.config_path,
@@ -460,11 +473,40 @@ impl PicodataInstance {
             .spawn()
             .context(format!("failed to start picodata instance: {instance_id}"))?;
 
+        let pico_instance = PicodataInstance {
+            instance_name,
+            tier: tier.to_string(),
+            log_threads: None,
+            child,
+            daemon: run_params.daemon,
+            disable_colors: run_params.disable_colors,
+            data_dir: instance_data_dir,
+            log_file_path,
+            pg_port: pg_ipv4.port(),
+            bin_port: bin_ipv4.port(),
+            http_port: http_ipv4.port(),
+            http_addr: http_ipv4,
+            instance_id,
+        };
+
+        // Save pid of picodata process to kill it after
+        pico_instance.make_pid_file()?;
+
+        Ok(pico_instance)
+    }
+
+    /// Wait for a started instance to become Online, learn its name, and start capturing
+    /// its output.
+    fn wait_online(&mut self, picodata_path: &PathBuf) -> Result<()> {
+        let cluster_dir = self
+            .data_dir
+            .parent()
+            .expect("instance dir is in the cluster dir");
         let start = Instant::now();
-        while Instant::now().duration_since(start) < TIMEOUT_WAITING_FOR_INSTANCE_READINESS {
-            thread::sleep(Duration::from_millis(100));
-            let socket_client =
-                InstanceSocketClient::new(&instance_data_dir, &run_params.picodata_path);
+        let interval = Duration::from_millis(100);
+        while Instant::now().duration_since(start) < TIMEOUT_WAITING_FOR_INSTANCE_ONLINE {
+            thread::sleep(interval);
+            let socket_client = self.socket_client(picodata_path);
             let Ok(new_instance_name) = socket_client
                 .instance_name()
                 .inspect_err(|err| log::debug!("failed to get name of the instance: {err}"))
@@ -483,37 +525,18 @@ impl PicodataInstance {
             // create symlink to real instance data dir
             let symlink_name = cluster_dir.join(&new_instance_name);
             let _ = fs::remove_file(&symlink_name);
-            symlink(&instance_name, symlink_name)
+            symlink(Self::make_name(self.instance_id), symlink_name)
                 .context("failed create symlink to instance dir")?;
 
-            instance_name = new_instance_name;
+            self.instance_name = new_instance_name;
             break;
         }
 
-        let mut pico_instance = PicodataInstance {
-            instance_name,
-            tier: tier.to_string(),
-            log_threads: None,
-            child,
-            daemon: run_params.daemon,
-            disable_colors: run_params.disable_colors,
-            data_dir: instance_data_dir,
-            log_file_path,
-            pg_port: pg_ipv4.port(),
-            bin_port: bin_ipv4.port(),
-            http_port: http_ipv4.port(),
-            http_addr: http_ipv4,
-            instance_id,
-        };
-
-        if !run_params.daemon {
-            pico_instance.capture_logs()?;
+        if !self.daemon {
+            self.capture_logs()?;
         }
 
-        // Save pid of picodata process to kill it after
-        pico_instance.make_pid_file()?;
-
-        Ok(pico_instance)
+        Ok(())
     }
 
     /// Where pike reaches the instance's HTTP server: the address it listens on, or
@@ -651,6 +674,10 @@ impl PicodataInstance {
         let mut file = File::create(pid_location)?;
         writeln!(file, "{pid}")?;
         Ok(())
+    }
+
+    fn name(&self) -> &str {
+        &self.instance_name
     }
 
     fn make_name(id: u16) -> String {
@@ -1091,8 +1118,12 @@ fn run_single_instance(
         }
     }
 
-    let pico_instance =
-        PicodataInstance::new(instance_id, plugins_dir, instance_tier_name, params)?;
+    let pico_instance = PicodataInstance::spawn_and_wait_online(
+        instance_id,
+        plugins_dir,
+        instance_tier_name,
+        params,
+    )?;
 
     log_instance_started(instance_name);
 
@@ -1181,11 +1212,16 @@ fn start_instances_in_tiers(
                 continue;
             }
 
-            let pico_instance = PicodataInstance::new(instance_id, plugins_dir, tier_name, params)?;
+            let pico_instance =
+                PicodataInstance::spawn(instance_id, plugins_dir, tier_name, params)?;
             picodata_processes.push(pico_instance);
-
-            log_instance_started(instance_name);
         }
+    }
+
+    // Every instance is started before any is waited for.
+    for pico_instance in &mut picodata_processes {
+        pico_instance.wait_online(&params.picodata_path)?;
+        log_instance_started(pico_instance.name());
     }
 
     Ok(picodata_processes)
