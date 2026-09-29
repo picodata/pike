@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [5.6.0]
+
 ### Added
 
 - `pike run --host <IPV4>` puts every instance's iproto, HTTP and pgproto listeners on one loopback address, so clusters on different addresses can use the same ports
