@@ -416,8 +416,9 @@ fn parse_loopback(s: &str) -> Result<Ipv4Addr> {
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<()> {
     colog::init();
-    log::info!("pike {}", env!("CARGO_PKG_VERSION"));
     let cli = Cli::parse_from(env::args().skip(1));
+
+    log::info!("pike {}", env!("CARGO_PKG_VERSION"));
 
     match cli.command {
         Command::Run {
