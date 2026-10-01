@@ -6,13 +6,15 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
-### Changed
-
-- `pike run` starts every instance of the cluster before waiting for any of them to become Online
+## [5.7.0]
 
 ### Added
 
 - Log pike version at info level as the first thing on every run
+
+### Changed
+
+- `pike run` starts every instance of the cluster before waiting for any of them to become Online
 
 ## [5.6.0]
 
