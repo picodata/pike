@@ -186,7 +186,102 @@ fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
 ///
 /// If the process does not terminate within the specified timeout,
 /// SIGKILL is sent as a fallback.
+///
+/// On Linux the wait is on a pidfd, which turns readable only once every
+/// thread of the process has exited: that is when its files, and the locks
+/// on them, are released. The state in `/proc/<pid>/stat` is the main
+/// thread's, which can be a zombie while other threads still hold the
+/// instance's data directory, so a `pike run` right after the stop would
+/// fail to lock it. A kernel without pidfds (before 5.3) gets the polling
+/// below.
+#[cfg(target_os = "linux")]
 fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::Result<()> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+
+    // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid.as_raw(), 0) };
+    if fd < 0 {
+        return match Errno::last() {
+            Errno::ESRCH => Ok(()),
+            Errno::ENOSYS => send_signal_and_poll(pid, signal, timeout),
+            err => bail!(err),
+        };
+    }
+    let fd = libc::c_int::try_from(fd).context("pidfd_open returned no descriptor")?;
+    // SAFETY: the descriptor was just opened and nothing else owns it.
+    let pidfd = unsafe { OwnedFd::from_raw_fd(fd) };
+
+    pidfd_send_signal(&pidfd, signal)?;
+    if pidfd_exited(&pidfd, timeout)? {
+        return Ok(());
+    }
+
+    warn!("Process {pid} did not terminate within {timeout:?}. Sending SIGKILL...");
+    pidfd_send_signal(&pidfd, Signal::SIGKILL)?;
+    if !pidfd_exited(&pidfd, timeout)? {
+        bail!("process {pid} did not exit within {timeout:?} of SIGKILL");
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::Result<()> {
+    send_signal_and_poll(pid, signal, timeout)
+}
+
+/// Signal the process the pidfd names, and no later one with its pid.
+#[cfg(target_os = "linux")]
+fn pidfd_send_signal(pidfd: &std::os::fd::OwnedFd, signal: Signal) -> anyhow::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    // SAFETY: a valid pidfd, a signal number, no siginfo and no flags.
+    let rc = unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            pidfd.as_raw_fd(),
+            signal as libc::c_int,
+            std::ptr::null::<libc::siginfo_t>(),
+            0,
+        )
+    };
+    // ESRCH: the process has exited already, which is what the caller waits for.
+    if rc < 0 && Errno::last() != Errno::ESRCH {
+        bail!(Errno::last());
+    }
+    Ok(())
+}
+
+/// Whether the process behind the pidfd exits, all its threads, within `timeout`.
+#[cfg(target_os = "linux")]
+fn pidfd_exited(pidfd: &std::os::fd::OwnedFd, timeout: Duration) -> anyhow::Result<bool> {
+    use std::os::fd::AsRawFd;
+
+    let deadline = Instant::now() + timeout;
+    let mut fds = [libc::pollfd {
+        fd: pidfd.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    }];
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let ms = libc::c_int::try_from(left.as_millis()).unwrap_or(libc::c_int::MAX);
+        // SAFETY: one valid pollfd.
+        match unsafe { libc::poll(fds.as_mut_ptr(), 1, ms) } {
+            0 => return Ok(false),
+            n if n > 0 => return Ok(true),
+            _ => {
+                let err = Errno::last();
+                if err != Errno::EINTR {
+                    bail!(err);
+                }
+            }
+        }
+    }
+}
+
+/// [`send_signal_and_wait`] without a pidfd: poll until the process is gone
+/// or, on Linux, its main thread is a zombie.
+fn send_signal_and_poll(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::Result<()> {
     kill(pid, signal)?;
 
     let start = Instant::now();
