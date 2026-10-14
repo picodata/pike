@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Fixed
+
+- A single quote in a service config value no longer breaks the SQL of `pike config apply`; it is passed as `\u0027` (works around picodata's doubling of `''` in `ALTER PLUGIN SET`, see https://git.picodata.io/core/picodata/-/work_items/3285)
+
 ### Changed
 
 - Pike now builds its http client library used for health checks (`ureq`) without TLS support. This sheds a significant number of dependencies

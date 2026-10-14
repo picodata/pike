@@ -77,6 +77,29 @@ fn read_config_from_path(path: &PathBuf) -> Result<ConfigMap> {
     ))
 }
 
+/// Queries for one service
+fn service_config_queries(
+    plugin_name: &str,
+    plugin_version: &str,
+    service_name: &str,
+    config: &HashMap<String, serde_norway::Value>,
+) -> Result<Vec<String>> {
+    let mut queries = Vec::with_capacity(config.len());
+
+    for (key, value) in config {
+        let value = serde_json::to_string(value)
+            .context(format!("failed to serialize the string with key {key}"))?;
+        // TODO: can be removed after fix https://git.picodata.io/core/picodata/-/work_items/3285
+        // `''` is stored doubled by `ALTER PLUGIN SET`, so `'` is passed as a JSON unicode escape instead
+        let value = value.replace('\'', "\\u0027");
+        queries.push(format!(
+            r#"ALTER PLUGIN "{plugin_name}" {plugin_version} SET "{service_name}"."{key}"='{value}';"#
+        ));
+    }
+
+    Ok(queries)
+}
+
 fn apply_service_config(
     plugin_name: &str,
     plugin_version: &str,
@@ -85,15 +108,7 @@ fn apply_service_config(
     admin_socket: &Path,
     picodata_path: &Path,
 ) -> Result<()> {
-    let mut queries: Vec<String> = Vec::new();
-
-    for (key, value) in config {
-        let value = serde_json::to_string(&value)
-            .context(format!("failed to serialize the string with key {key}"))?;
-        queries.push(format!(
-            r#"ALTER PLUGIN "{plugin_name}" {plugin_version} SET "{service_name}"."{key}"='{value}';"#
-        ));
-    }
+    let queries = service_config_queries(plugin_name, plugin_version, service_name, config)?;
 
     for query in queries {
         log::info!("picodata admin: {query}");
@@ -316,6 +331,15 @@ mod tests {
             msg.contains("failed to run picodata admin"),
             "expected process spawn error context, got: {msg}"
         );
+    }
+
+    /// A single quote in a value must be encoded as `\u0027`, so that the serialized JSON
+    /// can be safely embedded in a SQL string literal.
+    #[test]
+    fn service_config_queries_escape_single_quote() {
+        let config = HashMap::from([("k".to_string(), serde_norway::to_value("it's").unwrap())]);
+        let q = service_config_queries("p", "1.0.0", "s", &config).unwrap();
+        assert_eq!(q, [r#"ALTER PLUGIN "p" 1.0.0 SET "s"."k"='"it\u0027s"';"#]);
     }
 
     #[test]
