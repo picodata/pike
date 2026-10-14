@@ -21,6 +21,8 @@ use std::{
 use tar::Archive;
 use toml_edit::{DocumentMut, Item};
 
+use pike::cluster::StopParamsBuilder;
+
 pub const TESTS_DIR: &str = "./tests/tmp/";
 pub const PLUGIN_NAME: &str = "test-plugin";
 pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, PLUGIN_NAME);
@@ -44,47 +46,136 @@ pub struct CmdArguments {
     pub run_args: Vec<String>,
     pub build_args: Vec<String>,
     pub plugin_args: Vec<String>,
-    pub stop_args: Vec<String>,
 }
 
+/// RAII guard that guarantees a running picodata cluster is stopped once the
+/// value goes out of scope — both on a normal return and while unwinding from a
+/// failed assertion.
+///
+/// Tying cleanup to a guard is what makes the integration tests safe:
+///
+/// * **No leaked daemons.** Clusters started with `daemon(true)` keep running
+///   independently of the returned [`pike::cluster::PicodataInstance`] handles
+///   (their `Drop` is a no-op in daemon mode). Holding a `Cluster` guard means a
+///   panicking test can no longer leave picodata processes behind to collide
+///   with the next test over ports and sockets.
+///
+/// * **No panic-in-panic aborts.** [`Cluster::drop`] never panics: it stops the
+///   cluster through the library `pike::cluster::stop` entry point and only logs
+///   failures. A `Drop` that panicked while a test was already unwinding would
+///   abort the whole test process — the spurious "segfault"-looking crash we are
+///   eliminating here.
 pub struct Cluster {
+    /// Path to the plugin project whose cluster this guard owns.
+    plugin_path: PathBuf,
+    /// Data directory (relative to `plugin_path`) that holds `cluster/`.
+    data_dir: PathBuf,
+    /// Foreground `cargo-pike run` process to reap, when the cluster was started
+    /// through a subprocess (see [`run_cluster`]). `None` for clusters started
+    /// in-process via `pike::cluster::run`.
     run_handler: Option<Child>,
-    pub cmd_args: CmdArguments,
-}
-
-impl Drop for Cluster {
-    fn drop(&mut self) {
-        let mut args = vec!["stop", "--plugin-path", PLUGIN_NAME];
-        args.extend(self.cmd_args.stop_args.iter().map(String::as_str));
-        exec_pike(args);
-
-        if let Some(ref mut run_handler) = self.run_handler {
-            run_handler.wait().unwrap();
-        }
-    }
 }
 
 impl Cluster {
-    fn new(run_params: CmdArguments) -> Cluster {
-        info!("cleaning artefacts from previous run");
+    /// Take ownership of cleanup for a cluster started in-process (e.g. via
+    /// `pike::cluster::run`) under `plugin_path`, using the default `./tmp` data
+    /// directory.
+    ///
+    /// Call this right after the cluster is started so that any later panic
+    /// still triggers cleanup:
+    ///
+    /// ```ignore
+    /// run(params).unwrap();
+    /// let _cluster = Cluster::manage(plugin_path);
+    /// // ... assertions that may panic ...
+    /// ```
+    pub fn manage(plugin_path: impl Into<PathBuf>) -> Cluster {
+        Cluster::manage_with_data_dir(plugin_path, "./tmp")
+    }
 
-        match fs::remove_file(Path::new(TESTS_DIR).join("instance.log")) {
-            Ok(()) => info!("Clearing logs."),
-            Err(e) if e.kind() == ErrorKind::NotFound => {
-                info!("instance.log not found, skipping cleanup");
-            }
-            Err(e) => panic!("failed to delete instance.log: {e}"),
-        }
-
+    /// Like [`Cluster::manage`], but with an explicit data directory.
+    pub fn manage_with_data_dir(
+        plugin_path: impl Into<PathBuf>,
+        data_dir: impl Into<PathBuf>,
+    ) -> Cluster {
         Cluster {
+            plugin_path: plugin_path.into(),
+            data_dir: data_dir.into(),
             run_handler: None,
-            cmd_args: run_params,
         }
     }
 
     fn set_run_handler(&mut self, handler: Child) {
         self.run_handler = Some(handler);
     }
+
+    /// Stop the cluster without ever panicking. Errors are logged instead of
+    /// propagated, so this is safe to call from `Drop` during unwinding.
+    ///
+    /// Stopping is idempotent: instances without an active admin socket are
+    /// skipped, so re-stopping an already stopped cluster is a no-op.
+    fn stop_quietly(&self) {
+        let params = match StopParamsBuilder::default()
+            .plugin_path(self.plugin_path.clone())
+            .data_dir(self.data_dir.clone())
+            .build()
+        {
+            Ok(params) => params,
+            Err(e) => {
+                eprintln!("[cluster guard] failed to build stop params: {e:#}");
+                return;
+            }
+        };
+
+        // A cluster that never came up (missing data dir) or was already
+        // stopped is a perfectly fine state to land in here — just log it.
+        //
+        // `pike::cluster::stop` is expected to only ever return errors, but it
+        // still holds a couple of internal `unwrap`/`assert!`s. Run it inside
+        // `catch_unwind` so that even a latent library panic cannot turn this
+        // cleanup — which may execute while a test is already unwinding — into a
+        // panic-in-panic process abort.
+        let stop_outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            pike::cluster::stop(&params)
+        }));
+        match stop_outcome {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => eprintln!(
+                "[cluster guard] could not stop cluster at {}: {e:#}",
+                self.plugin_path.display()
+            ),
+            Err(_) => eprintln!(
+                "[cluster guard] stopping cluster at {} panicked; ignored during cleanup",
+                self.plugin_path.display()
+            ),
+        }
+    }
+}
+
+impl Drop for Cluster {
+    fn drop(&mut self) {
+        // Stop the instances first: a foreground `cargo-pike run` exits on its
+        // own once the picodata children we just killed are gone.
+        self.stop_quietly();
+
+        if let Some(mut run_handler) = self.run_handler.take() {
+            // Never unwrap while (possibly) unwinding. `kill` is a safety net in
+            // case the runner is still alive; both calls are allowed to fail.
+            let _ = run_handler.kill();
+            let _ = run_handler.wait();
+        }
+    }
+}
+
+/// Extract the `--data-dir` value from `pike run` arguments, defaulting to the
+/// `./tmp` directory that pike's CLI uses when the flag is absent (mirrors the
+/// `default_value` of `pike run`/`pike stop`).
+fn data_dir_from_args(run_args: &[String]) -> PathBuf {
+    run_args
+        .iter()
+        .position(|arg| arg == "--data-dir")
+        .and_then(|index| run_args.get(index + 1))
+        .map_or_else(|| PathBuf::from("./tmp"), PathBuf::from)
 }
 
 pub struct TestPluginInitParams<A = String>
@@ -324,28 +415,35 @@ pub fn build_plugin(build_type: &BuildType, new_version: &str, plugin_path: &Pat
 pub fn run_cluster(
     timeout: Duration,
     total_instances: i32,
-    cmd_args: CmdArguments,
+    cmd_args: &CmdArguments,
 ) -> Result<Cluster, std::io::Error> {
-    // Set up cleanup function
-    let mut cluster_handle = Cluster::new(cmd_args);
+    info!("cleaning artefacts from previous run");
+    match fs::remove_file(Path::new(TESTS_DIR).join("instance.log")) {
+        Ok(()) => info!("Clearing logs."),
+        Err(e) if e.kind() == ErrorKind::NotFound => {
+            info!("instance.log not found, skipping cleanup");
+        }
+        Err(e) => panic!("failed to delete instance.log: {e}"),
+    }
+
+    // Data directory (relative to the plugin dir) the cluster will live in.
+    let data_dir = data_dir_from_args(&cmd_args.run_args);
+
+    // Acquire the RAII guard up-front: from here on, every early return or panic
+    // stops the cluster and reaps the runner through `Cluster::drop`.
+    let mut cluster_handle = Cluster::manage_with_data_dir(PLUGIN_DIR, &data_dir);
 
     // Create plugin from template
-    let mut args = cluster_handle
-        .cmd_args
-        .plugin_args
-        .iter()
-        .map(String::as_str);
-
     init_plugin_with_args(TestPluginInitParams {
         name: "test-plugin".to_string(),
-        init_args: args.collect(),
+        init_args: cmd_args.plugin_args.iter().map(String::as_str).collect(),
         ..Default::default()
     });
 
     // Build the plugin
     Command::new("cargo")
         .arg("build")
-        .args(&cluster_handle.cmd_args.build_args)
+        .args(&cmd_args.build_args)
         .current_dir(PLUGIN_DIR)
         .output()?;
 
@@ -354,7 +452,7 @@ pub fn run_cluster(
     let run_handler = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
         .arg("pike")
         .arg("run")
-        .args(&cluster_handle.cmd_args.run_args)
+        .args(&cmd_args.run_args)
         .current_dir(PLUGIN_DIR)
         .spawn()
         .unwrap();
@@ -364,20 +462,9 @@ pub fn run_cluster(
 
     // Run in the loop until we get info about successful plugin installation
     loop {
-        // Get path to data dir from cmd_args
-        let cur_run_args = &cluster_handle.cmd_args.run_args;
-        let mut data_dir_path = Path::new("tmp");
-        if let Some(index) = cur_run_args.iter().position(|x| x == "--data-dir") {
-            if index + 1 < cur_run_args.len() {
-                data_dir_path = Path::new(&cur_run_args[index + 1]);
-            }
-        }
         // Check if cluster set up correctly
-        let mut picodata_admin = await_picodata_admin(
-            Duration::from_secs(60),
-            Path::new(PLUGIN_DIR),
-            data_dir_path,
-        )?;
+        let mut picodata_admin =
+            await_picodata_admin(Duration::from_secs(60), Path::new(PLUGIN_DIR), &data_dir)?;
         let stdout = picodata_admin
             .stdout
             .take()
