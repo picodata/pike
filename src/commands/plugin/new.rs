@@ -153,7 +153,7 @@ pub fn cmd(path: Option<&Path>, without_git: bool, init_workspace: bool) -> Resu
         }
         None => env::current_dir()?,
     };
-    let project_name = &path
+    let project_name = path
         .file_name()
         .context("failed to extract project name")?
         .to_str()
