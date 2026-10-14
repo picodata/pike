@@ -106,11 +106,6 @@ pub struct SessionToken {
 
 fn build_client() -> ureq::Agent {
     ureq::Agent::config_builder()
-        .tls_config(
-            ureq::tls::TlsConfig::builder()
-                .provider(ureq::tls::TlsProvider::NativeTls)
-                .build(),
-        )
         .timeout_global(Some(REQUEST_TIMEOUT))
         .http_status_as_error(false)
         .build()

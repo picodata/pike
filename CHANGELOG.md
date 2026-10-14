@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Changed
+
+- Pike now builds its http client library used for health checks (`ureq`) without TLS support. This sheds a significant number of dependencies
+
 ## [5.7.1]
 
 ### Fixed
