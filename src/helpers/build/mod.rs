@@ -5,7 +5,7 @@ use std::env;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-const MANIFEST_TEMPLATE_NAME: &str = "manifest.yaml.template";
+use crate::helpers::cargo_manifest::MANIFEST_TEMPLATE_NAME;
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub const LIB_EXT: &str = "so";

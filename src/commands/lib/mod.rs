@@ -1,3 +1,4 @@
+use crate::helpers::cargo_manifest::MANIFEST_TEMPLATE_NAME;
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use flate2::bufread::GzDecoder;
@@ -50,7 +51,7 @@ pub fn is_plugin_dir(path: &Path) -> bool {
         return false;
     }
 
-    if path.join("manifest.yaml.template").exists() {
+    if path.join(MANIFEST_TEMPLATE_NAME).exists() {
         return true;
     }
 
@@ -59,7 +60,7 @@ pub fn is_plugin_dir(path: &Path) -> bool {
         .filter(Result::is_ok)
         .map(|e| e.unwrap().path())
         .filter(|e| e.is_dir())
-        .any(|dir| dir.join("manifest.yaml.template").exists())
+        .any(|dir| dir.join(MANIFEST_TEMPLATE_NAME).exists())
 }
 
 pub fn is_plugin_shipping_dir(path: &Path) -> Result<()> {

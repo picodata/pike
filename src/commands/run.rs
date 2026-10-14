@@ -23,6 +23,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crate::commands::config::apply::{
+    config_queries, read_config_from_path, ConfigMap, ConfigSource,
+};
 use crate::commands::lib::instance_info::InstanceSocketClient;
 use crate::commands::lib::{
     cargo_build, copy_directory_tree, find_active_socket_path, get_cluster_dir,
@@ -31,6 +34,10 @@ use crate::commands::lib::{
 };
 use crate::commands::lib::{get_active_socket_path, BuildType};
 use crate::commands::lib::{is_plugin_archive, is_plugin_dir, is_plugin_shipping_dir};
+
+use crate::helpers::cargo_manifest::{
+    read_package_info, read_toml_document, MANIFEST_TEMPLATE_NAME,
+};
 
 const BAFFLED_WHALE: &str = r"
   __________________________________________________________
@@ -99,6 +106,9 @@ pub struct Plugin {
     ///
     /// Path should conform to one of path kinds, see [`PluginPathKind`]
     pub path: Option<PathBuf>,
+    /// Path to a YAML file with service configuration applied between
+    /// `MIGRATE TO` and `ENABLE`. Format is the same as of `config apply`.
+    pub config: Option<PathBuf>,
 }
 
 impl Plugin {
@@ -132,10 +142,22 @@ impl Topology {
         let deserializer = toml::de::Deserializer::parse(&content)
             .context(format!("failed to parse topology from {}", path.display()))?;
 
-        serde_ignored::deserialize(deserializer, |f| {
+        let mut topology: Self = serde_ignored::deserialize(deserializer, |f| {
             warn!("Unknown field in topology TOML: {f}");
         })
-        .map_err(anyhow::Error::from)
+        .map_err(anyhow::Error::from)?;
+
+        // relative config path of an external plugin is anchored to the topology file
+        let base = path.parent().unwrap_or(Path::new(""));
+        for plugin in topology.plugins.values_mut() {
+            if plugin.is_external() {
+                if let Some(cfg) = plugin.config.as_mut().filter(|c| c.is_relative()) {
+                    *cfg = std::path::absolute(base.join(&*cfg))?;
+                }
+            }
+        }
+
+        Ok(topology)
     }
 
     fn find_plugin_versions(&mut self, plugins_dir: &Path) -> Result<()> {
@@ -169,7 +191,10 @@ impl Topology {
     }
 }
 
-fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path) -> Result<()> {
+fn plugin_install_queries(
+    topology: &Topology,
+    configs: &BTreeMap<String, ConfigMap>,
+) -> Result<Vec<String>> {
     let mut queries: Vec<String> = Vec::new();
 
     for (plugin_name, plugin) in &topology.plugins {
@@ -202,11 +227,27 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
             r#"ALTER PLUGIN "{plugin_name}" MIGRATE TO {plugin_version};"#
         ));
 
+        // apply service configuration before `on_start` callback
+        if let Some(config) = configs.get(plugin_name) {
+            queries.extend(config_queries(plugin_name, plugin_version, config)?);
+        }
+
         // enable plugin
         queries.push(format!(
             r#"ALTER PLUGIN "{plugin_name}" {plugin_version} ENABLE;"#
         ));
     }
+
+    Ok(queries)
+}
+
+fn enable_plugins(
+    topology: &Topology,
+    configs: &BTreeMap<String, ConfigMap>,
+    cluster_dir: &Path,
+    picodata_path: &Path,
+) -> Result<()> {
+    let mut queries = plugin_install_queries(topology, configs)?;
 
     if !topology.post_install_sql.is_empty() {
         info!("Executing post-install SQL scripts...");
@@ -225,6 +266,89 @@ fn enable_plugins(topology: &Topology, cluster_dir: &Path, picodata_path: &Path)
     }
 
     Ok(())
+}
+
+/// Find the directory of the workspace member whose package name is given plugin name.
+fn find_workspace_member_dir(plugin_path: &Path, plugin_name: &str) -> Result<PathBuf> {
+    let root = std::env::current_dir()?.join(plugin_path);
+    let manifest = read_toml_document(&root.join("Cargo.toml"))?;
+    let members = manifest
+        .get("workspace")
+        .and_then(|w| w.get("members"))
+        .and_then(|m| m.as_array());
+
+    for member in members.into_iter().flatten().filter_map(|m| m.as_str()) {
+        let dir = root.join(member);
+        if !dir.join(MANIFEST_TEMPLATE_NAME).exists() {
+            continue;
+        }
+        if read_package_info(&dir, &root)?.name == plugin_name {
+            return Ok(dir);
+        }
+    }
+    bail!("no workspace member with package name '{plugin_name}'")
+}
+
+fn resolve_config_path(
+    params: &Params,
+    plugin_name: &str,
+    plugin: &Plugin,
+    path: &Path,
+) -> Result<PathBuf> {
+    // config paths of external plugins from topology.toml are already absolute
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    if plugin.is_external() {
+        return Ok(params.plugin_path.join(path));
+    }
+    let base = if params.plugin_path.join(MANIFEST_TEMPLATE_NAME).exists() {
+        params.plugin_path.clone()
+    } else {
+        find_workspace_member_dir(&params.plugin_path, plugin_name)?
+    };
+    Ok(base.join(path))
+}
+
+/// Read and validate service configs of all plugins before the cluster started
+fn resolve_plugin_configs(params: &Params) -> Result<BTreeMap<String, ConfigMap>> {
+    for name in params.plugin_configs.keys() {
+        if !params.topology.plugins.contains_key(name) {
+            bail!("config was passed for plugin '{name}', which is not declared in the topology");
+        }
+    }
+
+    let mut configs = BTreeMap::new();
+    for (name, plugin) in &params.topology.plugins {
+        let source = params
+            .plugin_configs
+            .get(name)
+            .cloned()
+            .or_else(|| plugin.config.clone().map(ConfigSource::Path));
+        let config = match source {
+            None => continue,
+            Some(ConfigSource::Map(map)) => map,
+            Some(ConfigSource::Path(path)) => {
+                let path = resolve_config_path(params, name, plugin, &path)
+                    .context(format!("plugin '{name}'"))?;
+                read_config_from_path(&path).context(format!("plugin '{name}'"))?
+            }
+        };
+
+        let mut services: Vec<_> = config.keys().collect();
+        services.sort();
+        for svc in services {
+            if !plugin.services.contains_key(svc) {
+                let declared: Vec<_> = plugin.services.keys().map(String::as_str).collect();
+                bail!(
+                    "plugin '{name}': config contains service '{svc}' that is not declared in topology (declared: [{}])",
+                    declared.join(", ")
+                );
+            }
+        }
+        configs.insert(name.clone(), config);
+    }
+    Ok(configs)
 }
 
 fn execute_sql(
@@ -985,6 +1109,27 @@ pub struct Params {
     wait_vshard_discovery: bool,
     #[builder(default = "300")]
     wait_vshard_discovery_timeout: u64,
+    /// Plugin name -> source of its service config (file or in-memory map).
+    /// Replaces `config` from the plugin's section in the topology
+    #[builder(default, setter(custom))]
+    plugin_configs: BTreeMap<String, ConfigSource>,
+}
+
+impl ParamsBuilder {
+    /// Set service config of one plugin: a path to a YAML file (`PathBuf`)
+    /// or an in-memory map (`ConfigMap`).
+    /// It will replace `config` section of this plugin from topology
+    #[allow(unused)]
+    pub fn add_plugin_config(
+        &mut self,
+        plugin_name: impl Into<String>,
+        source: impl Into<ConfigSource>,
+    ) -> &mut Self {
+        self.plugin_configs
+            .get_or_insert_with(BTreeMap::new)
+            .insert(plugin_name.into(), source.into());
+        self
+    }
 }
 
 impl Params {
@@ -1138,6 +1283,13 @@ fn run_cluster(params: &Params, plugins_dir: Option<&PathBuf>) -> Result<Vec<Pic
     let cluster_dir = params.get_cluster_dir();
     let picodata_version = get_picodata_version(&params.picodata_path)?;
 
+    // Validate service configs before any instance started
+    let configs = if params.disable_plugin_install {
+        BTreeMap::new()
+    } else {
+        resolve_plugin_configs(params)?
+    };
+
     info!("Running the cluster with {picodata_version}...");
     let start_cluster_run = Instant::now();
     let mut picodata_processes = start_instances_in_tiers(params, plugins_dir)?;
@@ -1163,7 +1315,12 @@ fn run_cluster(params: &Params, plugins_dir: Option<&PathBuf>) -> Result<Vec<Pic
             bail!("failed to enable plugins: directory with plugins is missing.")
         }
         info!("Enabling plugins...");
-        let result = enable_plugins(&params.topology, &cluster_dir, &params.picodata_path);
+        let result = enable_plugins(
+            &params.topology,
+            &configs,
+            &cluster_dir,
+            &params.picodata_path,
+        );
         if let Err(e) = result {
             for process in &mut picodata_processes {
                 process.kill().unwrap_or_else(|e| {
@@ -1558,6 +1715,7 @@ mod tests {
                         services: BTreeMap::new(),
                         version: None,
                         path: None,
+                        config: None,
                     },
                 );
                 m
@@ -1568,11 +1726,259 @@ mod tests {
         };
         let cluster_dir = temp_dir_unique("pike_test_cluster");
         let picodata_path = Path::new("picodata");
-        let err = enable_plugins(&topology, &cluster_dir, picodata_path).unwrap_err();
+        let err =
+            enable_plugins(&topology, &BTreeMap::new(), &cluster_dir, picodata_path).unwrap_err();
         let msg = format!("{err:#}");
         assert!(
             msg.contains("plugin version is missing"),
             "Expected explicit error on missing version, got: {msg}"
+        );
+    }
+
+    const TEST_PLUGIN_NAME: &str = "p";
+
+    fn plugin_with_service(name: &str, config: Option<PathBuf>) -> Params {
+        let plugin = Plugin {
+            services: BTreeMap::from([(name.to_string(), Service::default())]),
+            version: Some("1.0.0".to_string()),
+            config,
+            ..Default::default()
+        };
+        ParamsBuilder::default()
+            .topology(Topology {
+                plugins: BTreeMap::from([(TEST_PLUGIN_NAME.to_string(), plugin)]),
+                ..Default::default()
+            })
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn plugin_install_queries_between_migrate_and_enable() {
+        let params = plugin_with_service("svc", None);
+        let configs = BTreeMap::from([(
+            TEST_PLUGIN_NAME.to_string(),
+            ConfigMap::from([(
+                "svc".to_string(),
+                HashMap::from([("k".to_string(), Value::from("v"))]),
+            )]),
+        )]);
+        let q = plugin_install_queries(&params.topology, &configs).unwrap();
+        assert_eq!(q.len(), 4, "{q:?}");
+        assert!(q[0].starts_with("CREATE PLUGIN"));
+        assert!(q[1].contains("MIGRATE TO"));
+        assert!(q[2].contains(r#"SET "svc"."k"="#));
+        assert!(q[3].ends_with("ENABLE;"));
+        // without configs there is no `SET` command
+        let q = plugin_install_queries(&params.topology, &BTreeMap::new()).unwrap();
+        assert_eq!(q.len(), 3, "{q:?}");
+        assert!(q[0].starts_with("CREATE PLUGIN"));
+        assert!(q[1].contains("MIGRATE TO"));
+        assert!(q[2].ends_with("ENABLE;"));
+    }
+
+    #[test]
+    fn resolve_config_unknown_service() {
+        let unknown_service = "unknown_service";
+        let dir = temp_dir_unique("pike_test_cfg_unknown_service");
+        let yaml = dir.join("c.yaml");
+        fs::write(&yaml, format!("{unknown_service}:\n  k: v\n")).unwrap();
+        let params = plugin_with_service("svc", Some(yaml));
+        let msg = format!("{:#}", resolve_plugin_configs(&params).unwrap_err());
+        assert!(
+            msg.contains(&format!("service '{unknown_service}' that is not declared")),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn resolve_config_reads_valid_file() {
+        let dir = temp_dir_unique("pike_test_cfg_valid");
+        let yaml = dir.join("c.yaml");
+        fs::write(&yaml, "svc:\n  k: v\n").unwrap();
+        let params = plugin_with_service("svc", Some(yaml));
+        assert!(
+            resolve_plugin_configs(&params).unwrap()[TEST_PLUGIN_NAME]["svc"].contains_key("k")
+        );
+    }
+
+    #[test]
+    fn resolve_config_nonexistent_file() {
+        let dir = temp_dir_unique("pike_test_cfg_missing");
+        let params = plugin_with_service("svc", Some(dir.join("nonexistent.yaml")));
+        let msg = format!("{:#}", resolve_plugin_configs(&params).unwrap_err());
+        assert!(msg.contains("failed to read config file"), "{msg}");
+    }
+
+    #[test]
+    fn resolve_config_invalid_yaml() {
+        let dir = temp_dir_unique("pike_test_cfg_invalid");
+        let yaml = dir.join("invalid.yaml");
+        fs::write(&yaml, "not: [valid").unwrap();
+        let params = plugin_with_service("svc", Some(yaml));
+        let msg = format!("{:#}", resolve_plugin_configs(&params).unwrap_err());
+        assert!(msg.contains("failed to parse config file"), "{msg}");
+    }
+
+    #[test]
+    fn resolve_config_for_unknown_plugin() {
+        let unknown_plugin = "unknown_plugin";
+        let mut params = plugin_with_service("svc", None);
+        params
+            .plugin_configs
+            .insert(unknown_plugin.into(), ConfigSource::Map(ConfigMap::new()));
+        let msg = format!("{:#}", resolve_plugin_configs(&params).unwrap_err());
+        assert!(
+            msg.contains(&format!(
+                "plugin '{unknown_plugin}', which is not declared in the topology"
+            )),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn builder_replace_topology_config() {
+        let mut params = plugin_with_service("svc", Some(PathBuf::from("/does/not/exist.yaml")));
+        params.plugin_configs.insert(
+            TEST_PLUGIN_NAME.into(),
+            ConfigSource::Map(ConfigMap::from([("svc".to_string(), HashMap::new())])),
+        );
+        assert!(resolve_plugin_configs(&params)
+            .unwrap()
+            .contains_key(TEST_PLUGIN_NAME));
+    }
+
+    #[test]
+    fn parse_toml_plugin_config_paths() {
+        let dir = temp_dir_unique("pike_test_external");
+        let file = dir.join("topology.toml");
+        fs::write(
+            &file,
+            r#"
+            [tier.default]
+            replicasets = 1
+            replication_factor = 1
+
+            [plugin.external_plugin]
+            path = "/x"
+            config = "c.yaml"
+
+            [plugin.plugin_with_config_key]
+            config = "c.yaml"
+
+            [plugin.plugin_without_config_key]
+            "#,
+        )
+        .unwrap();
+        let t = Topology::parse_toml(&file).unwrap();
+        assert_eq!(
+            t.plugins["external_plugin"].config,
+            Some(dir.join("c.yaml"))
+        );
+        assert_eq!(
+            t.plugins["plugin_with_config_key"].config,
+            Some(PathBuf::from("c.yaml"))
+        );
+        assert_eq!(t.plugins["plugin_without_config_key"].config, None);
+    }
+
+    /// A plugin has one config source, so the later builder call for the same plugin
+    /// replaces the earlier one
+    #[test]
+    fn params_builder_plugin_config_last_call_for_same_plugin_wins() {
+        let params = ParamsBuilder::default()
+            .topology(Topology::default())
+            .add_plugin_config("a", PathBuf::from("c.yaml"))
+            .add_plugin_config("b", PathBuf::from("c.yaml"))
+            .add_plugin_config("a", ConfigMap::new())
+            .build()
+            .unwrap();
+        assert!(matches!(params.plugin_configs["a"], ConfigSource::Map(_)));
+        assert!(matches!(params.plugin_configs["b"], ConfigSource::Path(_)));
+
+        let params = ParamsBuilder::default()
+            .topology(Topology::default())
+            .add_plugin_config("a", ConfigMap::new())
+            .add_plugin_config("a", PathBuf::from("c.yaml"))
+            .build()
+            .unwrap();
+        assert!(matches!(params.plugin_configs["a"], ConfigSource::Path(_)));
+    }
+
+    #[test]
+    fn resolve_config_service_without_tiers_is_declared() {
+        // `plugin_with_service` declares the service with no tiers.
+        let mut params = plugin_with_service("svc", None);
+        params.plugin_configs.insert(
+            TEST_PLUGIN_NAME.into(),
+            ConfigSource::Map(ConfigMap::from([("svc".to_string(), HashMap::new())])),
+        );
+        assert!(resolve_plugin_configs(&params).is_ok());
+    }
+
+    /// Creates an empty temp dir and uses it as `plugin_path`.
+    /// Returns the params, their plugin and the dir, so a test can put files there.
+    fn path_rules_fixture(prefix: &str) -> (Params, Plugin, PathBuf) {
+        let root = temp_dir_unique(prefix);
+        let mut params = plugin_with_service("svc", None);
+        params.plugin_path = root.clone();
+        let plugin = params.topology.plugins[TEST_PLUGIN_NAME].clone();
+        (params, plugin, root)
+    }
+
+    #[test]
+    fn resolve_config_path_absolute() {
+        let (params, plugin, _) = path_rules_fixture("pike_test_path_abs");
+        let abs = Path::new("/abs/c.yaml");
+        assert_eq!(
+            resolve_config_path(&params, TEST_PLUGIN_NAME, &plugin, abs).unwrap(),
+            abs
+        );
+    }
+
+    #[test]
+    fn resolve_config_path_workspace_member_by_package_name() {
+        let (params, plugin, root) = path_rules_fixture("pike_test_path_ws");
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"dir-x\"]\n",
+        )
+        .unwrap();
+        let member = root.join("dir-x");
+        fs::create_dir_all(&member).unwrap();
+        fs::write(member.join(MANIFEST_TEMPLATE_NAME), "").unwrap();
+        fs::write(
+            member.join("Cargo.toml"),
+            format!("[package]\nname = \"{TEST_PLUGIN_NAME}\"\nversion = \"0.1.0\"\n"),
+        )
+        .unwrap();
+        assert_eq!(
+            resolve_config_path(&params, TEST_PLUGIN_NAME, &plugin, Path::new("c.yaml")).unwrap(),
+            member.join("c.yaml")
+        );
+        let err = resolve_config_path(&params, "other", &plugin, Path::new("c.yaml")).unwrap_err();
+        assert!(format!("{err:#}").contains("no workspace member with package name 'other'"));
+    }
+
+    #[test]
+    fn resolve_config_path_single_crate_is_relative_to_plugin_path() {
+        let (params, plugin, root) = path_rules_fixture("pike_test_path_crate");
+        fs::write(root.join(MANIFEST_TEMPLATE_NAME), "").unwrap();
+        assert_eq!(
+            resolve_config_path(&params, TEST_PLUGIN_NAME, &plugin, Path::new("c.yaml")).unwrap(),
+            root.join("c.yaml")
+        );
+    }
+
+    #[test]
+    fn resolve_config_path_external_in_code_uses_plugin_path() {
+        let (params, mut plugin, root) = path_rules_fixture("pike_test_path_ext");
+        plugin.path = Some(PathBuf::from("/ext"));
+        // An external plugin in a topology built in code has no `topology.toml`
+        // so a relative path must be resolved against `plugin_path`
+        assert_eq!(
+            resolve_config_path(&params, TEST_PLUGIN_NAME, &plugin, Path::new("c.yaml")).unwrap(),
+            root.join("c.yaml")
         );
     }
 

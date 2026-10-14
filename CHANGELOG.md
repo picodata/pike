@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- `config` key in `[plugin.<name>]` of `topology.toml`: service configuration from a YAML file is applied by `pike run` after `MIGRATE TO` and before `ENABLE`, so `on_start` sees it
+- `run::ParamsBuilder::add_plugin_config` to pass service configuration of a plugin as a file path or an in-memory map
+
 ### Fixed
 
 - A single quote in a service config value no longer breaks the SQL of `pike config apply`; it is passed as `\u0027` (works around picodata's doubling of `''` in `ALTER PLUGIN SET`, see https://git.picodata.io/core/picodata/-/work_items/3285)

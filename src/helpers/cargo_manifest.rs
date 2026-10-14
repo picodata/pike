@@ -3,6 +3,9 @@ use std::fs;
 use std::path::Path;
 use toml_edit::{DocumentMut, Item};
 
+/// File name of the plugin manifest template, which marks a directory as a plugin crate.
+pub(crate) const MANIFEST_TEMPLATE_NAME: &str = "manifest.yaml.template";
+
 /// Resolved `[package]` name and version of a crate's manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageInfo {

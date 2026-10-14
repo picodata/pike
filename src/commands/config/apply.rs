@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use derive_builder::Builder;
 use log::info;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     env, fs,
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
@@ -10,7 +10,9 @@ use std::{
 };
 use toml_edit::DocumentMut;
 
-use crate::helpers::cargo_manifest::{read_package_info, read_toml_document};
+use crate::helpers::cargo_manifest::{
+    read_package_info, read_toml_document, MANIFEST_TEMPLATE_NAME,
+};
 
 /// Mapping of plugin service names to their properties specified in
 /// [plugin configuration](https://github.com/picodata/pike?tab=readme-ov-file#config-apply).
@@ -66,7 +68,7 @@ o      ______/~/~/~/__           /((
                                  \((
  ";
 
-fn read_config_from_path(path: &PathBuf) -> Result<ConfigMap> {
+pub(crate) fn read_config_from_path(path: &PathBuf) -> Result<ConfigMap> {
     serde_norway::from_str(
         &fs::read_to_string(path)
             .context(format!("failed to read config file at {}", path.display()))?,
@@ -77,16 +79,17 @@ fn read_config_from_path(path: &PathBuf) -> Result<ConfigMap> {
     ))
 }
 
-/// Queries for one service
+/// Queries for one service, sorted by key
 fn service_config_queries(
     plugin_name: &str,
     plugin_version: &str,
     service_name: &str,
     config: &HashMap<String, serde_norway::Value>,
 ) -> Result<Vec<String>> {
-    let mut queries = Vec::with_capacity(config.len());
+    let sorted: BTreeMap<_, _> = config.iter().collect();
+    let mut queries = Vec::with_capacity(sorted.len());
 
-    for (key, value) in config {
+    for (key, value) in sorted {
         let value = serde_json::to_string(value)
             .context(format!("failed to serialize the string with key {key}"))?;
         // TODO: can be removed after fix https://git.picodata.io/core/picodata/-/work_items/3285
@@ -95,6 +98,27 @@ fn service_config_queries(
         queries.push(format!(
             r#"ALTER PLUGIN "{plugin_name}" {plugin_version} SET "{service_name}"."{key}"='{value}';"#
         ));
+    }
+
+    Ok(queries)
+}
+
+/// Queries for the whole config, sorted by service, then by key.
+pub(crate) fn config_queries(
+    plugin_name: &str,
+    plugin_version: &str,
+    config: &ConfigMap,
+) -> Result<Vec<String>> {
+    let sorted: BTreeMap<_, _> = config.iter().collect();
+    let mut queries = Vec::new();
+
+    for (service_name, service_config) in sorted {
+        queries.extend(service_config_queries(
+            plugin_name,
+            plugin_version,
+            service_name,
+            service_config,
+        )?);
     }
 
     Ok(queries)
@@ -181,6 +205,7 @@ fn apply_plugin_config(params: &Params, current_plugin_path: &str) -> Result<()>
         ConfigSource::Path(path) => read_config_from_path(&cur_plugin_dir.join(path))?,
     };
 
+    let config: BTreeMap<_, _> = config.into_iter().collect();
     for (service_name, service_config) in config {
         apply_service_config(
             &package_info.name,
@@ -202,6 +227,18 @@ fn apply_plugin_config(params: &Params, current_plugin_path: &str) -> Result<()>
 pub enum ConfigSource {
     Map(ConfigMap),
     Path(PathBuf),
+}
+
+impl From<PathBuf> for ConfigSource {
+    fn from(path: PathBuf) -> Self {
+        ConfigSource::Path(path)
+    }
+}
+
+impl From<ConfigMap> for ConfigSource {
+    fn from(map: ConfigMap) -> Self {
+        ConfigSource::Map(map)
+    }
 }
 
 impl Default for ConfigSource {
@@ -270,7 +307,7 @@ pub fn cmd(params: &Params) -> Result<()> {
 
                     if !root_dir
                         .join(member_str.unwrap())
-                        .join("manifest.yaml.template")
+                        .join(MANIFEST_TEMPLATE_NAME)
                         .exists()
                     {
                         continue;
@@ -333,13 +370,56 @@ mod tests {
         );
     }
 
-    /// A single quote in a value must be encoded as `\u0027`, so that the serialized JSON
-    /// can be safely embedded in a SQL string literal.
     #[test]
-    fn service_config_queries_escape_single_quote() {
-        let config = HashMap::from([("k".to_string(), serde_norway::to_value("it's").unwrap())]);
-        let q = service_config_queries("p", "1.0.0", "s", &config).unwrap();
-        assert_eq!(q, [r#"ALTER PLUGIN "p" 1.0.0 SET "s"."k"='"it\u0027s"';"#]);
+    fn config_queries_with_single_quote() {
+        let c = ConfigMap::from([(
+            "s".to_string(),
+            HashMap::from([("k".to_string(), serde_norway::to_value("it's").unwrap())]),
+        )]);
+        let q = config_queries("p", "1.0.0", &c).unwrap();
+        assert_eq!(q.len(), 1);
+        // a single quote in a value must be encoded as `\u0027`, so that the serialized JSON
+        // can be safely embedded in a SQL string literal
+        assert_eq!(q[0], r#"ALTER PLUGIN "p" 1.0.0 SET "s"."k"='"it\u0027s"';"#);
+    }
+
+    #[test]
+    fn config_queries_are_sorted_and_serialize_values_as_json() {
+        let make_config = || {
+            ConfigMap::from([
+                (
+                    "b".to_string(),
+                    HashMap::from([
+                        ("workers".to_string(), serde_norway::to_value(4).unwrap()),
+                        (
+                            "origins".to_string(),
+                            serde_norway::to_value(vec!["http://localhost:3000"]).unwrap(),
+                        ),
+                    ]),
+                ),
+                (
+                    "a".to_string(),
+                    HashMap::from([(
+                        "listen".to_string(),
+                        serde_norway::to_value("127.0.0.1:18080").unwrap(),
+                    )]),
+                ),
+            ])
+        };
+        let expected = vec![
+            r#"ALTER PLUGIN "p" 1.0.0 SET "a"."listen"='"127.0.0.1:18080"';"#,
+            r#"ALTER PLUGIN "p" 1.0.0 SET "b"."origins"='["http://localhost:3000"]';"#,
+            r#"ALTER PLUGIN "p" 1.0.0 SET "b"."workers"='4';"#,
+        ];
+        // Queries are ordered by service, then by key, so the generated SQL is deterministic.
+        // The map is built anew each time: every `HashMap` has its own iteration order,
+        // so a single run could match the expected order by chance.
+        for _ in 0..5 {
+            assert_eq!(
+                config_queries("p", "1.0.0", &make_config()).unwrap(),
+                expected
+            );
+        }
     }
 
     #[test]

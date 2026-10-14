@@ -1,5 +1,8 @@
 use crate::commands::lib::{cargo_build, BuildType, LIB_EXT};
-use crate::helpers::cargo_manifest::{read_package_info, read_toml_document};
+
+use crate::helpers::cargo_manifest::{
+    read_package_info, read_toml_document, MANIFEST_TEMPLATE_NAME,
+};
 use anyhow::{anyhow, bail, Context, Result};
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -102,7 +105,7 @@ pub fn cmd(
                     continue;
                 };
                 let member_path = root_dir.join(member_str);
-                if member_path.join("manifest.yaml.template").exists() {
+                if member_path.join(MANIFEST_TEMPLATE_NAME).exists() {
                     info!("Packing workspace member plugin: {}", member_path.display());
                     create_plugin_archive(&build_root, &member_path, &root_dir, None)?;
                     packaged_any = true;

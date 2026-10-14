@@ -157,6 +157,10 @@ replication_factor = 2
 migration_context = [
     { name = "example_name", value = "example_value" },
 ]
+# необязательный путь до YAML-файла с конфигурацией сервисов (формат как у `config apply`),
+# применяется между `MIGRATE TO` и `ENABLE`;
+# если ключа нет, сервисы стартуют со значениями `default_configuration` из `manifest.yaml.template`
+config = "plugin_config.yaml"
 
 # настройки сервисов плагинов
 [plugin.sp.service.main] # в примере настройка сервиса main плагина sp
@@ -181,6 +185,73 @@ PICODATA_HTTP_LISTEN = "127.0.0.1:{{ instance_id + 8000 }}"
 Доступные переменные контекста в шаблонах:
 
 - `instance_id` - порядковый номер инстанса при запуске, начинается с 1
+
+##### Конфигурация сервисов при запуске (`config`)
+
+Ключ `config` в секции плагина указывает путь до YAML-файла с конфигурацией сервисов. Значения из него применяются во время установки плагина, после миграций и до включения. Формат файла такой же, как у [`config apply`](#config-apply).
+
+**Использование на уровне файлов конфигурации**
+
+`plugin_config.yaml`:
+
+```yaml
+example_service:
+  value: "it's value"
+```
+
+`topology.toml`:
+
+```toml
+[tier.default]
+replicasets = 2
+replication_factor = 2
+
+[plugin.test_plugin]
+config = "plugin_config.yaml"
+
+[plugin.test_plugin.service.example_service]
+tiers = ["default"]
+```
+
+Без ключа `config` значения из файла не применяются: сервисы стартуют со значениями по умолчанию из `default_configuration` в `manifest.yaml.template` плагина (в шаблоне плагина это `value: example` в секции `example_service`), `plugin_config.yaml` из шаблона плагина не подхватывается автоматически.
+
+Путь из `config` разрешается так:
+
+- если плагин в крейте или workspace: относительно директории плагина (как у `config apply`);
+- если плагин внешний (`path = ...`): относительно директории `topology.toml`;
+- абсолютный путь используется как есть.
+
+Если файл не найден, YAML невалиден или в нём указан сервис, которого нет в топологии, `cargo pike run` завершится с ошибкой до запуска кластера.
+
+**Использование на уровне библиотеки**
+
+При использовании pike как библиотеки, конфигурацию одного плагина можно передать через `add_plugin_config(имя_плагина, источник)`, где источник -- путь до файла (`PathBuf`) или структура в памяти (`PluginConfigMap`). Эта опция *полностью заменяет* `config` из топологии для указанного плагина. Относительный путь разрешается так же, как `config` в `topology.toml`.
+
+```rust
+use std::{collections::HashMap, path::PathBuf};
+
+use pike::cluster::RunParamsBuilder;
+use pike::config::PluginConfigMap;
+
+// из файла
+let params = RunParamsBuilder::default()
+    .topology(topology)
+    .add_plugin_config("test_plugin", PathBuf::from("plugin_config.yaml"))
+    .build()?;
+
+// из памяти
+let config_map: PluginConfigMap = HashMap::from([(
+    "example_service".to_string(),
+    HashMap::from([("value".to_string(), serde_norway::to_value("it's value")?)]),
+)]);
+
+let params = RunParamsBuilder::default()
+    .topology(topology)
+    .add_plugin_config("test_plugin", config_map)
+    .build()?;
+```
+
+Если установка плагинов отключена (см. `RunParamsBuilder::disable_plugin_install(true)` или CLI опцию `--disable-install-plugins`), конфигурация не читается и не проверяется.
 
 #### picodata.yaml
 
@@ -517,6 +588,8 @@ main: # имя сервиса
 ```bash
 cargo pike config apply
 ```
+
+Тот же файл можно применить при установке плагина через ключ `config` в `topology.toml`.
 
 #### Доступные опции
 
