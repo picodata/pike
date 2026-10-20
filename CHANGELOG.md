@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Fixed
+
+- Fail with an error if waiting for instance to become `Online` times out
+
 ### Changed
 
 - Bump rust to 1.99

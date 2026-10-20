@@ -60,7 +60,8 @@ const BAFFLED_WHALE: &str = r"
                                  `-.,'
  ";
 
-const TIMEOUT_WAITING_FOR_INSTANCE_ONLINE: Timeout = Timeout::from_secs(10);
+// Default timeout for waiting of instance to become Online.
+const DEFAULT_INSTANCE_ONLINE_TIMEOUT: Timeout = Timeout::from_secs(300);
 
 // Default timeout for waiting of vshard discovery completion.
 pub const DEFAULT_VSHARD_DISCOVERY_TIMEOUT: Timeout = Timeout::from_secs(300);
@@ -631,11 +632,29 @@ impl PicodataInstance {
             .data_dir
             .parent()
             .expect("instance dir is in the cluster dir");
-        let start = Instant::now();
+
+        let socket_client = self.socket_client(picodata_path);
         let interval = Duration::from_millis(100);
-        while Instant::now().duration_since(start) < TIMEOUT_WAITING_FOR_INSTANCE_ONLINE {
+        let timeout = DEFAULT_INSTANCE_ONLINE_TIMEOUT;
+        let start = Instant::now();
+
+        log::debug!(
+            "Waiting for instance '{}' to become online (timeout {:?})",
+            self.name(),
+            timeout
+        );
+
+        loop {
+            if start.elapsed() >= timeout {
+                bail!(
+                    "Timed out waiting for instance '{}' to become online after {:?}",
+                    self.name(),
+                    timeout
+                );
+            }
+
             thread::sleep(interval);
-            let socket_client = self.socket_client(picodata_path);
+
             let Ok(new_instance_name) = socket_client
                 .instance_name()
                 .inspect_err(|err| log::debug!("failed to get name of the instance: {err}"))

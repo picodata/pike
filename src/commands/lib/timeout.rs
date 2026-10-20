@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    fmt::{self, Display, Formatter},
+    fmt::{self, Debug, Display, Formatter},
     num::ParseIntError,
     ops::{Deref, Div},
     str::FromStr,
@@ -8,7 +8,7 @@ use std::{
     write,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Timeout(Duration);
 
 impl Timeout {
@@ -52,6 +52,12 @@ impl From<Duration> for Timeout {
 impl Display for Timeout {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0.as_secs())
+    }
+}
+
+impl Debug for Timeout {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 
