@@ -16,6 +16,9 @@ pub mod cluster {
 
     pub use crate::commands::stop::cmd as stop;
     pub use crate::commands::stop::ParamsBuilder as StopParamsBuilder;
+
+    pub use crate::commands::expel::cmd as expel;
+    pub use crate::commands::expel::ParamsBuilder as ExpelParamsBuilder;
 }
 
 pub mod config {
