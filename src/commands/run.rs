@@ -1,5 +1,6 @@
 mod readiness;
 
+use crate::commands::lib::timeout::Timeout;
 use crate::healthcheck::api::get_health_status;
 use anyhow::{anyhow, bail, Context, Result};
 use colored::Colorize;
@@ -59,7 +60,11 @@ const BAFFLED_WHALE: &str = r"
                                  `-.,'
  ";
 
-const TIMEOUT_WAITING_FOR_INSTANCE_ONLINE: Duration = Duration::from_secs(10);
+const TIMEOUT_WAITING_FOR_INSTANCE_ONLINE: Timeout = Timeout::from_secs(10);
+
+// Default timeout for waiting of vshard discovery completion.
+pub const DEFAULT_VSHARD_DISCOVERY_TIMEOUT: Timeout = Timeout::from_secs(300);
+pub const DEFAULT_VSHARD_DISCOVERY_ENABLED: bool = true;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Tier {
@@ -1105,10 +1110,10 @@ pub struct Params {
     with_web_auth: bool,
     #[builder(default = "false")]
     with_audit: bool,
-    #[builder(default = "false")]
+    #[builder(default = DEFAULT_VSHARD_DISCOVERY_ENABLED)]
     wait_vshard_discovery: bool,
-    #[builder(default = "300")]
-    wait_vshard_discovery_timeout: u64,
+    #[builder(default = DEFAULT_VSHARD_DISCOVERY_TIMEOUT)]
+    wait_vshard_discovery_timeout: Timeout,
     /// Plugin name -> source of its service config (file or in-memory map).
     /// Replaces `config` from the plugin's section in the topology
     #[builder(default, setter(custom))]

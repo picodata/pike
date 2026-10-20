@@ -1,5 +1,7 @@
 use crate::commands::{
+    lib::timeout::Timeout,
     ride,
+    run::{DEFAULT_VSHARD_DISCOVERY_ENABLED, DEFAULT_VSHARD_DISCOVERY_TIMEOUT},
     stop::{DEFAULT_STOP_SIGNAL, DEFAULT_STOP_TIMEOUT},
 };
 use anyhow::{bail, Context, Result};
@@ -150,15 +152,22 @@ enum Command {
         #[arg(long, value_name = "WITH_AUDIT", default_value_t = false)]
         with_audit: bool,
         /// Wait for vshard discovery to complete
-        #[arg(long,
+        #[arg(
+            long,
             num_args = 0..=1,
-            default_value_t = true,
+            default_value_t = DEFAULT_VSHARD_DISCOVERY_ENABLED,
             value_parser = clap::value_parser!(bool)
         )]
         wait_vshard_discovery: bool,
         /// Timeout in seconds for waiting vshard discovery to complete.
-        #[arg(long, value_name = "SECONDS", default_value_t = 300)]
-        wait_vshard_discovery_timeout: u64,
+        #[arg(
+            long,
+            short,
+            value_name = "SECONDS",
+            default_value_t = DEFAULT_VSHARD_DISCOVERY_TIMEOUT,
+            help = "Vshard discovery timeout in seconds"
+        )]
+        wait_vshard_discovery_timeout: Timeout,
     },
     /// Stop Picodata cluster or a specific instance
     Stop {
@@ -186,10 +195,10 @@ enum Command {
             long,
             short,
             value_name = "TIMEOUT_SECS",
-            default_value_t = DEFAULT_STOP_TIMEOUT.as_secs(),
+            default_value_t = DEFAULT_STOP_TIMEOUT,
             help = "Graceful shutdown timeout in seconds"
         )]
-        timeout: u64,
+        timeout: Timeout,
     },
     /// Remove all data files of previous cluster run
     Clean {
@@ -486,7 +495,6 @@ fn main() -> Result<()> {
             is_required_path_exists(&plugin_path, &data_dir, CARING_PIKE, 1);
 
             run_child_killer();
-            let timeout = Duration::from_secs(timeout);
             let params = commands::stop::ParamsBuilder::default()
                 .data_dir(data_dir)
                 .plugin_path(plugin_path)

@@ -1,4 +1,4 @@
-use crate::commands::run::Params;
+use crate::commands::{lib::timeout::Timeout, run::Params};
 use crate::healthcheck::api;
 use anyhow::{bail, Result};
 use log::{debug, info};
@@ -70,7 +70,7 @@ pub(super) fn wait_instances_ready(instances: &[PicodataInstance]) -> Result<()>
 ///    verifying that bucket counts per replicaset match those observed on storage.
 ///
 pub(super) fn wait_vshard_discovery(instances: &[PicodataInstance], params: &Params) -> Result<()> {
-    let timeout = Duration::from_secs(params.wait_vshard_discovery_timeout);
+    let timeout = params.wait_vshard_discovery_timeout;
     info!(
         "Waiting for vshard discovery on {} instance(s) (timeout {}s)",
         instances.len(),
@@ -107,7 +107,7 @@ pub(super) fn wait_vshard_discovery(instances: &[PicodataInstance], params: &Par
 fn wait_for_initial_resharding(
     instances: &[PicodataInstance],
     picodata_path: &PathBuf,
-    timeout: Duration,
+    timeout: Timeout,
 ) -> Result<HashMap<String, u32>> {
     let start = Instant::now();
     let mut bucket_count_per_replicaset: HashMap<String, u32> = HashMap::new();
@@ -142,7 +142,7 @@ fn wait_for_initial_resharding(
                 break instance_bucket_count;
             }
 
-            if start.elapsed() >= timeout {
+            if start.elapsed() >= *timeout {
                 bail!(
                     "Resharding timed out on instance '{}' within {}s",
                     instance.instance_name,

@@ -1,4 +1,7 @@
-use crate::commands::lib::{get_active_socket_path, get_cluster_dir};
+use crate::commands::lib::{
+    timeout::Timeout,
+    {get_active_socket_path, get_cluster_dir},
+};
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use derive_builder::Builder;
@@ -15,7 +18,7 @@ use std::time::{Duration, Instant};
 // Default signal sent by unix kill command during `pike stop` command.
 pub const DEFAULT_STOP_SIGNAL: Signal = Signal::SIGKILL;
 // Default timeout for graceful process shutdown.
-pub const DEFAULT_STOP_TIMEOUT: Duration = Duration::from_secs(30);
+pub const DEFAULT_STOP_TIMEOUT: Timeout = Timeout::from_secs(30);
 
 #[derive(Debug, Builder)]
 pub struct Params {
@@ -28,7 +31,7 @@ pub struct Params {
     #[builder(default = DEFAULT_STOP_SIGNAL)]
     signal: Signal,
     #[builder(default = DEFAULT_STOP_TIMEOUT)]
-    timeout: Duration,
+    timeout: Timeout,
 }
 
 pub fn cmd(params: &Params) -> Result<()> {
@@ -122,7 +125,7 @@ fn stop_instance(
     cluster_dir: &Path,
     instance_dir: &Path,
     signal: Signal,
-    timeout: Duration,
+    timeout: Timeout,
 ) -> Result<()> {
     if !instance_dir.is_dir() {
         bail!("{} is not a directory", instance_dir.to_string_lossy());
@@ -195,7 +198,7 @@ fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
 /// fail to lock it. A kernel without pidfds (before 5.3) gets the polling
 /// below.
 #[cfg(target_os = "linux")]
-fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::Result<()> {
+fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::Result<()> {
     use std::os::fd::{FromRawFd, OwnedFd};
 
     // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor.
@@ -253,10 +256,10 @@ fn pidfd_send_signal(pidfd: &std::os::fd::OwnedFd, signal: Signal) -> anyhow::Re
 
 /// Whether the process behind the pidfd exits, all its threads, within `timeout`.
 #[cfg(target_os = "linux")]
-fn pidfd_exited(pidfd: &std::os::fd::OwnedFd, timeout: Duration) -> anyhow::Result<bool> {
+fn pidfd_exited(pidfd: &std::os::fd::OwnedFd, timeout: Timeout) -> anyhow::Result<bool> {
     use std::os::fd::AsRawFd;
 
-    let deadline = Instant::now() + timeout;
+    let deadline = Instant::now() + *timeout;
     let mut fds = [libc::pollfd {
         fd: pidfd.as_raw_fd(),
         events: libc::POLLIN,
@@ -281,7 +284,7 @@ fn pidfd_exited(pidfd: &std::os::fd::OwnedFd, timeout: Duration) -> anyhow::Resu
 
 /// [`send_signal_and_wait`] without a pidfd: poll until the process is gone
 /// or, on Linux, its main thread is a zombie.
-fn send_signal_and_poll(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::Result<()> {
+fn send_signal_and_poll(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::Result<()> {
     kill(pid, signal)?;
 
     let start = Instant::now();

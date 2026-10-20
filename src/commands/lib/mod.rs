@@ -13,6 +13,7 @@ use std::process::{Child, Command, Stdio};
 use tar::Archive;
 
 pub mod instance_info;
+pub mod timeout;
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub const LIB_EXT: &str = "so";
