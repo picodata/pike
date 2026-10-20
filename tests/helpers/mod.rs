@@ -638,3 +638,130 @@ pub fn is_instance_running(instance_dir: &Path) -> bool {
     let socket_path = instance_dir.join("admin.sock");
     socket_path.exists() && UnixStream::connect(&socket_path).is_ok()
 }
+
+// Topology for the vshard wait tests: one tier, 2 replicasets, 2 replicas each.
+const VSHARD_TOPOLOGY_TOML: &str = "[tier.default]\nreplicasets = 2\nreplication_factor = 2\n";
+
+/// Topology for the vshard wait tests. It is the same as their `topology.toml`.
+pub fn vshard_topology() -> pike::cluster::Topology {
+    toml::from_str(VSHARD_TOPOLOGY_TOML).unwrap()
+}
+
+/// Creates `tests/tmp/<name>/` from scratch as a small plugin directory for the
+/// vshard wait tests. It holds the test plugin `picodata.yaml` (with
+/// `default_bucket_count` if given) and a `topology.toml` that matches
+/// [`vshard_topology`]. If an aborted run left a cluster there, it is stopped
+/// first. Returns the absolute path.
+pub fn prepare_vshard_plugin_dir(name: &str, bucket_count: Option<u32>) -> PathBuf {
+    let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let plugin_path = Path::new(&root_dir).join("tests/tmp").join(name);
+
+    stop_vshard_cluster(&plugin_path);
+    cleanup_dir(&plugin_path);
+    fs::create_dir_all(&plugin_path).unwrap();
+
+    let bucket_count_line = bucket_count
+        .map(|count| format!("  default_bucket_count: {count}\n"))
+        .unwrap_or_default();
+    let picodata_config = format!(
+        "cluster:\n  name: \"{name}\"\n{bucket_count_line}  tier:\n    default:\n      \
+        can_vote: true\n  default_replication_factor: 2\n\ninstance:\n  log:\n    \
+        level: warn\n    format: plain\n  memtx:\n    memory: 67108864\n"
+    );
+    fs::write(plugin_path.join("picodata.yaml"), picodata_config).unwrap();
+    fs::write(plugin_path.join("topology.toml"), VSHARD_TOPOLOGY_TOML).unwrap();
+
+    plugin_path
+}
+
+/// Run parameters for the vshard wait tests: a daemon cluster with
+/// [`vshard_topology`], no plugin build or install, and the vshard wait on.
+/// Ports are shifted by `base_port_offset`, so tests never share ports.
+pub fn vshard_run_params(
+    plugin_path: &Path,
+    base_port_offset: u16,
+) -> pike::cluster::RunParamsBuilder {
+    let mut builder = pike::cluster::RunParamsBuilder::default();
+    builder
+        .topology(vshard_topology())
+        .plugin_path(plugin_path.to_path_buf())
+        .daemon(true)
+        .no_build(true)
+        .disable_plugin_install(true)
+        .wait_vshard_discovery(true)
+        .base_bin_port(3000 + base_port_offset)
+        .base_http_port(8000 + base_port_offset)
+        .base_pg_port(5432 + base_port_offset);
+    builder
+}
+
+/// Stops the cluster of a vshard wait test when dropped, even on panic.
+pub struct VshardClusterGuard {
+    plugin_path: PathBuf,
+}
+
+impl VshardClusterGuard {
+    pub fn new(plugin_path: &Path) -> Self {
+        Self {
+            plugin_path: plugin_path.to_path_buf(),
+        }
+    }
+}
+
+impl Drop for VshardClusterGuard {
+    fn drop(&mut self) {
+        stop_vshard_cluster(&self.plugin_path);
+    }
+}
+
+// Stops all instances of the cluster in `plugin_path`. It is fine if there is no cluster.
+fn stop_vshard_cluster(plugin_path: &Path) {
+    let params = pike::cluster::StopParamsBuilder::default()
+        .plugin_path(plugin_path.to_path_buf())
+        .build()
+        .unwrap();
+    let _ = pike::cluster::stop(&params);
+}
+
+// Lua query for `read_raw_vshard_state`. Returns the number of buckets stored
+// on the instance, and the bucket count per replicaset that each of its routers sees.
+const RAW_VSHARD_STATE_QUERY: &str = "\\lua\n\
+local routers = {}; \
+for name, router in pairs(vshard.router.internal.routers) do \
+    local counts = {}; \
+    for uuid, rs in pairs(router.replicasets) do counts[uuid] = rs.bucket_count; end; \
+    routers[name] = counts; \
+end; \
+return require('json').encode({buckets = box.space._bucket:count(), routers = routers})";
+
+/// Reads the raw vshard state of one instance (stored buckets and router maps),
+/// as the admin console prints it. Returns `None` if the instance does not answer yet.
+pub fn read_raw_vshard_state(admin_socket: &Path) -> Option<String> {
+    run_admin_query(admin_socket, RAW_VSHARD_STATE_QUERY)
+        .filter(|stdout| stdout.contains("buckets"))
+}
+
+/// Returns the name that picodata gave to the instance behind `admin_socket`.
+pub fn read_instance_name(admin_socket: &Path) -> Option<String> {
+    run_admin_query(admin_socket, "\\lua\npico.instance_info().name")?
+        .lines()
+        .find_map(|line| line.strip_prefix("- "))
+        .map(str::to_string)
+}
+
+// Sends `query` to the admin console of an instance and returns its output.
+// Returns `None` if the console cannot be started or the query fails.
+fn run_admin_query(admin_socket: &Path, query: &str) -> Option<String> {
+    let mut admin = Command::new("picodata")
+        .arg("admin")
+        .arg(admin_socket)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    admin.stdin.take()?.write_all(query.as_bytes()).ok()?;
+    let output = admin.wait_with_output().ok()?;
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    output.status.success().then_some(stdout)
+}

@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Added
 
 - Add an option to configure the timeout for waiting instance `Online` status during `pike run`
+- `pike run --wait-vshard-discovery-idle-timeout <SECONDS>` (default 60) fails the vshard wait when resharding or router discovery makes no progress for that long [#409](https://github.com/picodata/pike/issues/409)
 
 ### Fixed
 
@@ -19,6 +20,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 - Bump rust to 1.99
 - Bump picodata-plugin to 26.2.1
 - Bump picotest to 3.2.3
+- `pike run --wait-vshard-discovery` wakes up the vshard rebalancer and router discovery on every poll that finds the cluster not ready instead of waiting for their internal timers, so the cluster gets ready faster
+- `--wait-vshard-discovery-timeout` is the overall limit for resharding and discovery together; its default is now 600 seconds (was 300)
 
 ## [5.8.0]
 
