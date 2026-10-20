@@ -1,7 +1,10 @@
 use crate::commands::{
     lib::timeout::Timeout,
     ride,
-    run::{DEFAULT_VSHARD_DISCOVERY_ENABLED, DEFAULT_VSHARD_DISCOVERY_TIMEOUT},
+    run::{
+        DEFAULT_INSTANCE_ONLINE_TIMEOUT, DEFAULT_VSHARD_DISCOVERY_ENABLED,
+        DEFAULT_VSHARD_DISCOVERY_TIMEOUT,
+    },
     stop::{DEFAULT_STOP_SIGNAL, DEFAULT_STOP_TIMEOUT},
 };
 use anyhow::{bail, Context, Result};
@@ -168,6 +171,14 @@ enum Command {
             help = "Vshard discovery timeout in seconds"
         )]
         wait_vshard_discovery_timeout: Timeout,
+        /// Timeout in seconds for waiting for an instance to become online.
+        #[arg(
+            long,
+            value_name = "SECONDS",
+            default_value_t = DEFAULT_INSTANCE_ONLINE_TIMEOUT,
+            help = "Timeout in seconds for waiting for an instance to become online"
+        )]
+        wait_instance_online_timeout: Timeout,
     },
     /// Stop Picodata cluster or a specific instance
     Stop {
@@ -451,6 +462,7 @@ fn main() -> Result<()> {
             with_audit,
             wait_vshard_discovery,
             wait_vshard_discovery_timeout,
+            wait_instance_online_timeout,
         } => {
             is_required_path_exists(&plugin_path, &topology, CARING_PIKE, 1);
 
@@ -481,6 +493,7 @@ fn main() -> Result<()> {
                 .with_audit(with_audit)
                 .wait_vshard_discovery(wait_vshard_discovery)
                 .wait_vshard_discovery_timeout(wait_vshard_discovery_timeout)
+                .wait_instance_online_timeout(wait_instance_online_timeout)
                 .build()
                 .unwrap();
             commands::run::cmd(params).context("failed to execute Run command")?;

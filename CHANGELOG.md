@@ -6,9 +6,13 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- Add an option to configure the timeout for waiting instance `Online` status during `pike run`
+
 ### Fixed
 
-- Fail with an error if waiting for instance to become `Online` times out
+- Fail with an error if waiting for instance to become `Online` times out ([#421](https://github.com/picodata/pike/issues/421))
 
 ### Changed
 

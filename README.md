@@ -116,7 +116,8 @@ cargo pike run --topology topology.toml --data-dir ./tmp
 - `--with-web-auth` - Оставить включённой аутентификацию WebUI. По умолчанию Pike отключает WebUI auth для локальной разработки запросом `ALTER SYSTEM SET jwt_secret = ''`
 - `--with-audit` - Включить логи аудита. По умолчанию, они отключены. Если параметр указан - каждый инстанс кластера хранит собственный лог аудита под именем `audit.log` в своей директории.
 - `--wait-vshard-discovery` - Ожидать завершения vshard discovery перед запуском plugin SQL. Значение по умолчанию: включено.
-- `--wait-vshard-discovery-timeout` - Таймаут ожидания завершения vshard discovery в секундах. По умолчанию: 300.
+- `--wait-vshard-discovery-timeout` - Таймаут ожидания завершения vshard discovery. По умолчанию: 300 секунд.
+- `--wait-instance-online-timeout` - Таймаут ожидания статуса `Online` у каждого инстанса в кластере. По умолчанию: 300 секунд.
 
 
 Также, можно задать iproto, http и pg порты через `enviroment` в `topology.toml`, они соответсвуют названиям переменных в `picodata run --help`. В `enviroment` выставляются значения вида `<host>:<port>`, работать будут только `127.0.0.1` и `0.0.0.0`, т. к. пайк предназначен для локальной разработки

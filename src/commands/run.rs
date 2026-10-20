@@ -61,7 +61,7 @@ const BAFFLED_WHALE: &str = r"
  ";
 
 // Default timeout for waiting of instance to become Online.
-const DEFAULT_INSTANCE_ONLINE_TIMEOUT: Timeout = Timeout::from_secs(300);
+pub const DEFAULT_INSTANCE_ONLINE_TIMEOUT: Timeout = Timeout::from_secs(300);
 
 // Default timeout for waiting of vshard discovery completion.
 pub const DEFAULT_VSHARD_DISCOVERY_TIMEOUT: Timeout = Timeout::from_secs(300);
@@ -480,7 +480,10 @@ impl PicodataInstance {
         run_params: &Params,
     ) -> Result<Self> {
         let mut pico_instance = Self::spawn(instance_id, plugins_dir, tier, run_params)?;
-        pico_instance.wait_online(&run_params.picodata_path)?;
+        pico_instance.wait_online(
+            &run_params.picodata_path,
+            run_params.wait_instance_online_timeout,
+        )?;
         Ok(pico_instance)
     }
 
@@ -627,7 +630,7 @@ impl PicodataInstance {
 
     /// Wait for a started instance to become Online, learn its name, and start capturing
     /// its output.
-    fn wait_online(&mut self, picodata_path: &PathBuf) -> Result<()> {
+    fn wait_online(&mut self, picodata_path: &PathBuf, timeout: Timeout) -> Result<()> {
         let cluster_dir = self
             .data_dir
             .parent()
@@ -635,7 +638,6 @@ impl PicodataInstance {
 
         let socket_client = self.socket_client(picodata_path);
         let interval = Duration::from_millis(100);
-        let timeout = DEFAULT_INSTANCE_ONLINE_TIMEOUT;
         let start = Instant::now();
 
         log::debug!(
@@ -1132,6 +1134,8 @@ pub struct Params {
     wait_vshard_discovery: bool,
     #[builder(default = DEFAULT_VSHARD_DISCOVERY_TIMEOUT)]
     wait_vshard_discovery_timeout: Timeout,
+    #[builder(default = DEFAULT_INSTANCE_ONLINE_TIMEOUT)]
+    wait_instance_online_timeout: Timeout,
     /// Plugin name -> source of its service config (file or in-memory map).
     /// Replaces `config` from the plugin's section in the topology
     #[builder(default, setter(custom))]
@@ -1400,7 +1404,7 @@ fn start_instances_in_tiers(
 
     // Every instance is started before any is waited for.
     for pico_instance in &mut picodata_processes {
-        pico_instance.wait_online(&params.picodata_path)?;
+        pico_instance.wait_online(&params.picodata_path, params.wait_instance_online_timeout)?;
         log_instance_started(pico_instance.name());
     }
 
