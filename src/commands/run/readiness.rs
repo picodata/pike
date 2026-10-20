@@ -157,7 +157,7 @@ fn wait_for_initial_resharding(
         let replicaset_uuid: String = instance_socket.replicaset_uuid()?;
 
         if instance_socket.is_master_of_replicaset(&replicaset_uuid)? {
-            info!("Replicaset '{replicaset_uuid}' has {instance_bucket_count} known bucket(s)",);
+            info!("Replicaset '{replicaset_uuid}' has {instance_bucket_count} known bucket(s)");
             bucket_count_per_replicaset.insert(replicaset_uuid, instance_bucket_count);
         }
     }

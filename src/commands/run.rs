@@ -561,7 +561,7 @@ impl PicodataInstance {
             "--tier",
             tier,
             "--config-parameter",
-            &format!("cluster.tier={tiers_config}",),
+            &format!("cluster.tier={tiers_config}"),
         ]);
 
         let config_path = run_params.plugin_path.join(&run_params.config_path);
@@ -935,8 +935,7 @@ fn get_external_plugin_path_kind(path: &Path) -> Result<PluginPathKind> {
     // Forbid symlinks explicitly to avoid confusing copies/unpacks
     if path
         .symlink_metadata()
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false)
+        .is_ok_and(|m| m.file_type().is_symlink())
     {
         bail!(
             "symlink as external plugin path is not supported: {}",

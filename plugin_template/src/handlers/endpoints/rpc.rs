@@ -9,13 +9,14 @@ pub struct ExampleResponse {
     pub rpc_hello_response: String,
 }
 
+#[expect(clippy::result_large_err)]
 pub fn register_example_rpc_handle(context: &PicoContext) {
     RouteBuilder::from_pico_context(context)
         .path("/greetings_rpc")
         .register(move |req, _ctx| {
             log::debug!("Received store request: {req:?}");
 
-            let user: User = rmp_serde::from_slice(req.as_bytes()).unwrap();
+            let user: User = req.decode_rmp()?;
 
             log::warn!("Recieved \"{user:?}\" as RPC input");
 
@@ -24,7 +25,7 @@ pub fn register_example_rpc_handle(context: &PicoContext) {
                 rpc_hello_response: format!("Hello {user_name}, long time no see."),
             };
 
-            Ok(rpc::Response::encode_rmp(&response_to_return).unwrap())
+            rpc::Response::encode_rmp(&response_to_return)
         })
         .unwrap();
 }

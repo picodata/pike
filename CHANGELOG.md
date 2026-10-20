@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Changed
+
+- Bump rust to 1.99
+
 ## [5.8.0]
 
 ### Added

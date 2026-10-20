@@ -272,8 +272,7 @@ pub fn assert_path_existance(path: &Path, must_be_symlink: bool) {
 
     let is_symlink = path
         .symlink_metadata()
-        .map(|m| m.file_type().is_symlink())
-        .unwrap_or(false);
+        .is_ok_and(|m| m.file_type().is_symlink());
 
     if must_be_symlink {
         assert!(is_symlink);
