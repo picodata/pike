@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Changed
 
 - Bump rust to 1.99
+- Bump picodata-plugin to 26.2.1
 
 ## [5.8.0]
 
