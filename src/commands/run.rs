@@ -1206,7 +1206,7 @@ where
 
 // При ошибке только предупреждаем, запуск не падает
 fn apply_web_auth_setting(params: &Params, cluster_dir: &Path) -> Result<()> {
-    let Some(socket_path) = find_active_socket_path(cluster_dir)? else {
+    let Some(socket_path) = find_active_socket_path(cluster_dir, None)? else {
         bail!("не удалось найти активный admin.sock для применения настройки WebUI auth");
     };
 
@@ -1460,7 +1460,7 @@ pub fn cluster(mut params: Params) -> Result<Vec<PicodataInstance>> {
         return run_single_instance(&params, plugins_dir.as_ref());
     }
 
-    if let Some(sock_path) = find_active_socket_path(&params.get_cluster_dir())? {
+    if let Some(sock_path) = find_active_socket_path(&params.get_cluster_dir(), None)? {
         info!("Cluster is running (connected via {})", sock_path.display());
         // Reviving terminated instances and exit.
         return start_instances_in_tiers(&params, plugins_dir.as_ref());
