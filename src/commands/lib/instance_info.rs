@@ -6,6 +6,7 @@ use std::error::Error as StdError;
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
+    time::Duration,
 };
 
 const ADMIN_SOCKET_FILENAME: &str = "admin.sock";
@@ -68,6 +69,10 @@ pub enum InstanceState {
 impl InstanceState {
     pub fn is_online(self) -> bool {
         matches!(self, InstanceState::Online)
+    }
+
+    pub fn is_expelled(self) -> bool {
+        matches!(self, InstanceState::Expelled)
     }
 }
 
@@ -149,6 +154,27 @@ impl<'a> InstanceSocketClient<'a> {
     /// Fetches instance name from admin socket.
     pub fn instance_name(&self) -> Result<String> {
         self.get_parsed_lua_output(GET_INSTANCE_NAME)
+    }
+
+    /// Expels the instance with the given picodata name from the cluster.
+    pub fn expel(&self, instance_name: &str, force: bool, timeout: Duration) -> Result<()> {
+        let expelled: bool = self.get_parsed_lua_output(&format!(
+            "\\lua\nreturn pico.expel('{instance_name}', {{ force = {force}, timeout = {} }})",
+            timeout.as_secs()
+        ))?;
+        if !expelled {
+            bail!("picodata refused to expel instance '{instance_name}'");
+        }
+
+        Ok(())
+    }
+
+    /// Fetches state of the instance with the given picodata name
+    pub fn state_of(&self, instance_name: &str) -> Result<InstanceState> {
+        self.get_lua_single_line_output(&format!(
+            "\\lua\nreturn box.space._pico_instance:get('{instance_name}').current_state[1]"
+        ))
+        .and_then(|state| state.parse())
     }
 
     /// Fetches state of the instance from admin socket.
