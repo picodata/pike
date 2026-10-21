@@ -39,6 +39,21 @@ for _, router in pairs(vshard.router.internal.routers) do \
 end; \
 return require('json').encode(out)";
 
+// Lua script that wakes up the rebalancer fiber if this instance runs it. Check the
+// fiber first: the public vshard.storage API raises STORAGE_IS_DISABLED until
+// the storage is configured.
+const WAKE_REBALANCER_LUA: &str = "\
+if vshard.storage.internal.rebalancer_fiber ~= nil then \
+    vshard.storage.rebalancer_wakeup(); \
+end; ";
+
+// Lua script that wakes up the discovery fiber of every router on this instance.
+// picodata has one router per tier and no static router.
+const WAKE_DISCOVERY_LUA: &str = "\
+for _, router in pairs(vshard.router.internal.routers) do \
+    router:discovery_wakeup(); \
+end; ";
+
 fn parse_lua_json(lua_output: &str) -> Result<HashMap<String, u32>> {
     let trimmed = lua_output.trim();
 
@@ -137,6 +152,27 @@ impl<'a> InstanceSocketClient<'a> {
     pub fn vshard_replicaset_map(&self) -> Result<HashMap<String, u32>> {
         self.get_lua_single_line_output(GET_VSHARD_REPLICASET_MAP)
             .and_then(|o| parse_lua_json(&o))
+    }
+
+    /// Wakes up the vshard rebalancer fiber if this instance runs it, and the
+    /// discovery fiber of every vshard router on this instance, in one
+    /// `picodata admin` call.
+    pub fn wake_rebalancer_and_discovery(&self) -> Result<()> {
+        self.wake_up(&format!("{WAKE_REBALANCER_LUA}{WAKE_DISCOVERY_LUA}"))
+    }
+
+    /// Wakes up the discovery fiber of every vshard router on this instance.
+    pub fn wake_discovery(&self) -> Result<()> {
+        self.wake_up(WAKE_DISCOVERY_LUA)
+    }
+
+    // Runs the wakeup Lua code `lua`. `return true` makes the console print a
+    // line, so get_lua_single_line_output has something to read. The admin
+    // console prints a Lua error as a normal `- error: ...` line, so we parse
+    // that `true` to catch the error.
+    fn wake_up(&self, lua: &str) -> Result<()> {
+        self.get_parsed_lua_output::<bool>(&format!("\\lua\n{lua}return true"))
+            .map(|_| ())
     }
 
     /// Fetches configured number of buckets in the instance tier.

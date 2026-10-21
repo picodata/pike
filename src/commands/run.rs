@@ -63,8 +63,10 @@ const BAFFLED_WHALE: &str = r"
 // Default timeout for waiting of instance to become Online.
 pub const DEFAULT_INSTANCE_ONLINE_TIMEOUT: Timeout = Timeout::from_secs(300);
 
-// Default timeout for waiting of vshard discovery completion.
-pub const DEFAULT_VSHARD_DISCOVERY_TIMEOUT: Timeout = Timeout::from_secs(300);
+// Default total timeout for resharding and vshard router discovery together.
+pub const DEFAULT_VSHARD_DISCOVERY_TIMEOUT: Timeout = Timeout::from_secs(600);
+// Default time a vshard wait phase may go without progress before it fails.
+pub const DEFAULT_VSHARD_DISCOVERY_IDLE_TIMEOUT: Timeout = Timeout::from_secs(60);
 pub const DEFAULT_VSHARD_DISCOVERY_ENABLED: bool = true;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1134,6 +1136,8 @@ pub struct Params {
     wait_vshard_discovery: bool,
     #[builder(default = DEFAULT_VSHARD_DISCOVERY_TIMEOUT, setter(into))]
     wait_vshard_discovery_timeout: Timeout,
+    #[builder(default = DEFAULT_VSHARD_DISCOVERY_IDLE_TIMEOUT, setter(into))]
+    wait_vshard_discovery_idle_timeout: Timeout,
     #[builder(default = DEFAULT_INSTANCE_ONLINE_TIMEOUT, setter(into))]
     wait_instance_online_timeout: Timeout,
     /// Plugin name -> source of its service config (file or in-memory map).

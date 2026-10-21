@@ -3,7 +3,7 @@ use crate::commands::{
     ride,
     run::{
         DEFAULT_INSTANCE_ONLINE_TIMEOUT, DEFAULT_VSHARD_DISCOVERY_ENABLED,
-        DEFAULT_VSHARD_DISCOVERY_TIMEOUT,
+        DEFAULT_VSHARD_DISCOVERY_IDLE_TIMEOUT, DEFAULT_VSHARD_DISCOVERY_TIMEOUT,
     },
     stop::{DEFAULT_STOP_SIGNAL, DEFAULT_STOP_TIMEOUT},
 };
@@ -162,15 +162,24 @@ enum Command {
             value_parser = clap::value_parser!(bool)
         )]
         wait_vshard_discovery: bool,
-        /// Timeout in seconds for waiting vshard discovery to complete.
+        /// Total timeout in seconds for resharding and vshard router discovery together.
         #[arg(
             long,
             short,
             value_name = "SECONDS",
             default_value_t = DEFAULT_VSHARD_DISCOVERY_TIMEOUT,
-            help = "Vshard discovery timeout in seconds"
+            help = "Total timeout in seconds for resharding and vshard router discovery together"
         )]
         wait_vshard_discovery_timeout: Timeout,
+        /// Idle timeout in seconds. The vshard wait fails if resharding or router
+        /// discovery makes no progress for this long. With 0, the wait fails on the
+        /// first poll that finds an instance not ready.
+        #[arg(
+            long,
+            value_name = "SECONDS",
+            default_value_t = DEFAULT_VSHARD_DISCOVERY_IDLE_TIMEOUT
+        )]
+        wait_vshard_discovery_idle_timeout: Timeout,
         /// Timeout in seconds for waiting for an instance to become online.
         #[arg(
             long,
@@ -462,6 +471,7 @@ fn main() -> Result<()> {
             with_audit,
             wait_vshard_discovery,
             wait_vshard_discovery_timeout,
+            wait_vshard_discovery_idle_timeout,
             wait_instance_online_timeout,
         } => {
             is_required_path_exists(&plugin_path, &topology, CARING_PIKE, 1);
@@ -493,6 +503,7 @@ fn main() -> Result<()> {
                 .with_audit(with_audit)
                 .wait_vshard_discovery(wait_vshard_discovery)
                 .wait_vshard_discovery_timeout(wait_vshard_discovery_timeout)
+                .wait_vshard_discovery_idle_timeout(wait_vshard_discovery_idle_timeout)
                 .wait_instance_online_timeout(wait_instance_online_timeout)
                 .build()
                 .unwrap();
