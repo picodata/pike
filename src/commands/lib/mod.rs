@@ -21,6 +21,8 @@ pub const LIB_EXT: &str = "so";
 #[cfg(target_os = "macos")]
 pub const LIB_EXT: &str = "dylib";
 
+pub const DEFAULT_DATA_DIR: &str = "./tmp/pike";
+
 pub fn log_instance_skipped(name: impl Display) {
     info!("{name} - {}", "SKIPPED".yellow());
 }

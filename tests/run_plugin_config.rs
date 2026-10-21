@@ -114,7 +114,7 @@ fn cli_run_applies_topology_config() {
     exec_pike(["run", "--daemon", "--plugin-path", PLUGIN_NAME]);
 
     assert_plugin_enabled(PLUGIN_DIR, 1);
-    let stored = get_picodata_table(plugin_dir, Path::new("tmp"), "_pico_plugin_config");
+    let stored = get_picodata_table(plugin_dir, Path::new("tmp/pike"), "_pico_plugin_config");
     assert!(
         stored.contains("it's me") && !stored.contains("it''s me"),
         "{stored}"
@@ -187,7 +187,7 @@ fn run_without_config_key_uses_manifest_defaults() {
     assert_plugin_enabled(PLUGIN_DIR, 1);
     let stored = get_picodata_table(
         Path::new(PLUGIN_DIR),
-        Path::new("tmp"),
+        Path::new("tmp/pike"),
         "_pico_plugin_config",
     );
     assert!(!stored.contains("from_file"), "{stored}");
@@ -224,7 +224,7 @@ fn run_fails_early_on_invalid_config() {
         assert!(msg.contains(expected_err), "{msg}");
 
         // no instance has been started
-        let cluster_dir = Path::new(PLUGIN_DIR).join("tmp/cluster");
+        let cluster_dir = Path::new(PLUGIN_DIR).join("tmp/pike/cluster");
         let started = fs::read_dir(&cluster_dir).into_iter().flatten().any(|e| {
             let dir = e.unwrap().path();
             dir.join("admin.sock").exists() || dir.join("pid").exists()

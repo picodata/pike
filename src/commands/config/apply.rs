@@ -10,6 +10,7 @@ use std::{
 };
 use toml_edit::DocumentMut;
 
+use crate::commands::lib::DEFAULT_DATA_DIR;
 use crate::helpers::cargo_manifest::{
     read_package_info, read_toml_document, MANIFEST_TEMPLATE_NAME,
 };
@@ -251,7 +252,7 @@ impl Default for ConfigSource {
 pub struct Params {
     #[builder(default, setter(custom))]
     config_source: ConfigSource,
-    #[builder(default = "PathBuf::from(\"./tmp\")")]
+    #[builder(default = "PathBuf::from(DEFAULT_DATA_DIR)")]
     data_dir: PathBuf,
     #[builder(default = "PathBuf::from(\"./\")")]
     plugin_path: PathBuf,
