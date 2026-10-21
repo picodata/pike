@@ -1,8 +1,8 @@
 mod helpers;
 
 use helpers::{
-    exec_pike, get_picodata_table, init_plugin_workspace, run_cluster, CmdArguments, PLUGIN_DIR,
-    TESTS_DIR,
+    exec_pike, get_picodata_table, init_plugin_workspace, run_cluster, Cluster, CmdArguments,
+    PLUGIN_DIR, TESTS_DIR,
 };
 use rstest::rstest;
 use std::{
@@ -56,7 +56,7 @@ fn test_config_apply(#[case] params_builder: ApplyParamsBuilder) {
     let _cluster_handle = run_cluster(
         Duration::from_secs(120),
         TOTAL_INSTANCES,
-        CmdArguments::default(),
+        &CmdArguments::default(),
     )
     .unwrap();
 
@@ -86,7 +86,7 @@ fn test_corrupted_config() {
     let _cluster_handle = run_cluster(
         Duration::from_secs(120),
         TOTAL_INSTANCES,
-        CmdArguments::default(),
+        &CmdArguments::default(),
     )
     .unwrap();
 
@@ -175,6 +175,7 @@ fn test_workspace_config_apply() {
 
     // Run cluster and check successful plugin installation
     run(params).unwrap();
+    let _cluster = Cluster::manage(&workspace_path);
 
     let start = Instant::now();
     let mut is_cluster_valid = false;
@@ -261,8 +262,6 @@ fn test_workspace_config_apply() {
     }
 
     assert!(is_cluster_valid, "Failed to apply config for one plugin");
-
-    exec_pike(["stop", "--plugin-path", "workspace_plugin"]);
 }
 
 #[test]
