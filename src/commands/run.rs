@@ -1094,7 +1094,7 @@ fn prepare_external_plugins(params: &Params, plugin_run_dir: &Path) -> Result<()
 #[derive(Debug, Builder, Clone)]
 pub struct Params {
     topology: Topology,
-    #[builder(default = "PathBuf::from(\"./tmp\")")]
+    #[builder(default = "PathBuf::from(\"./tmp/pike\")")]
     data_dir: PathBuf,
     #[builder(default = "false")]
     disable_plugin_install: bool,

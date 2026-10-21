@@ -21,7 +21,7 @@ fn assert_cluster_stopped(timeout: Duration) {
     while Instant::now().duration_since(start) < timeout {
         // Search for PID's of picodata instances and check their liveness
         let mut cluster_stopped = true;
-        let cluster_dir = Path::new(PLUGIN_DIR).join("tmp").join("cluster");
+        let cluster_dir = Path::new(PLUGIN_DIR).join("tmp/pike").join("cluster");
 
         for instance_dir in fs::read_dir(cluster_dir).unwrap() {
             // Check if proccess of picodata is still running
@@ -117,7 +117,7 @@ fn test_pike_stop_of_specific_instance() {
         target_instance,
     ]);
 
-    let data_dir = Path::new(PLUGIN_DIR).join("tmp").join("cluster");
+    let data_dir = Path::new(PLUGIN_DIR).join("tmp/pike").join("cluster");
     let instance_dir = data_dir.join(target_instance);
 
     // Wait while stopping instance is not killed.

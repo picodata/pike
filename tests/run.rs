@@ -115,7 +115,7 @@ fn test_cluster_daemon_and_arguments() {
         run_cluster(Duration::from_secs(120), TOTAL_INSTANCES, run_params).unwrap();
 
     // Validate each instances's PID
-    for entry in fs::read_dir(Path::new(PLUGIN_DIR).join("tmp").join("cluster")).unwrap() {
+    for entry in fs::read_dir(Path::new(PLUGIN_DIR).join("tmp/pike").join("cluster")).unwrap() {
         let entry = entry.unwrap();
         let pid_path = entry.path().join("pid");
 
@@ -178,8 +178,9 @@ fn test_topology_struct_run() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_instance");
-        let pico_plugin = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_plugin");
+        let pico_instance =
+            get_picodata_table(plugin_path, Path::new("tmp/pike"), "_pico_instance");
+        let pico_plugin = get_picodata_table(plugin_path, Path::new("tmp/pike"), "_pico_plugin");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -333,8 +334,9 @@ fn test_topology_struct_one_tier() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_instance");
-        let pico_plugin = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_plugin");
+        let pico_instance =
+            get_picodata_table(plugin_path, Path::new("tmp/pike"), "_pico_instance");
+        let pico_plugin = get_picodata_table(plugin_path, Path::new("tmp/pike"), "_pico_plugin");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -380,7 +382,8 @@ fn test_topology_struct_run_no_plugin() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(plugin_path, Path::new("tmp"), "_pico_instance");
+        let pico_instance =
+            get_picodata_table(plugin_path, Path::new("tmp/pike"), "_pico_instance");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -450,10 +453,10 @@ fn test_picodata_instance_interaction() {
     assert_eq!(properties.instance_id, &1);
     assert_eq!(properties.tier, "default");
     assert_eq!(properties.instance_name, "default_1_1");
-    assert_eq!(data_dir, "./tests/tmp/test-plugin/./tmp/cluster/i1");
+    assert_eq!(data_dir, "./tests/tmp/test-plugin/./tmp/pike/cluster/i1");
     assert_eq!(
         Path::new(data_dir).join("audit.log").to_str().unwrap(),
-        "./tests/tmp/test-plugin/./tmp/cluster/i1/audit.log"
+        "./tests/tmp/test-plugin/./tmp/pike/cluster/i1/audit.log"
     );
 
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
@@ -552,7 +555,7 @@ fn test_quickstart_pipeline() {
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
         let pico_plugin_config =
-            get_picodata_table(&quickstart_path, Path::new("tmp"), "_pico_instance");
+            get_picodata_table(&quickstart_path, Path::new("tmp/pike"), "_pico_instance");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -620,7 +623,7 @@ fn test_workspace_pipeline() {
 
     let params = RunParamsBuilder::default()
         .topology(topology)
-        .data_dir(Path::new("./tmp").to_path_buf())
+        .data_dir(Path::new("./tmp/pike").to_path_buf())
         .disable_plugin_install(false)
         .base_http_port(8000)
         .picodata_path(Path::new("picodata").to_path_buf())
@@ -639,8 +642,10 @@ fn test_workspace_pipeline() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(&workspace_path, Path::new("tmp"), "_pico_instance");
-        let pico_plugin = get_picodata_table(&workspace_path, Path::new("tmp"), "_pico_plugin");
+        let pico_instance =
+            get_picodata_table(&workspace_path, Path::new("tmp/pike"), "_pico_instance");
+        let pico_plugin =
+            get_picodata_table(&workspace_path, Path::new("tmp/pike"), "_pico_plugin");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -729,7 +734,8 @@ fn test_run_without_plugin_directory() {
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(&plugin_dir, Path::new("tmp"), "_pico_instance");
+        let pico_instance =
+            get_picodata_table(&plugin_dir, Path::new("tmp/pike"), "_pico_instance");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -772,8 +778,11 @@ fn test_run_with_several_tiers() {
         // |-------------+--------------------------------------+---------+-----------------+--------------------------------------+---------------+---------------+----------------+---------+--------------------|
         // | default_1_2 | ef6ccfee-c855-479b-a15a-a050a6493d08 | 2       | default_1       | 25d1dfd1-bbb4-4fd0-880f-77b7512b07b6 | ["Online", 1] | ["Online", 1] | {}             | default | 25.1.1-0-g38230552 |
         // |-------------+--------------------------------------+---------+-----------------+--------------------------------------+---------------+---------------+----------------+---------+--------------------|
-        let pico_instance =
-            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_instance");
+        let pico_instance = get_picodata_table(
+            Path::new(PLUGIN_DIR),
+            Path::new("tmp/pike"),
+            "_pico_instance",
+        );
 
         // Tier default == 1 replicaset and replication_factor is 3 => "default" must be met 9 times
         if pico_instance.matches("default").count() != 9 {
@@ -803,7 +812,7 @@ fn test_run_with_several_tiers() {
         // | test-plugin | true    | ["example_service"] | 0.1.0   | A plugin for picodata | ["migrations/0001_init.sql"] |
         // +-------------+---------+---------------------+---------+-----------------------+------------------------------+
         let pico_plugin =
-            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_plugin");
+            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp/pike"), "_pico_plugin");
         if !pico_plugin.contains("true") {
             dbg!(pico_plugin);
             continue;
@@ -815,8 +824,11 @@ fn test_run_with_several_tiers() {
         // +=================================================================================+
         // | test-plugin | example_service | 0.1.0   | ["second", "third"] | default service |
         // +-------------+-----------------+---------+---------------------+-----------------+
-        let pico_service =
-            get_picodata_table(Path::new(PLUGIN_DIR), Path::new("tmp"), "_pico_service");
+        let pico_service = get_picodata_table(
+            Path::new(PLUGIN_DIR),
+            Path::new("tmp/pike"),
+            "_pico_service",
+        );
         if !(pico_service.contains("second") && pico_service.contains("third")) {
             dbg!(pico_service);
             continue;
@@ -1065,7 +1077,7 @@ fn run_specific_instance() {
         target_instance,
     ]);
 
-    let data_dir = plugin_path.join("tmp").join("cluster");
+    let data_dir = plugin_path.join("tmp/pike").join("cluster");
     let instance_dir = data_dir.join(target_instance);
 
     // Wait while stopping instance is not killed.
@@ -1142,7 +1154,7 @@ fn run_specific_instance() {
 #[test]
 fn revive_terminated_instances() {
     let plugin_path = Path::new(PLUGIN_DIR);
-    let data_dir = plugin_path.join("tmp").join("cluster");
+    let data_dir = plugin_path.join("tmp/pike").join("cluster");
     init_plugin(PLUGIN_NAME);
     let terminated_instances = ["i1", "i2"];
 
@@ -1255,7 +1267,7 @@ fn run_with_env_variables() {
     assert_eq!(properties.instance_name, "default_1_1");
     assert_eq!(
         properties.data_dir.to_str().unwrap(),
-        "./tests/tmp/test-plugin/./tmp/cluster/i1"
+        "./tests/tmp/test-plugin/./tmp/pike/cluster/i1"
     );
 
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
