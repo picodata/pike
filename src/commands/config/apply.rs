@@ -251,7 +251,7 @@ impl Default for ConfigSource {
 pub struct Params {
     #[builder(default, setter(custom))]
     config_source: ConfigSource,
-    #[builder(default = "PathBuf::from(\"./tmp\")")]
+    #[builder(default = "PathBuf::from(\"./tmp/pike\")")]
     data_dir: PathBuf,
     #[builder(default = "PathBuf::from(\"./\")")]
     plugin_path: PathBuf,

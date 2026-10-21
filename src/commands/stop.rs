@@ -22,7 +22,7 @@ pub const DEFAULT_STOP_TIMEOUT: Timeout = Timeout::from_secs(30);
 
 #[derive(Debug, Builder)]
 pub struct Params {
-    #[builder(default = "PathBuf::from(\"./tmp\")")]
+    #[builder(default = "PathBuf::from(\"./tmp/pike\")")]
     data_dir: PathBuf,
     #[builder(default = "PathBuf::from(\"./\")")]
     plugin_path: PathBuf,

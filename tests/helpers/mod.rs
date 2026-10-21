@@ -365,7 +365,7 @@ pub fn run_cluster(
     loop {
         // Get path to data dir from cmd_args
         let cur_run_args = &cluster_handle.cmd_args.run_args;
-        let mut data_dir_path = Path::new("tmp");
+        let mut data_dir_path = Path::new("tmp/pike");
         if let Some(index) = cur_run_args.iter().position(|x| x == "--data-dir") {
             if index + 1 < cur_run_args.len() {
                 data_dir_path = Path::new(&cur_run_args[index + 1]);
@@ -435,10 +435,13 @@ where
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance =
-            get_picodata_table(plugin_path.as_ref(), Path::new("tmp"), "_pico_instance");
+        let pico_instance = get_picodata_table(
+            plugin_path.as_ref(),
+            Path::new("tmp/pike"),
+            "_pico_instance",
+        );
         let pico_plugin =
-            get_picodata_table(plugin_path.as_ref(), Path::new("tmp"), "_pico_plugin");
+            get_picodata_table(plugin_path.as_ref(), Path::new("tmp/pike"), "_pico_plugin");
         let current_state = ClusterStateToCheck {
             pico_instance: &pico_instance,
             pico_plugin: &pico_plugin,

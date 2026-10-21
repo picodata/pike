@@ -56,7 +56,7 @@ fn test_pre_install_sql_execution() {
 
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
         let result = std::panic::catch_unwind(|| {
-            get_picodata_table(plugin_path, Path::new("tmp"), "\"pre_install_check\"")
+            get_picodata_table(plugin_path, Path::new("tmp/pike"), "\"pre_install_check\"")
         });
 
         if let Ok(output) = result {

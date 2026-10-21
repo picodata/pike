@@ -99,7 +99,7 @@ enum Command {
         #[arg(short, long, value_name = "TOPOLOGY", default_value = "topology.toml")]
         topology: PathBuf,
         /// Path to data directory of the cluster
-        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
+        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp/pike")]
         data_dir: PathBuf,
         /// Disable the automatic installation of plugins
         #[arg(long)]
@@ -183,7 +183,7 @@ enum Command {
     /// Stop Picodata cluster or a specific instance
     Stop {
         /// Path to data directory of the cluster
-        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
+        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp/pike")]
         data_dir: PathBuf,
         /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
@@ -214,7 +214,7 @@ enum Command {
     /// Remove all data files of previous cluster run
     Clean {
         /// Path to data directory of the cluster
-        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
+        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp/pike")]
         data_dir: PathBuf,
         /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
@@ -225,7 +225,7 @@ enum Command {
         /// Name of the Picodata instance to enter. Example value: `default_1_1`
         instance_name: String,
         /// Path to data directory of the cluster
-        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
+        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp/pike")]
         data_dir: PathBuf,
         /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
@@ -324,7 +324,7 @@ enum Config {
         )]
         config_path: PathBuf,
         /// Path to data directory of the cluster
-        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp")]
+        #[arg(long, value_name = "DATA_DIR", default_value = "./tmp/pike")]
         data_dir: PathBuf,
         /// Path to the plugin's project directory
         #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
