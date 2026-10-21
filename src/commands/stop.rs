@@ -1,6 +1,6 @@
 use crate::commands::lib::{
     timeout::Timeout,
-    {get_active_socket_path, get_cluster_dir},
+    {get_active_socket_path, get_cluster_dir, DEFAULT_DATA_DIR},
 };
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
@@ -22,7 +22,7 @@ pub const DEFAULT_STOP_TIMEOUT: Timeout = Timeout::from_secs(30);
 
 #[derive(Debug, Builder)]
 pub struct Params {
-    #[builder(default = "PathBuf::from(\"./tmp\")")]
+    #[builder(default = "PathBuf::from(DEFAULT_DATA_DIR)")]
     data_dir: PathBuf,
     #[builder(default = "PathBuf::from(\"./\")")]
     plugin_path: PathBuf,

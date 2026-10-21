@@ -54,7 +54,7 @@ fn test_post_install_sql_execution() {
 
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
         let result = std::panic::catch_unwind(|| {
-            get_picodata_table(plugin_path, Path::new("tmp"), "_pico_user")
+            get_picodata_table(plugin_path, Path::new("tmp/pike"), "_pico_user")
         });
 
         if let Ok(output) = result {

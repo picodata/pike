@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Breaking changes
+
+- Default `--data-dir` of `pike run`, `stop`, `clean`, `enter` and `config apply` (and the default `data_dir` of the corresponding library parameter builders) is now `./tmp/pike` instead of `./tmp`.
+
 ### Added
 
 - Add an option to configure the timeout for waiting instance `Online` status during `pike run`

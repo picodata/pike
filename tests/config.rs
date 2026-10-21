@@ -70,7 +70,7 @@ fn test_config_apply(#[case] params_builder: ApplyParamsBuilder) {
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
         let pico_plugin_config = get_picodata_table(
             Path::new(PLUGIN_DIR),
-            Path::new("tmp"),
+            Path::new("tmp/pike"),
             "_pico_plugin_config",
         );
         if pico_plugin_config.contains("value") && pico_plugin_config.contains("changed") {
@@ -179,8 +179,10 @@ fn test_workspace_config_apply() {
     let start = Instant::now();
     let mut is_cluster_valid = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(&workspace_path, Path::new("tmp"), "_pico_instance");
-        let pico_plugin = get_picodata_table(&workspace_path, Path::new("tmp"), "_pico_plugin");
+        let pico_instance =
+            get_picodata_table(&workspace_path, Path::new("tmp/pike"), "_pico_instance");
+        let pico_plugin =
+            get_picodata_table(&workspace_path, Path::new("tmp/pike"), "_pico_plugin");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -208,8 +210,11 @@ fn test_workspace_config_apply() {
     is_cluster_valid = false;
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_plugin_config =
-            get_picodata_table(&workspace_path, Path::new("tmp"), "_pico_plugin_config");
+        let pico_plugin_config = get_picodata_table(
+            &workspace_path,
+            Path::new("tmp/pike"),
+            "_pico_plugin_config",
+        );
 
         if pico_plugin_config.contains("value")
             && pico_plugin_config.contains("changed")
@@ -248,8 +253,11 @@ fn test_workspace_config_apply() {
     is_cluster_valid = false;
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_plugin_config =
-            get_picodata_table(&workspace_path, Path::new("tmp"), "_pico_plugin_config");
+        let pico_plugin_config = get_picodata_table(
+            &workspace_path,
+            Path::new("tmp/pike"),
+            "_pico_plugin_config",
+        );
 
         if pico_plugin_config.contains("value")
             && pico_plugin_config.contains("changed")
