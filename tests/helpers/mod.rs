@@ -490,7 +490,7 @@ pub fn get_picodata_table(plugin_path: &Path, data_dir_path: &Path, table_name: 
         .join("\n")
 }
 
-fn set_current_version_of_pike(plugin_path: &OsStr) {
+pub fn set_current_version_of_pike(plugin_path: &OsStr) {
     let cargo_path = Path::new(TESTS_DIR).join(plugin_path).join("Cargo.toml");
     let Ok(cargo_content) = fs::read_to_string(&cargo_path) else {
         return;
@@ -506,17 +506,28 @@ fn set_current_version_of_pike(plugin_path: &OsStr) {
     writeln!(&file, "{cargo_with_fixed_pike}").unwrap();
 }
 
-pub fn exec_pike<I, S>(args: I)
+pub fn exec_pike<I, S>(args: I) -> String
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr> + std::fmt::Debug,
 {
-    exec_pike_in(args, TESTS_DIR);
+    exec_pike_in(args, TESTS_DIR)
 }
 
 // Spawn child process where pike is executed
 // Funciton waits for child process to end
-pub fn exec_pike_in<I, S, WD>(args: I, work_dir: WD)
+// Returns stdout and stderr of pike joined line by line
+pub fn exec_pike_in<I, S, WD>(args: I, work_dir: WD) -> String
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr> + std::fmt::Debug,
+    WD: AsRef<Path> + std::fmt::Debug,
+{
+    exec_pike_with_env_in(args, work_dir, &[])
+}
+
+/// Same as [`exec_pike_in`], but sets additional environment variables for pike.
+pub fn exec_pike_with_env_in<I, S, WD>(args: I, work_dir: WD, envs: &[(&str, &OsStr)]) -> String
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr> + std::fmt::Debug,
@@ -534,6 +545,7 @@ where
     let mut pike_child = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
         .arg("pike")
         .args(args)
+        .envs(envs.iter().copied())
         .current_dir(work_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -542,6 +554,7 @@ where
 
     let status = pike_child.wait().unwrap();
 
+    let mut pike_output = String::new();
     let outputs: [Box<dyn Read + Send>; 2] = [
         Box::new(pike_child.stdout.unwrap()),
         Box::new(pike_child.stderr.unwrap()),
@@ -551,10 +564,89 @@ where
         for line in reader.lines() {
             let line = line.expect("failed to read picodata admin output");
             println!("{line}");
+            pike_output.push_str(&line);
+            pike_output.push('\n');
         }
     }
 
     assert!(status.success(), "pike run failed");
+    pike_output
+}
+
+/// Stages and commits every file of the git repository at `dir`,
+/// independent of the global git config.
+///
+/// After the commit run pike without `--plugin-path`: otherwise
+/// [`set_current_version_of_pike`] rewrites `Cargo.toml` and the tree becomes dirty.
+pub fn git_commit_all(dir: &Path) {
+    run_git_successfully(dir, &["add", "-A"]);
+    run_git_successfully(
+        dir,
+        &[
+            "-c",
+            "user.name=pike-tests",
+            "-c",
+            "user.email=pike-tests@localhost",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            "test commit",
+        ],
+    );
+}
+
+/// Returns the hash of `HEAD` of the git repository at `dir`.
+pub fn git_head(dir: &Path) -> String {
+    run_git_successfully(dir, &["rev-parse", "HEAD"])
+}
+
+/// Runs `git -C <dir> <args>`, asserts that it succeeded and returns its trimmed stdout.
+fn run_git_successfully(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed in {}: {}",
+        dir.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// Content of `build_info.yaml` from a packed plugin archive.
+#[derive(Debug, PartialEq, serde::Deserialize)]
+pub struct ArchivedBuildInfo {
+    pub commit: String,
+    pub dirty: bool,
+}
+
+/// Unpacks `archive` into a fresh `unpack_dir` and reads its `build_info.yaml`.
+/// Returns `None` if the archive has no such file.
+pub fn unpack_build_info(
+    archive: &Path,
+    unpack_dir: &Path,
+    plugin_name: &str,
+    version: &str,
+) -> Option<ArchivedBuildInfo> {
+    cleanup_dir(unpack_dir);
+    fs::create_dir_all(unpack_dir).unwrap();
+    unpack_archive(archive, unpack_dir);
+    let build_info_path = unpack_dir
+        .join(plugin_name)
+        .join(version)
+        .join("build_info.yaml");
+    if !build_info_path.exists() {
+        return None;
+    }
+    let content = fs::read_to_string(&build_info_path).unwrap();
+    Some(serde_norway::from_str(&content).unwrap())
 }
 
 pub fn wait_for_proc(proc: &mut Child, timeout: Duration) {

@@ -3,15 +3,26 @@ use crate::commands::lib::{cargo_build, BuildType, LIB_EXT};
 use crate::helpers::cargo_manifest::{
     read_package_info, read_toml_document, MANIFEST_TEMPLATE_NAME,
 };
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use log::{debug, info, warn};
+use serde::Serialize;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 use std::{env, fs};
-use tar::Builder;
+use tar::{Builder, Header};
 use toml_edit::DocumentMut;
+
+const BUILD_INFO_FILE_NAME: &str = "build_info.yaml";
+
+/// Git state of the plugin repository at packing time, stored in the archive as `build_info.yaml`.
+#[derive(Debug, PartialEq, Serialize)]
+struct BuildInfo {
+    commit: String,
+    dirty: bool,
+}
 
 /// Validate that pre-built plugin shipping directory contains required files
 /// Required: manifest.yaml and `lib{normalized_package_name}.{LIB_EXT}`
@@ -78,6 +89,26 @@ pub fn cmd(
             .with_context(|| format!("building {build_type} version of plugin"))?;
     }
 
+    // Collected once after the build, so that changes made by the build itself
+    // (e.g. a created or updated `Cargo.lock`) count as dirty and the warning is not
+    // lost in the cargo output. Every workspace member archive gets the same info.
+    let build_info = collect_build_info(&root_dir)
+        .inspect_err(|reason| {
+            warn!("Git commit info is unavailable, {BUILD_INFO_FILE_NAME} will not be added to the archive: {reason:#}");
+        })
+        .ok();
+    if let Some(build_info) = &build_info {
+        if build_info.dirty {
+            warn!(
+                "Repository working tree has uncommitted changes: commit {} in {BUILD_INFO_FILE_NAME} does not fully describe the archive contents",
+                build_info.commit
+            );
+        }
+        if no_build {
+            info!("--no-build: {BUILD_INFO_FILE_NAME} reflects the repository state at packing time, not at build time");
+        }
+    }
+
     let build_root = {
         let effective_target_dir = if target_dir.is_absolute() {
             target_dir.clone()
@@ -107,7 +138,13 @@ pub fn cmd(
                 let member_path = root_dir.join(member_str);
                 if member_path.join(MANIFEST_TEMPLATE_NAME).exists() {
                     info!("Packing workspace member plugin: {}", member_path.display());
-                    create_plugin_archive(&build_root, &member_path, &root_dir, None)?;
+                    create_plugin_archive(
+                        &build_root,
+                        &member_path,
+                        &root_dir,
+                        None,
+                        build_info.as_ref(),
+                    )?;
                     packaged_any = true;
                 } else {
                     debug!(
@@ -125,7 +162,13 @@ pub fn cmd(
         return Ok(());
     }
 
-    create_plugin_archive(&build_root, &root_dir, &root_dir, archive_name)
+    create_plugin_archive(
+        &build_root,
+        &root_dir,
+        &root_dir,
+        archive_name,
+        build_info.as_ref(),
+    )
 }
 
 fn create_plugin_archive(
@@ -133,6 +176,7 @@ fn create_plugin_archive(
     plugin_dir: &Path,
     workspace_root: &Path,
     archive_name: Option<&PathBuf>,
+    build_info: Option<&BuildInfo>,
 ) -> Result<()> {
     let package_info = read_package_info(plugin_dir, workspace_root)
         .context("failed to resolve package info for packaging")?;
@@ -185,11 +229,11 @@ fn create_plugin_archive(
             &plugin_build_dir.join(&lib_name),
             &mut tarball,
         )?;
-        archive_if_exists(
-            &root_in_archive,
-            &plugin_build_dir.join("manifest.yaml"),
-            &mut tarball,
-        )?;
+        let manifest_path = plugin_build_dir.join("manifest.yaml");
+        archive_if_exists(&root_in_archive, &manifest_path, &mut tarball)?;
+        if let Some(build_info) = build_info {
+            append_build_info(&root_in_archive, build_info, &manifest_path, &mut tarball)?;
+        }
         archive_if_exists(
             &root_in_archive,
             &plugin_build_dir.join("migrations"),
@@ -394,6 +438,91 @@ fn detect_macos_os_suffix() -> Result<String> {
 
 // --------------- Helpers ---------------
 
+/// Runs `git -C <plugin_dir> <args>` and returns its raw output.
+/// `Err` only when the process cannot be started.
+fn run_git(plugin_dir: &Path, args: &[&str]) -> Result<Output> {
+    Command::new("git")
+        .arg("-C")
+        .arg(plugin_dir)
+        .args(args)
+        .output()
+        .context("failed to run git, is it installed?")
+}
+
+/// Returns trimmed stdout of a finished `git <command>`, or `Err` with its stderr if it failed.
+fn successful_git_stdout(command: &str, output: &Output) -> Result<String> {
+    ensure!(
+        output.status.success(),
+        "git {command} failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Collects commit hash and dirtiness of the git repository containing `plugin_dir`.
+/// `Err` holds a human-readable reason why the info is unavailable.
+fn collect_build_info(plugin_dir: &Path) -> Result<BuildInfo> {
+    // `--verify --quiet` distinguishes the failures by exit code alone, independent of locale:
+    // 1 - HEAD does not point to a commit (fresh `git init`), 128 - not a repository or other fatal error.
+    // Plain `git rev-parse HEAD` prints "HEAD" to stdout even when it fails.
+    let rev_parse = run_git(
+        plugin_dir,
+        &["rev-parse", "--verify", "--quiet", "HEAD^{commit}"],
+    )?;
+    ensure!(
+        rev_parse.status.code() != Some(1),
+        "repository has no commits (HEAD does not point to a commit)"
+    );
+    let commit = successful_git_stdout("rev-parse", &rev_parse)?;
+
+    // `--untracked-files=normal` overrides a user's `status.showUntrackedFiles`,
+    // so untracked files always make the tree dirty.
+    // `--no-optional-locks` keeps `status` read-only: it does not take `index.lock` to refresh
+    // the index, so it neither changes `.git/index` nor blocks git commands run concurrently.
+    let status = run_git(
+        plugin_dir,
+        &[
+            "--no-optional-locks",
+            "status",
+            "--porcelain",
+            "--untracked-files=normal",
+        ],
+    )?;
+    let dirty = !successful_git_stdout("status", &status)?.is_empty();
+
+    Ok(BuildInfo { commit, dirty })
+}
+
+/// Serializes `build_info` and appends it as `build_info.yaml` to `root_in_archive` in the tarball.
+/// The entry gets owner, mode and mtime of `metadata_source_path`, so it looks like
+/// the other files of the archive, which `append_file` takes from the disk.
+fn append_build_info(
+    root_in_archive: &Path,
+    build_info: &BuildInfo,
+    metadata_source_path: &Path,
+    tarball: &mut Builder<&mut GzEncoder<File>>,
+) -> Result<()> {
+    let content = serde_norway::to_string(build_info)
+        .with_context(|| format!("failed to serialize {BUILD_INFO_FILE_NAME}"))?;
+    let source_metadata = fs::metadata(metadata_source_path).with_context(|| {
+        format!(
+            "failed to read metadata of {}",
+            metadata_source_path.display()
+        )
+    })?;
+
+    let mut header = Header::new_gnu();
+    header.set_metadata(&source_metadata);
+    header.set_size(content.len() as u64);
+    tarball
+        .append_data(
+            &mut header,
+            root_in_archive.join(BUILD_INFO_FILE_NAME),
+            content.as_bytes(),
+        )
+        .with_context(|| format!("failed to append {BUILD_INFO_FILE_NAME}"))
+}
+
 fn archive_if_exists(
     root_in_archive: &Path,
     file_path: &Path,
@@ -431,13 +560,14 @@ fn archive_if_exists(
 #[cfg(test)]
 mod tests {
     use super::{
-        create_archive_path, generate_archive_path, resolve_archive_path,
-        validate_plugin_build_tree, LIB_EXT,
+        append_build_info, archive_if_exists, collect_build_info, create_archive_path,
+        generate_archive_path, resolve_archive_path, run_git, successful_git_stdout,
+        validate_plugin_build_tree, BuildInfo, BUILD_INFO_FILE_NAME, LIB_EXT,
     };
     use std::fs;
     use std::io::Write;
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn tmp_dir(prefix: &str) -> PathBuf {
         let ts = SystemTime::now()
@@ -588,5 +718,262 @@ mod tests {
         let p = generate_archive_path(Path::new("/tmp/build/rel"), "pkg", "0.1.0").unwrap();
         let name = p.file_name().unwrap().to_string_lossy();
         assert!(name.starts_with("pkg_0.1.0-") && name.ends_with(".tar.gz"));
+    }
+
+    fn run_git_successfully(dir: &Path, args: &[&str]) -> String {
+        successful_git_stdout(&args.join(" "), &run_git(dir, args).unwrap()).unwrap()
+    }
+
+    fn init_git_repository(prefix: &str) -> PathBuf {
+        let dir = tmp_dir(prefix);
+        fs::create_dir_all(&dir).unwrap();
+        run_git_successfully(&dir, &["init", "-q"]);
+        dir
+    }
+
+    /// Commits every file of the repository without depending on the global git config.
+    fn commit_all_files(dir: &Path) {
+        run_git_successfully(dir, &["add", "-A"]);
+        run_git_successfully(
+            dir,
+            &[
+                "-c",
+                "user.name=pike-tests",
+                "-c",
+                "user.email=pike-tests@localhost",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "--no-verify",
+                "-m",
+                "init",
+            ],
+        );
+    }
+
+    fn head_commit(dir: &Path) -> String {
+        run_git_successfully(dir, &["rev-parse", "HEAD"])
+    }
+
+    /// Creates a repository with one committed file `a.txt`.
+    fn init_committed_repository(prefix: &str) -> PathBuf {
+        let dir = init_git_repository(prefix);
+        touch(&dir.join("a.txt"));
+        commit_all_files(&dir);
+        dir
+    }
+
+    fn append_line(path: &Path, line: &str) {
+        let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+        writeln!(file, "{line}").unwrap();
+    }
+
+    const SAMPLE_COMMIT: &str = "658364a999a9a051ccb1821fabf8af738b3364b9";
+
+    #[test]
+    fn build_info_serializes() {
+        for dirty in [false, true] {
+            let build_info = BuildInfo {
+                commit: SAMPLE_COMMIT.into(),
+                dirty,
+            };
+            assert_eq!(
+                serde_norway::to_string(&build_info).unwrap(),
+                format!("commit: {SAMPLE_COMMIT}\ndirty: {dirty}\n")
+            );
+        }
+    }
+
+    #[test]
+    fn collect_build_info_fails_without_commits() {
+        let dir = init_git_repository("bi-no-commits");
+        touch(&dir.join("a.txt"));
+
+        let reason = format!("{:#}", collect_build_info(&dir).unwrap_err());
+        assert!(
+            reason.contains("repository has no commits"),
+            "Unexpected reason: {reason}"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collect_build_info_clean_tree() {
+        let dir = init_committed_repository("bi-clean");
+
+        let build_info = collect_build_info(&dir).unwrap();
+        assert_eq!(
+            build_info,
+            BuildInfo {
+                commit: head_commit(&dir),
+                dirty: false
+            }
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collect_build_info_dirty_tree() {
+        type MakeDirty = fn(&Path);
+        let cases: [(&str, MakeDirty); 4] = [
+            ("modified-tracked", |dir| {
+                append_line(&dir.join("a.txt"), "changed");
+            }),
+            ("staged", |dir| {
+                touch(&dir.join("b.txt"));
+                run_git_successfully(dir, &["add", "b.txt"]);
+            }),
+            ("untracked", |dir| touch(&dir.join("b.txt"))),
+            // `--untracked-files=normal` must override the user's config.
+            ("show-untracked-files-no", |dir| {
+                run_git_successfully(dir, &["config", "status.showUntrackedFiles", "no"]);
+                touch(&dir.join("b.txt"));
+            }),
+        ];
+        for (case, make_dirty) in cases {
+            let dir = init_committed_repository(&format!("bi-dirty-{case}"));
+            make_dirty(&dir);
+
+            assert_eq!(
+                collect_build_info(&dir).unwrap(),
+                BuildInfo {
+                    commit: head_commit(&dir),
+                    dirty: true
+                },
+                "case {case}"
+            );
+
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    #[test]
+    fn collect_build_info_does_not_write_index() {
+        let dir = init_committed_repository("bi-no-index-write");
+        // Same content with another mtime: `git status` refreshes the stat info of the entry
+        // and, unless optional locks are disabled, writes the index back.
+        fs::File::options()
+            .write(true)
+            .open(dir.join("a.txt"))
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(1_600_000_000))
+            .unwrap();
+        let index_path = dir.join(".git").join("index");
+        let index_before = fs::read(&index_path).unwrap();
+
+        assert!(!collect_build_info(&dir).unwrap().dirty);
+        assert_eq!(
+            fs::read(&index_path).unwrap(),
+            index_before,
+            "git index must not be rewritten"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collect_build_info_ignores_gitignored_file() {
+        let dir = init_git_repository("bi-gitignored");
+        fs::write(dir.join(".gitignore"), "ignored.txt\n").unwrap();
+        commit_all_files(&dir);
+        touch(&dir.join("ignored.txt"));
+
+        assert!(!collect_build_info(&dir).unwrap().dirty);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collect_build_info_in_subdirectory_sees_whole_repository() {
+        let dir = init_git_repository("bi-subdirectory");
+        let plugin_dir = dir.join("sub").join("plugin");
+        touch(&plugin_dir.join("a.txt"));
+        commit_all_files(&dir);
+
+        assert_eq!(
+            collect_build_info(&plugin_dir).unwrap(),
+            BuildInfo {
+                commit: head_commit(&dir),
+                dirty: false
+            }
+        );
+
+        touch(&dir.join("outside.txt"));
+        assert!(collect_build_info(&plugin_dir).unwrap().dirty);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn append_build_info_copies_metadata_of_manifest_entry() {
+        use flate2::{read::GzDecoder, write::GzEncoder, Compression};
+        use std::io::Read;
+
+        let dir = tmp_dir("bi-header");
+        let plugin_build_dir = dir.join("build");
+        let manifest_path = plugin_build_dir.join("manifest.yaml");
+        touch(&manifest_path);
+        // An mtime far from "now" tells the build time apart from the packing time.
+        fs::File::options()
+            .write(true)
+            .open(&manifest_path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_secs(1_600_000_000))
+            .unwrap();
+
+        let archive_path = dir.join("plugin.tar.gz");
+        let root_in_archive = Path::new("plugin").join("0.1.0");
+        let build_info = BuildInfo {
+            commit: SAMPLE_COMMIT.into(),
+            dirty: false,
+        };
+        {
+            let mut encoder = GzEncoder::new(
+                fs::File::create(&archive_path).unwrap(),
+                Compression::default(),
+            );
+            let mut tarball = tar::Builder::new(&mut encoder);
+            archive_if_exists(&root_in_archive, &manifest_path, &mut tarball).unwrap();
+            append_build_info(&root_in_archive, &build_info, &manifest_path, &mut tarball).unwrap();
+            tarball.finish().unwrap();
+            drop(tarball);
+            encoder.try_finish().unwrap();
+        }
+
+        let mut archive = tar::Archive::new(GzDecoder::new(fs::File::open(&archive_path).unwrap()));
+        let mut manifest_header = None;
+        let mut build_info_entry = None;
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let file_name = entry.path().unwrap().file_name().unwrap().to_owned();
+            if file_name == "manifest.yaml" {
+                manifest_header = Some(entry.header().clone());
+            } else if file_name == BUILD_INFO_FILE_NAME {
+                let mut content = String::new();
+                entry.read_to_string(&mut content).unwrap();
+                build_info_entry = Some((entry.header().clone(), content));
+            }
+        }
+        let manifest_header = manifest_header.unwrap();
+        let (build_info_header, content) = build_info_entry.unwrap();
+
+        assert_eq!(content, serde_norway::to_string(&build_info).unwrap());
+        let uid_gid_mode_mtime = |header: &tar::Header| {
+            (
+                header.uid().unwrap(),
+                header.gid().unwrap(),
+                header.mode().unwrap(),
+                header.mtime().unwrap(),
+            )
+        };
+        assert_eq!(
+            uid_gid_mode_mtime(&build_info_header),
+            uid_gid_mode_mtime(&manifest_header)
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

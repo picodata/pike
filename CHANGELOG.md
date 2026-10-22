@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Added
 
 - Add an option to configure the timeout for waiting instance `Online` status during `pike run`
+- `plugin pack` adds `build_info.yaml` with the commit hash of the plugin repository and a `dirty` flag to the archive ([#402](https://github.com/picodata/pike/issues/402))
 
 ### Fixed
 
