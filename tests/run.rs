@@ -2,12 +2,12 @@ mod helpers;
 
 use helpers::{
     await_picodata_admin, build_plugin, cleanup_dir, exec_pike, exec_pike_in, get_picodata_table,
-    init_plugin, init_plugin_with_args, init_plugin_workspace, run_cluster,
-    set_default_tier_bucket_count, wait_cluster_start_completed,
+    git_commit_all, git_head, init_plugin, init_plugin_with_args, init_plugin_workspace,
+    run_cluster, set_default_tier_bucket_count, unpack_build_info, wait_cluster_start_completed,
 };
 use helpers::{
-    CmdArguments, TestPluginInitParams, CLUSTER_DIR, DATA_DIR, LIB_EXT, PLUGIN_DIR, PLUGIN_NAME,
-    TESTS_DIR,
+    ArchivedBuildInfo, CmdArguments, TestPluginInitParams, CLUSTER_DIR, DATA_DIR, LIB_EXT,
+    PLUGIN_DIR, PLUGIN_NAME, TESTS_DIR,
 };
 use pike::cluster::{run, MigrationContextVar, Plugin, RunParamsBuilder, Service, Tier, Topology};
 use std::collections::BTreeMap;
@@ -946,6 +946,66 @@ fn run_with_external_plugin_archive() {
             assert_eq!(state.pico_plugin.matches("true").count(), 2);
             true
         });
+
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+
+    assert!(cluster_started);
+}
+
+#[test]
+fn run_with_external_plugin_archive_with_build_info() {
+    let plugin_path = Path::new(PLUGIN_DIR);
+    init_plugin(PLUGIN_NAME);
+    build_plugin(&helpers::BuildType::Debug, "0.1.0", plugin_path);
+
+    // setup external plugin, commit it and pack
+    let ext_plugin_root = PathBuf::from("./tests/tmp_ext/external-plugin-1");
+    init_plugin_with_args(TestPluginInitParams::<String> {
+        name: "external-plugin-1".to_string(),
+        plugin_path: ext_plugin_root.join(""),
+        shared_target_path: "./tests/tmp_ext/ext_shared_target".into(),
+        working_dir: "./tests/tmp_ext".into(),
+        ..Default::default()
+    });
+    build_plugin(&helpers::BuildType::Release, "0.1.0", &ext_plugin_root);
+    git_commit_all(&ext_plugin_root);
+    exec_pike_in(["plugin", "pack"], &ext_plugin_root);
+
+    let ext_release_dir = ext_plugin_root.join("target").join("release");
+    let ext_plugin_archive =
+        find_os_suffixed_archive(&ext_release_dir, "external-plugin-1", "0.1.0");
+    assert_eq!(
+        unpack_build_info(
+            &ext_plugin_archive,
+            &ext_release_dir.join("unpacked_build_info"),
+            "external-plugin-1",
+            "0.1.0",
+        ),
+        Some(ArchivedBuildInfo {
+            commit: git_head(&ext_plugin_root),
+            dirty: false,
+        })
+    );
+
+    let plugins = BTreeMap::from([
+        (PLUGIN_NAME.to_string(), Plugin::default()),
+        (
+            "external-plugin-1".to_string(),
+            Plugin {
+                path: Some(ext_plugin_archive),
+                ..Default::default()
+            },
+        ),
+    ]);
+    let params = make_ext_run_params(plugin_path, plugins).build().unwrap();
+
+    run(params).unwrap();
+
+    let cluster_started = wait_cluster_start_completed(plugin_path, |state| {
+        assert_eq!(state.pico_instance.matches("Online").count(), 8);
+        assert_eq!(state.pico_plugin.matches("true").count(), 2);
+        true
+    });
 
     exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
 
