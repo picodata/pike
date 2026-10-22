@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 - Add an option to configure the timeout for waiting instance `Online` status during `pike run`
 - Add `--wait-vshard-idle-timeout` option to `pike run`. [#409](https://github.com/picodata/pike/issues/409)
+- Add git commit info (`build_info.yaml`) to `plugin pack` archive [#402](https://github.com/picodata/pike/issues/402)
 
 ### Fixed
 
