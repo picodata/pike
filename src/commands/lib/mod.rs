@@ -179,8 +179,11 @@ pub fn get_active_socket_path(cluster_dir: &Path, instance_name: &str) -> Option
     None
 }
 
-// Scan directory with instances and return the first active socket path
-pub fn find_active_socket_path(cluster_dir: &Path) -> Result<Option<PathBuf>> {
+// Scan directory with instances and return the first active socket path.
+pub fn find_active_socket_path(
+    cluster_dir: &Path,
+    exclude: Option<&str>,
+) -> Result<Option<PathBuf>> {
     if !cluster_dir.exists() {
         return Ok(None);
     }
@@ -191,8 +194,17 @@ pub fn find_active_socket_path(cluster_dir: &Path) -> Result<Option<PathBuf>> {
     ))?;
 
     for current_dir in dirs {
-        let dir_name = current_dir?.file_name();
+        let current_dir = current_dir?;
+        if fs::symlink_metadata(current_dir.path())?.is_symlink() {
+            continue;
+        }
+
+        let dir_name = current_dir.file_name();
         if let Some(name) = dir_name.to_str() {
+            if exclude == Some(name) {
+                continue;
+            }
+
             let socket_path = get_active_socket_path(cluster_dir, name);
             if socket_path.is_some() {
                 return Ok(socket_path);
