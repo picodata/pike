@@ -1,17 +1,18 @@
 mod helpers;
 
 use helpers::{
-    build_plugin, cleanup_dir, exec_pike, exec_pike_in, get_picodata_table, init_plugin,
-    init_plugin_with_args, init_plugin_workspace, run_cluster, wait_cluster_start_completed,
+    await_picodata_admin, build_plugin, cleanup_dir, exec_pike, exec_pike_in, get_picodata_table,
+    init_plugin, init_plugin_with_args, init_plugin_workspace, run_cluster,
+    set_default_tier_bucket_count, wait_cluster_start_completed,
 };
 use helpers::{CmdArguments, TestPluginInitParams, LIB_EXT, PLUGIN_DIR, PLUGIN_NAME, TESTS_DIR};
 use pike::cluster::{run, MigrationContextVar, Plugin, RunParamsBuilder, Service, Tier, Topology};
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::{
     fs::{self},
     path::Path,
@@ -1285,4 +1286,210 @@ fn run_with_wait_vshard_discovery() {
     });
 
     assert!(cluster_started);
+}
+
+fn pike_run_command(args: &[&str]) -> Command {
+    let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let mut command = Command::new(format!("{root_dir}/target/debug/cargo-pike"));
+    command
+        .args(["pike", "run", "--daemon", "--wait-vshard-discovery"])
+        .args(args)
+        .current_dir(PLUGIN_DIR);
+    command
+}
+
+fn pike_run_and_stop(args: &[&str]) -> std::process::Output {
+    let output = pike_run_command(args).output().unwrap();
+    println!("{}", String::from_utf8_lossy(&output.stderr));
+
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+
+    output
+}
+
+fn parse_vshard_wait_duration(log: &str) -> Duration {
+    const WAIT_COMPLETED: &str = "Vshard discovery has been completed on all instances within ";
+    let value = log
+        .lines()
+        .find_map(|line| line.split_once(WAIT_COMPLETED))
+        .map_or_else(
+            || panic!("no '{WAIT_COMPLETED}' in the pike log"),
+            |(_, value)| value.trim(),
+        );
+    let (number, scale) = [("ms", 1e-3), ("s", 1.0)]
+        .into_iter()
+        .find_map(|(unit, scale)| value.strip_suffix(unit).map(|number| (number, scale)))
+        .unwrap_or_else(|| panic!("unexpected duration: '{value}'"));
+    let number: f64 = number
+        .parse()
+        .unwrap_or_else(|_| panic!("unexpected duration: '{value}'"));
+    Duration::from_secs_f64(number * scale)
+}
+
+#[test]
+fn run_with_wait_vshard_fast_cluster() {
+    init_plugin(PLUGIN_NAME);
+
+    let output = pike_run_and_stop(&[]);
+
+    let log = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "pike run failed:\n{log}");
+    let wait = parse_vshard_wait_duration(&log);
+    assert!(
+        wait < Duration::from_secs(5),
+        "waiting for vshard took {wait:?}"
+    );
+}
+
+#[test]
+fn run_with_wait_vshard_slow_resharding() {
+    const IDLE_TIMEOUT: Duration = Duration::from_secs(3);
+    init_plugin(PLUGIN_NAME);
+    set_default_tier_bucket_count(Path::new(PLUGIN_DIR), 60000);
+
+    let output = pike_run_and_stop(&[
+        "--wait-vshard-idle-timeout",
+        &IDLE_TIMEOUT.as_secs().to_string(),
+        "--wait-vshard-discovery-timeout",
+        "120",
+    ]);
+
+    let log = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "pike run failed:\n{log}");
+
+    let wait = parse_vshard_wait_duration(&log);
+    assert!(
+        wait > IDLE_TIMEOUT * 2,
+        "waiting for vshard took {wait:?}, not longer than the idle timeout"
+    );
+}
+
+fn run_lua_on_i1(lua: &str) {
+    const DONE: &str = "lua chunk is done";
+    let mut admin = await_picodata_admin(
+        Duration::from_secs(60),
+        Path::new(PLUGIN_DIR),
+        Path::new("tmp"),
+    )
+    .unwrap();
+    admin
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(format!("\\lua\n{lua} return '{DONE}'\n").as_bytes())
+        .expect("Failed to write data into admin socket");
+    admin.wait().unwrap();
+
+    let mut output = String::new();
+    admin
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut output)
+        .expect("Failed to read output");
+    assert!(output.contains(DONE), "failed to run Lua on i1: {output}");
+}
+
+fn disable_router_discovery_on_i1() {
+    run_lua_on_i1(
+        "for _, router in pairs(vshard.router.internal.routers) do \
+            router:discovery_set('off') \
+        end",
+    );
+}
+
+fn pike_run_and_stop_with_action(
+    mut command: Command,
+    trigger: &str,
+    action: impl FnOnce(),
+) -> (std::process::ExitStatus, String) {
+    let mut pike_run = command.stderr(Stdio::piped()).spawn().unwrap();
+
+    let mut log = String::new();
+    let mut stderr = BufReader::new(pike_run.stderr.take().unwrap());
+    let mut line = String::new();
+    while stderr.read_line(&mut line).unwrap() > 0 {
+        let triggered = line.contains(trigger);
+        log.push_str(&line);
+        line.clear();
+        if triggered {
+            action();
+            break;
+        }
+    }
+    stderr.read_to_string(&mut log).unwrap();
+    let status = pike_run.wait().unwrap();
+    println!("{log}");
+
+    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
+
+    (status, log)
+}
+
+#[test]
+fn run_with_wait_vshard_stuck_discovery() {
+    init_plugin(PLUGIN_NAME);
+    set_default_tier_bucket_count(Path::new(PLUGIN_DIR), 60000);
+
+    let command = pike_run_command(&[
+        "--wait-vshard-idle-timeout",
+        "5",
+        "--wait-vshard-discovery-timeout",
+        "60",
+    ]);
+
+    let (status, log) =
+        pike_run_and_stop_with_action(command, "Waiting for vshard initialization", || {
+            disable_router_discovery_on_i1();
+        });
+
+    assert!(!status.success(), "pike run must fail:\n{log}");
+    assert!(
+        log.contains("waiting for vshard initialization")
+            && log.contains("no progress within 5s (idle timeout)"),
+        "pike run must fail by the idle timeout:\n{log}"
+    );
+}
+
+#[test]
+fn run_with_wait_vshard_total_timeout() {
+    init_plugin(PLUGIN_NAME);
+    set_default_tier_bucket_count(Path::new(PLUGIN_DIR), 60000);
+
+    let output = pike_run_and_stop(&[
+        "--wait-vshard-idle-timeout",
+        "60",
+        "--wait-vshard-discovery-timeout",
+        "5",
+    ]);
+
+    let log = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "pike run must fail:\n{log}");
+    assert!(
+        log.contains("timed out within 5s (total timeout)"),
+        "pike run must fail by the total timeout:\n{log}"
+    );
+}
+
+#[test]
+fn run_with_wait_vshard_wakeup_error() {
+    init_plugin(PLUGIN_NAME);
+    set_default_tier_bucket_count(Path::new(PLUGIN_DIR), 60000);
+
+    let command = pike_run_command(&[]);
+    let (status, log) =
+        pike_run_and_stop_with_action(command, "Waiting for vshard discovery on", || {
+            run_lua_on_i1(
+                "vshard.storage.rebalancer_wakeup = function() error('test error') end \
+                for _, router in pairs(vshard.router.internal.routers) do \
+                    router.discovery_wakeup = function() error('test error') end \
+                end",
+            );
+        });
+
+    assert!(!status.success(), "pike run must fail:\n{log}");
+    assert!(
+        log.contains("wakeup failed") && log.contains("test error"),
+        "pike run must fail with the wakeup error:\n{log}"
+    );
 }

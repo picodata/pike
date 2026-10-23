@@ -490,6 +490,24 @@ pub fn get_picodata_table(plugin_path: &Path, data_dir_path: &Path, table_name: 
         .join("\n")
 }
 
+/// Sets the bucket count of the `default` tier in `picodata.yaml` of the plugin
+/// created from the template.
+pub fn set_default_tier_bucket_count(plugin_path: &Path, bucket_count: u32) {
+    let config_path = plugin_path.join("picodata.yaml");
+    let config = fs::read_to_string(&config_path).unwrap();
+    let tier = "  tier:\n    default:\n";
+    assert!(
+        config.contains(tier),
+        "no default tier in {}:\n{config}",
+        config_path.display()
+    );
+    fs::write(
+        &config_path,
+        config.replace(tier, &format!("{tier}      bucket_count: {bucket_count}\n")),
+    )
+    .unwrap();
+}
+
 fn set_current_version_of_pike(plugin_path: &OsStr) {
     let cargo_path = Path::new(TESTS_DIR).join(plugin_path).join("Cargo.toml");
     let Ok(cargo_content) = fs::read_to_string(&cargo_path) else {

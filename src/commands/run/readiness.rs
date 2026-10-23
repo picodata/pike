@@ -1,8 +1,12 @@
-use crate::commands::{lib::timeout::Timeout, run::Params};
+use crate::commands::{
+    lib::{instance_info::InstanceSocketClient, timeout::Timeout},
+    run::Params,
+};
 use crate::healthcheck::api;
-use anyhow::{bail, Result};
+use anyhow::{bail, ensure, Context, Result};
 use log::{debug, info};
 use std::collections::HashMap;
+use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -69,28 +73,35 @@ pub(super) fn wait_instances_ready(instances: &[PicodataInstance]) -> Result<()>
 ///    Waits until `vshard.router` on every instance reflects the actual cluster state by
 ///    verifying that bucket counts per replicaset match those observed on storage.
 ///
+/// On every polling iteration the vshard rebalancer or router discovery
+/// is woken up on each instance, so that waiting doesn't depend on
+/// internal vshard timers.
+///
+/// Both phases share one total timeout (`wait_vshard_discovery_timeout`). Each phase
+/// also fails if nothing changes for longer than the idle timeout
+/// (`wait_vshard_idle_timeout`).
 pub(super) fn wait_vshard_discovery(instances: &[PicodataInstance], params: &Params) -> Result<()> {
-    let timeout = params.wait_vshard_discovery_timeout;
+    let start = Instant::now();
+    let policy = PollPolicy::new(
+        params.wait_vshard_discovery_timeout,
+        params.wait_vshard_idle_timeout,
+        CHECK_INTERVAL,
+    );
     info!(
-        "Waiting for vshard discovery on {} instance(s) (timeout {}s)",
+        "Waiting for vshard discovery on {} instance(s) (timeout {}s, idle timeout {}s)",
         instances.len(),
-        timeout.as_secs()
+        policy.total_timeout.as_secs(),
+        policy.idle_timeout.as_secs()
     );
 
-    let start = Instant::now();
     let picodata_path = &params.picodata_path;
     let bucket_count_per_replicaset =
-        wait_for_initial_resharding(instances, picodata_path, timeout)?;
-
-    let Some(time_left) = timeout.checked_sub(start.elapsed()) else {
-        bail!("no time left for vshard initialization");
-    };
-
+        wait_for_initial_resharding(instances, picodata_path, &policy)?;
     wait_for_vshard_router_init(
         instances,
         picodata_path,
         &bucket_count_per_replicaset,
-        time_left,
+        &policy,
     )?;
 
     info!(
@@ -101,66 +112,43 @@ pub(super) fn wait_vshard_discovery(instances: &[PicodataInstance], params: &Par
     Ok(())
 }
 
-// Waits for initial vshard resharding to complete on all instances.
-// Returns a map of replicaset UUID → bucket count (collected from masters),
-// or fails if the timeout is exceeded.
+/// Waits for initial vshard resharding to complete on all instances.
+/// Returns a map of replicaset UUID → bucket count (collected from masters),
+/// or fails if the total or idle timeout is exceeded.
 fn wait_for_initial_resharding(
     instances: &[PicodataInstance],
     picodata_path: &PathBuf,
-    timeout: Timeout,
+    policy: &PollPolicy,
 ) -> Result<HashMap<String, u32>> {
     let start = Instant::now();
-    let mut bucket_count_per_replicaset: HashMap<String, u32> = HashMap::new();
+    info!("Waiting for initial resharding");
 
-    info!(
-        "Waiting for initial resharding (timeout {}s)",
-        timeout.as_secs()
-    );
+    let expected_bucket_counts = collect_expected_bucket_counts(instances, picodata_path)
+        .context("unable to collect expected bucket counts")?;
+    let mut poller = Poller::new(policy);
 
-    for instance in instances {
-        let instance_socket = instance.socket_client(picodata_path);
-        let tier_replicaset_count: u32 = instance_socket.tier_replicaset_count()?;
-        let tier_bucket_count: u32 = instance_socket.tier_bucket_count()?;
+    let bucket_count_per_replicaset = loop {
+        wakeup_rebalancer(instances, picodata_path)?;
 
-        // Wait for the current instance to complete resharding.
-
-        debug!(
-            "Instance '{}': awaiting resharding completion",
-            instance.instance_name
-        );
-
-        let instance_bucket_count = loop {
-            let instance_bucket_count: u32 = instance_socket.bucket_count()?;
-
-            if (tier_replicaset_count * instance_bucket_count).abs_diff(tier_bucket_count)
-                < tier_replicaset_count
-            {
-                debug!(
-                    "Instance '{}': resharding completed (bucket_count = {})",
-                    instance.instance_name, instance_bucket_count
-                );
-                break instance_bucket_count;
-            }
-
-            if start.elapsed() >= *timeout {
-                bail!(
-                    "Resharding timed out on instance '{}' within {}s",
-                    instance.instance_name,
-                    timeout.as_secs()
-                );
-            }
-
-            thread::sleep(CHECK_INTERVAL);
-        };
-
-        // If current instance is master, preserve number of buckets in the map.
-        let replicaset_uuid: String = instance_socket.replicaset_uuid()?;
-
-        if instance_socket.is_master_of_replicaset(&replicaset_uuid)? {
-            info!("Replicaset '{replicaset_uuid}' has {instance_bucket_count} known bucket(s)");
-            bucket_count_per_replicaset.insert(replicaset_uuid, instance_bucket_count);
+        let bucket_count_per_instance =
+            read_all(instances, picodata_path, InstanceSocketClient::bucket_count)?;
+        if is_resharding_complete(
+            instances,
+            &expected_bucket_counts,
+            &bucket_count_per_instance,
+        ) {
+            // The master role is checked after resharding: it may change while waiting.
+            break collect_master_bucket_counts(
+                instances,
+                picodata_path,
+                &bucket_count_per_instance,
+            )?;
         }
-    }
+
+        poller
+            .wait_next(&bucket_count_per_instance)
+            .context("waiting for initial resharding")?;
+    };
 
     info!(
         "Initial resharding completed across all instances in {:.2?}",
@@ -170,62 +158,96 @@ fn wait_for_initial_resharding(
     Ok(bucket_count_per_replicaset)
 }
 
+fn collect_expected_bucket_counts(
+    instances: &[PicodataInstance],
+    picodata_path: &PathBuf,
+) -> Result<HashMap<String, RangeInclusive<u32>>> {
+    let mut result = HashMap::new();
+    for instance in instances {
+        if result.contains_key(&instance.tier) {
+            continue;
+        }
+        let client = instance.socket_client(picodata_path);
+        let replicaset_count = client.tier_replicaset_count()?;
+        let bucket_count = client.tier_bucket_count()?;
+        ensure!(
+            replicaset_count > 0,
+            "tier '{}' has no replicasets",
+            instance.tier
+        );
+        let expected = bucket_count / replicaset_count..=bucket_count.div_ceil(replicaset_count);
+        result.insert(instance.tier.clone(), expected);
+    }
+    Ok(result)
+}
+
+fn is_resharding_complete(
+    instances: &[PicodataInstance],
+    expected_bucket_counts: &HashMap<String, RangeInclusive<u32>>,
+    bucket_count_per_instance: &HashMap<String, u32>,
+) -> bool {
+    instances.iter().all(|instance| {
+        let expected = expected_bucket_counts.get(&instance.tier).unwrap();
+        bucket_count_per_instance
+            .get(&instance.instance_name)
+            .is_some_and(|bucket_count| expected.contains(bucket_count))
+    })
+}
+
+fn collect_master_bucket_counts(
+    instances: &[PicodataInstance],
+    picodata_path: &PathBuf,
+    bucket_count_per_instance: &HashMap<String, u32>,
+) -> Result<HashMap<String, u32>> {
+    let mut result = HashMap::new();
+    for instance in instances {
+        let name = &instance.instance_name;
+        let client = instance.socket_client(picodata_path);
+        let replicaset_uuid = client
+            .replicaset_uuid()
+            .with_context(|| format!("instance '{name}'"))?;
+        let is_master = client
+            .is_master_of_replicaset(&replicaset_uuid)
+            .with_context(|| format!("instance '{name}'"))?;
+        if is_master {
+            let bucket_count = *bucket_count_per_instance.get(name).unwrap();
+            info!("Replicaset '{replicaset_uuid}' has {bucket_count} known bucket(s)");
+            result.insert(replicaset_uuid, bucket_count);
+        }
+    }
+    Ok(result)
+}
+
 /// Waits until vshard.router is initialized and synchronized on all instances,
-/// or returns an error if the timeout is exceeded.
+/// or returns an error if the total or idle timeout is exceeded.
 fn wait_for_vshard_router_init(
     instances: &[PicodataInstance],
     picodata_path: &PathBuf,
     bucket_count_per_replicaset: &HashMap<String, u32>,
-    timeout: Duration,
+    policy: &PollPolicy,
 ) -> Result<()> {
     let start = Instant::now();
+    info!("Waiting for vshard initialization");
 
-    info!(
-        "Waiting for vshard initialization (timeout {}s)",
-        timeout.as_secs()
-    );
+    let mut poller = Poller::new(policy);
+    loop {
+        wakeup_discovery(instances, picodata_path)?;
 
-    for instance in instances {
-        let instance_socket = instance.socket_client(picodata_path);
-
-        debug!(
-            "Instance '{}': awaiting vshard.router initialization",
-            instance.instance_name
-        );
-
-        loop {
-            // Fetch vshard.router map from socket.
-            match instance_socket.vshard_replicaset_map() {
-                Ok(map) if map == *bucket_count_per_replicaset => {
-                    debug!(
-                        "Instance '{}': has synced vshard router",
-                        instance.instance_name
-                    );
-                    break;
-                }
-                Ok(map) => {
-                    debug!(
-                        "Instance '{}': vshard.router not yet synced",
-                        instance.instance_name
-                    );
-                    debug!("vshard.router state: {map:?}");
-                }
-                Err(err) => {
-                    // Likely vshard.router not yet available, so
-                    // lua returned an error.
-                    debug!("Unable to get vshard replicaset map: {err:}");
-                }
-            }
-
-            if start.elapsed() >= timeout {
-                bail!(
-                    "Initialization of vshard.router timed out within {}s",
-                    timeout.as_secs()
-                );
-            }
-
-            thread::sleep(CHECK_INTERVAL);
+        let router_view_per_instance = read_all(
+            instances,
+            picodata_path,
+            InstanceSocketClient::vshard_replicaset_map,
+        )?;
+        if router_view_per_instance
+            .values()
+            .all(|view| view == bucket_count_per_replicaset)
+        {
+            break;
         }
+
+        poller
+            .wait_next(&router_view_per_instance)
+            .context("waiting for vshard initialization")?;
     }
 
     info!(
@@ -234,4 +256,189 @@ fn wait_for_vshard_router_init(
     );
 
     Ok(())
+}
+
+fn wakeup_rebalancer(instances: &[PicodataInstance], picodata_path: &PathBuf) -> Result<()> {
+    for instance in instances {
+        instance
+            .socket_client(picodata_path)
+            .rebalancer_wakeup()
+            .with_context(|| {
+                format!(
+                    "instance '{}': rebalancer wakeup failed",
+                    instance.instance_name
+                )
+            })?;
+    }
+    Ok(())
+}
+
+fn wakeup_discovery(instances: &[PicodataInstance], picodata_path: &PathBuf) -> Result<()> {
+    for instance in instances {
+        instance
+            .socket_client(picodata_path)
+            .router_discovery_wakeup()
+            .with_context(|| {
+                format!(
+                    "instance '{}': router discovery wakeup failed",
+                    instance.instance_name
+                )
+            })?;
+    }
+    Ok(())
+}
+
+/// Fails on the first failed read.
+fn read_all<'a, V>(
+    instances: &[PicodataInstance],
+    picodata_path: &'a PathBuf,
+    read: impl Fn(&InstanceSocketClient<'a>) -> Result<V>,
+) -> Result<HashMap<String, V>> {
+    instances
+        .iter()
+        .map(|instance| {
+            let name = &instance.instance_name;
+            let value = read(&instance.socket_client(picodata_path))
+                .with_context(|| format!("instance '{name}'"))?;
+            Ok((name.clone(), value))
+        })
+        .collect()
+}
+
+/// Limits for polling vshard readiness, shared by both phases.
+struct PollPolicy {
+    deadline: Instant,
+    /// Duration `deadline` was computed from, for messages.
+    total_timeout: Duration,
+    /// A phase fails if its observed state doesn't change for this long.
+    idle_timeout: Duration,
+    interval: Duration,
+}
+
+impl PollPolicy {
+    fn new(total_timeout: Timeout, idle_timeout: Timeout, interval: Duration) -> Self {
+        let total_timeout = total_timeout.into();
+        Self {
+            deadline: Instant::now() + total_timeout,
+            total_timeout,
+            idle_timeout: idle_timeout.into(),
+            interval,
+        }
+    }
+}
+
+struct Poller<'a, V> {
+    policy: &'a PollPolicy,
+    last_observed: Option<V>,
+    last_progress: Instant,
+    last_tick: Instant,
+}
+
+impl<'a, V: Clone + PartialEq> Poller<'a, V> {
+    fn new(policy: &'a PollPolicy) -> Self {
+        let now = Instant::now();
+        Self {
+            policy,
+            last_observed: None,
+            last_progress: now,
+            last_tick: now,
+        }
+    }
+
+    /// Records `observed` and sleeps until the next iteration.
+    ///
+    /// Fails instead of sleeping if the deadline has passed or `observed`
+    /// hasn't changed for the idle timeout.
+    fn wait_next(&mut self, observed: &V) -> Result<()> {
+        if self.last_observed.as_ref() != Some(observed) {
+            self.last_observed = Some(observed.clone());
+            self.last_progress = Instant::now();
+        }
+
+        if Instant::now() >= self.policy.deadline {
+            bail!(
+                "timed out within {}s (total timeout)",
+                self.policy.total_timeout.as_secs(),
+            );
+        }
+
+        if self.last_progress.elapsed() >= self.policy.idle_timeout {
+            bail!(
+                "no progress within {}s (idle timeout)",
+                self.policy.idle_timeout.as_secs(),
+            );
+        }
+
+        let until_next_tick = self
+            .policy
+            .interval
+            .saturating_sub(self.last_tick.elapsed());
+        let until_deadline = self
+            .policy
+            .deadline
+            .saturating_duration_since(Instant::now());
+        thread::sleep(until_next_tick.min(until_deadline));
+        self.last_tick = Instant::now();
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const INTERVAL: Duration = Duration::from_millis(10);
+    const IDLE_TIMEOUT: Duration = Duration::from_millis(200);
+    const NO_TOTAL_TIMEOUT: Duration = Duration::from_secs(60);
+
+    fn policy(total_timeout: Duration, idle_timeout: Duration) -> PollPolicy {
+        PollPolicy::new(total_timeout.into(), idle_timeout.into(), INTERVAL)
+    }
+
+    fn poll_for(poller: &mut Poller<u32>, state: u32, duration: Duration) -> Result<()> {
+        let start = Instant::now();
+        while start.elapsed() < duration {
+            poller.wait_next(&state)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unchanged_state_fails_with_idle_timeout() {
+        let policy = policy(NO_TOTAL_TIMEOUT, IDLE_TIMEOUT);
+        let mut poller = Poller::new(&policy);
+        let start = Instant::now();
+
+        let err = poll_for(&mut poller, 1, NO_TOTAL_TIMEOUT).unwrap_err();
+
+        assert!(err.to_string().contains("idle timeout"), "{err:#}");
+        assert!(start.elapsed() >= IDLE_TIMEOUT);
+    }
+
+    #[test]
+    fn changed_state_resets_idle_timeout() {
+        let policy = policy(NO_TOTAL_TIMEOUT, IDLE_TIMEOUT);
+        let mut poller = Poller::new(&policy);
+
+        // Each stall is shorter than the idle timeout, but together they are longer.
+        let stall = IDLE_TIMEOUT * 3 / 4;
+        poll_for(&mut poller, 1, stall).unwrap();
+        poll_for(&mut poller, 2, stall).unwrap();
+        poll_for(&mut poller, 3, stall).unwrap();
+    }
+
+    #[test]
+    fn continuous_progress_fails_with_total_timeout() {
+        let total_timeout = Duration::from_millis(100);
+        let start = Instant::now();
+        let policy = policy(total_timeout, NO_TOTAL_TIMEOUT);
+        let mut poller = Poller::new(&policy);
+
+        let err = (0..)
+            .find_map(|state: u32| poller.wait_next(&state).err())
+            .unwrap();
+
+        assert!(err.to_string().contains("total timeout"), "{err:#}");
+        assert!(start.elapsed() >= total_timeout);
+    }
 }

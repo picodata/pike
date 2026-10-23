@@ -63,8 +63,11 @@ const BAFFLED_WHALE: &str = r"
 // Default timeout for waiting of instance to become Online.
 pub const DEFAULT_INSTANCE_ONLINE_TIMEOUT: Timeout = Timeout::from_secs(300);
 
-// Default timeout for waiting of vshard discovery completion.
-pub const DEFAULT_VSHARD_DISCOVERY_TIMEOUT: Timeout = Timeout::from_secs(300);
+// Default total timeout for waiting of vshard rebalancing and discovery completion.
+pub const DEFAULT_VSHARD_DISCOVERY_TIMEOUT: Timeout = Timeout::from_secs(600);
+
+// Default idle timeout: how long waiting for vshard may go without any progress.
+pub const DEFAULT_VSHARD_IDLE_TIMEOUT: Timeout = Timeout::from_secs(60);
 pub const DEFAULT_VSHARD_DISCOVERY_ENABLED: bool = true;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -1134,6 +1137,8 @@ pub struct Params {
     wait_vshard_discovery: bool,
     #[builder(default = DEFAULT_VSHARD_DISCOVERY_TIMEOUT, setter(into))]
     wait_vshard_discovery_timeout: Timeout,
+    #[builder(default = DEFAULT_VSHARD_IDLE_TIMEOUT, setter(into))]
+    wait_vshard_idle_timeout: Timeout,
     #[builder(default = DEFAULT_INSTANCE_ONLINE_TIMEOUT, setter(into))]
     wait_instance_online_timeout: Timeout,
     /// Plugin name -> source of its service config (file or in-memory map).
@@ -1873,6 +1878,29 @@ mod tests {
         assert!(resolve_plugin_configs(&params)
             .unwrap()
             .contains_key(TEST_PLUGIN_NAME));
+    }
+
+    #[test]
+    fn builder_vshard_wait_timeouts_have_defaults() {
+        let params = ParamsBuilder::default()
+            .topology(Topology::default())
+            .build()
+            .unwrap();
+        assert_eq!(
+            params.wait_vshard_discovery_timeout,
+            DEFAULT_VSHARD_DISCOVERY_TIMEOUT
+        );
+        assert_eq!(params.wait_vshard_idle_timeout, DEFAULT_VSHARD_IDLE_TIMEOUT);
+    }
+
+    #[test]
+    fn builder_sets_vshard_idle_timeout() {
+        let params = ParamsBuilder::default()
+            .topology(Topology::default())
+            .wait_vshard_idle_timeout(Timeout::from_secs(30))
+            .build()
+            .unwrap();
+        assert_eq!(params.wait_vshard_idle_timeout, Timeout::from_secs(30));
     }
 
     #[test]
