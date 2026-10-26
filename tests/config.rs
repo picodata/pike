@@ -1,8 +1,8 @@
 mod helpers;
 
 use helpers::{
-    exec_pike, get_picodata_table, init_plugin_workspace, run_cluster, CmdArguments, PLUGIN_DIR,
-    TESTS_DIR,
+    exec_pike, get_picodata_table, init_plugin_workspace, run_cluster, CmdArguments, CLUSTER_DIR,
+    DATA_DIR, PLUGIN_DIR, TESTS_DIR,
 };
 use rstest::rstest;
 use std::{
@@ -68,11 +68,7 @@ fn test_config_apply(#[case] params_builder: ApplyParamsBuilder) {
 
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_plugin_config = get_picodata_table(
-            Path::new(PLUGIN_DIR),
-            Path::new("tmp/pike"),
-            "_pico_plugin_config",
-        );
+        let pico_plugin_config = get_picodata_table(Path::new(CLUSTER_DIR), "_pico_plugin_config");
         if pico_plugin_config.contains("value") && pico_plugin_config.contains("changed") {
             return;
         }
@@ -136,6 +132,7 @@ fn test_corrupted_config() {
 fn test_workspace_config_apply() {
     let tests_dir = Path::new(TESTS_DIR);
     let workspace_path = tests_dir.join("workspace_plugin");
+    let cluster_dir = workspace_path.join(DATA_DIR).join("cluster");
 
     init_plugin_workspace("workspace_plugin");
 
@@ -179,10 +176,8 @@ fn test_workspace_config_apply() {
     let start = Instant::now();
     let mut is_cluster_valid = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance =
-            get_picodata_table(&workspace_path, Path::new("tmp/pike"), "_pico_instance");
-        let pico_plugin =
-            get_picodata_table(&workspace_path, Path::new("tmp/pike"), "_pico_plugin");
+        let pico_instance = get_picodata_table(&cluster_dir, "_pico_instance");
+        let pico_plugin = get_picodata_table(&cluster_dir, "_pico_plugin");
 
         // Compare with 8, because table gives current state and target state
         // both of them should be online
@@ -210,11 +205,7 @@ fn test_workspace_config_apply() {
     is_cluster_valid = false;
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_plugin_config = get_picodata_table(
-            &workspace_path,
-            Path::new("tmp/pike"),
-            "_pico_plugin_config",
-        );
+        let pico_plugin_config = get_picodata_table(&cluster_dir, "_pico_plugin_config");
 
         if pico_plugin_config.contains("value")
             && pico_plugin_config.contains("changed")
@@ -253,11 +244,7 @@ fn test_workspace_config_apply() {
     is_cluster_valid = false;
     let start = Instant::now();
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_plugin_config = get_picodata_table(
-            &workspace_path,
-            Path::new("tmp/pike"),
-            "_pico_plugin_config",
-        );
+        let pico_plugin_config = get_picodata_table(&cluster_dir, "_pico_plugin_config");
 
         if pico_plugin_config.contains("value")
             && pico_plugin_config.contains("changed")

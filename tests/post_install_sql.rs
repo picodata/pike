@@ -1,6 +1,6 @@
 mod helpers;
 
-use helpers::{get_picodata_table, init_plugin, PLUGIN_DIR, PLUGIN_NAME};
+use helpers::{get_picodata_table, init_plugin, CLUSTER_DIR, PLUGIN_DIR, PLUGIN_NAME};
 use std::{
     collections::BTreeMap,
     path::Path,
@@ -53,9 +53,8 @@ fn test_post_install_sql_execution() {
     let mut check_passed = false;
 
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let result = std::panic::catch_unwind(|| {
-            get_picodata_table(plugin_path, Path::new("tmp/pike"), "_pico_user")
-        });
+        let result =
+            std::panic::catch_unwind(|| get_picodata_table(Path::new(CLUSTER_DIR), "_pico_user"));
 
         if let Ok(output) = result {
             if output.contains("post_install_user") {

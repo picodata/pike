@@ -1,6 +1,6 @@
 mod helpers;
 
-use helpers::{get_picodata_table, init_plugin, PLUGIN_DIR, PLUGIN_NAME};
+use helpers::{get_picodata_table, init_plugin, CLUSTER_DIR, PLUGIN_DIR, PLUGIN_NAME};
 use std::{
     collections::BTreeMap,
     path::Path,
@@ -56,7 +56,7 @@ fn test_pre_install_sql_execution() {
 
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
         let result = std::panic::catch_unwind(|| {
-            get_picodata_table(plugin_path, Path::new("tmp/pike"), "\"pre_install_check\"")
+            get_picodata_table(Path::new(CLUSTER_DIR), "\"pre_install_check\"")
         });
 
         if let Ok(output) = result {
