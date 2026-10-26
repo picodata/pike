@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 ### Added
 
 - Add an option to configure the timeout for waiting instance `Online` status during `pike run`
+- Add `--wait-vshard-idle-timeout` option to `pike run`. [#409](https://github.com/picodata/pike/issues/409)
 
 ### Fixed
 
@@ -16,6 +17,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Changed
 
+- Speed up vshard bootstrap in `pike run` by waking up the rebalancer and router discovery; `--wait-vshard-discovery-timeout` now covers both and defaults to 600s. [#409](https://github.com/picodata/pike/issues/409)
 - Bump rust to 1.99
 - Bump picodata-plugin to 26.2.1
 - Bump picotest to 3.2.3

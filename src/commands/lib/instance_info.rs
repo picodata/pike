@@ -39,6 +39,12 @@ for _, router in pairs(vshard.router.internal.routers) do \
 end; \
 return require('json').encode(out)";
 
+const REBALANCER_WAKEUP: &str = "\\lua\nvshard.storage.rebalancer_wakeup()";
+const ROUTER_DISCOVERY_WAKEUP: &str = "\\lua\n\
+for _, router in pairs(vshard.router.internal.routers) do \
+    router:discovery_wakeup(); \
+end";
+
 fn parse_lua_json(lua_output: &str) -> Result<HashMap<String, u32>> {
     let trimmed = lua_output.trim();
 
@@ -73,7 +79,7 @@ impl FromStr for InstanceState {
             "online" => Self::Online,
             "offline" => Self::Offline,
             "expelled" => Self::Expelled,
-            unknown => bail!("Unknown instane state variant: '{unknown}'"),
+            unknown => bail!("Unknown instance state variant: '{unknown}'"),
         };
 
         Ok(state)
@@ -108,6 +114,25 @@ impl<'a> InstanceSocketClient<'a> {
         Ok(output.to_string())
     }
 
+    /// Runs input query in picodata admin and expects empty output.
+    fn get_lua_empty_output(&self, lua_query: &str) -> Result<()> {
+        let stdout = run_query_in_picodata_admin(self.picodata_path, &self.socket_path, lua_query)?;
+
+        let mut lines = stdout.lines();
+        let Some(first) = lines.find_map(|line| line.strip_prefix("- error:")) else {
+            return Ok(());
+        };
+
+        // The message continues until the end of the YAML document.
+        let message = std::iter::once(first)
+            .chain(lines.take_while(|line| *line != "..."))
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        bail!("Lua query failed: {message}");
+    }
+
     fn get_parsed_lua_output<T>(&self, lua_query: &str) -> anyhow::Result<T>
     where
         T: FromStr,
@@ -139,6 +164,14 @@ impl<'a> InstanceSocketClient<'a> {
             .and_then(|o| parse_lua_json(&o))
     }
 
+    pub fn rebalancer_wakeup(&self) -> Result<()> {
+        self.get_lua_empty_output(REBALANCER_WAKEUP)
+    }
+
+    pub fn router_discovery_wakeup(&self) -> Result<()> {
+        self.get_lua_empty_output(ROUTER_DISCOVERY_WAKEUP)
+    }
+
     /// Fetches configured number of buckets in the instance tier.
     pub fn tier_bucket_count(&self) -> Result<u32> {
         self.get_parsed_lua_output(GET_TIER_BUCKET_COUNT)
@@ -157,19 +190,23 @@ impl<'a> InstanceSocketClient<'a> {
     /// Fetches UUID of the instance's replicaset.
     pub fn replicaset_uuid(&self) -> Result<String> {
         self.get_parsed_lua_output(GET_REPLICASET_UUID)
+            .context("unable to determine replicaset uuid")
     }
 
     /// Checks whether current instance is a master in replicaset
     /// according to `_pico_replicaset` table.
     pub fn is_master_of_replicaset(&self, replicaset_uuid: &str) -> Result<bool> {
-        let instance_name = self.instance_name()?;
+        let error_context =
+            || format!("unable to determine master of replicaset '{replicaset_uuid}'");
+
+        let instance_name = self.instance_name().with_context(error_context)?;
 
         let current_master_name: String = self.get_parsed_lua_output(&format!(
             "\\lua\npico.sql(\"select current_master_name from _pico_replicaset where uuid = ?\", {{ \"{replicaset_uuid}\" }}).rows[1][1]",
-        ))?;
+        )).with_context(error_context)?;
         let target_master_name: String = self.get_parsed_lua_output(&format!(
             "\\lua\npico.sql(\"select target_master_name from _pico_replicaset where uuid = ?\", {{ \"{replicaset_uuid}\" }}).rows[1][1]",
-        ))?;
+        )).with_context(error_context)?;
 
         if current_master_name != target_master_name {
             warn!("Master change is in progress; using target master name");
