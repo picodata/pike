@@ -24,6 +24,8 @@ use toml_edit::{DocumentMut, Item};
 pub const TESTS_DIR: &str = "./tests/tmp/";
 pub const PLUGIN_NAME: &str = "test-plugin";
 pub const PLUGIN_DIR: &str = concat!(TESTS_DIR, PLUGIN_NAME);
+pub const DATA_DIR: &str = "./tmp/pike";
+pub const CLUSTER_DIR: &str = concat!(PLUGIN_DIR, "/", DATA_DIR, "/cluster");
 pub const SHARED_TARGET_NAME: &str = "shared_target";
 pub const SHARED_TARGET_PATH: &str = concat!(TESTS_DIR, SHARED_TARGET_NAME);
 
@@ -365,7 +367,7 @@ pub fn run_cluster(
     loop {
         // Get path to data dir from cmd_args
         let cur_run_args = &cluster_handle.cmd_args.run_args;
-        let mut data_dir_path = Path::new("tmp/pike");
+        let mut data_dir_path = Path::new(DATA_DIR);
         if let Some(index) = cur_run_args.iter().position(|x| x == "--data-dir") {
             if index + 1 < cur_run_args.len() {
                 data_dir_path = Path::new(&cur_run_args[index + 1]);
@@ -374,8 +376,7 @@ pub fn run_cluster(
         // Check if cluster set up correctly
         let mut picodata_admin = await_picodata_admin(
             Duration::from_secs(60),
-            Path::new(PLUGIN_DIR),
-            data_dir_path,
+            &Path::new(PLUGIN_DIR).join(data_dir_path).join("cluster"),
         )?;
         let stdout = picodata_admin
             .stdout
@@ -432,16 +433,12 @@ where
     P: AsRef<Path>,
     for<'a> CheckFn: Fn(ClusterStateToCheck<'a>) -> bool,
 {
+    let cluster_dir = plugin_path.as_ref().join(DATA_DIR).join("cluster");
     let start = Instant::now();
     let mut cluster_started = false;
     while Instant::now().duration_since(start) < Duration::from_secs(60) {
-        let pico_instance = get_picodata_table(
-            plugin_path.as_ref(),
-            Path::new("tmp/pike"),
-            "_pico_instance",
-        );
-        let pico_plugin =
-            get_picodata_table(plugin_path.as_ref(), Path::new("tmp/pike"), "_pico_plugin");
+        let pico_instance = get_picodata_table(&cluster_dir, "_pico_instance");
+        let pico_plugin = get_picodata_table(&cluster_dir, "_pico_plugin");
         let current_state = ClusterStateToCheck {
             pico_instance: &pico_instance,
             pico_plugin: &pico_plugin,
@@ -456,9 +453,8 @@ where
     cluster_started
 }
 
-pub fn get_picodata_table(plugin_path: &Path, data_dir_path: &Path, table_name: &str) -> String {
-    let mut picodata_admin =
-        await_picodata_admin(Duration::from_secs(60), plugin_path, data_dir_path).unwrap();
+pub fn get_picodata_table(cluster_dir: &Path, table_name: &str) -> String {
+    let mut picodata_admin = await_picodata_admin(Duration::from_secs(60), cluster_dir).unwrap();
 
     // New scope to avoid infinite cycle while reading picodata stdout
     {
@@ -600,8 +596,7 @@ pub fn wait_for_proc(proc: &mut Child, timeout: Duration) {
 
 pub fn await_picodata_admin(
     timeout: Duration,
-    plugin_path: &Path,
-    data_dir_path: &Path,
+    cluster_dir: &Path,
 ) -> Result<Child, std::io::Error> {
     let start_time = Instant::now();
     loop {
@@ -612,11 +607,7 @@ pub fn await_picodata_admin(
 
         let picodata_admin = Command::new("picodata")
             .arg("admin")
-            .arg(
-                plugin_path
-                    .join(data_dir_path)
-                    .join("cluster/i1/admin.sock"),
-            )
+            .arg(cluster_dir.join("i1/admin.sock"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

@@ -2,7 +2,7 @@ mod helpers;
 
 use helpers::{
     build_plugin, exec_pike, get_picodata_table, init_plugin, init_plugin_with_args,
-    wait_cluster_start_completed, TestPluginInitParams, PLUGIN_DIR, PLUGIN_NAME,
+    wait_cluster_start_completed, TestPluginInitParams, CLUSTER_DIR, PLUGIN_DIR, PLUGIN_NAME,
 };
 use std::{
     collections::{BTreeMap, HashMap},
@@ -114,7 +114,7 @@ fn cli_run_applies_topology_config() {
     exec_pike(["run", "--daemon", "--plugin-path", PLUGIN_NAME]);
 
     assert_plugin_enabled(PLUGIN_DIR, 1);
-    let stored = get_picodata_table(plugin_dir, Path::new("tmp/pike"), "_pico_plugin_config");
+    let stored = get_picodata_table(Path::new(CLUSTER_DIR), "_pico_plugin_config");
     assert!(
         stored.contains("it's me") && !stored.contains("it''s me"),
         "{stored}"
@@ -185,11 +185,7 @@ fn run_without_config_key_uses_manifest_defaults() {
     run(params_builder(topology).build().unwrap()).unwrap();
 
     assert_plugin_enabled(PLUGIN_DIR, 1);
-    let stored = get_picodata_table(
-        Path::new(PLUGIN_DIR),
-        Path::new("tmp/pike"),
-        "_pico_plugin_config",
-    );
+    let stored = get_picodata_table(Path::new(CLUSTER_DIR), "_pico_plugin_config");
     assert!(!stored.contains("from_file"), "{stored}");
     stop();
 }
@@ -224,8 +220,8 @@ fn run_fails_early_on_invalid_config() {
         assert!(msg.contains(expected_err), "{msg}");
 
         // no instance has been started
-        let cluster_dir = Path::new(PLUGIN_DIR).join("tmp/pike/cluster");
-        let started = fs::read_dir(&cluster_dir).into_iter().flatten().any(|e| {
+        let cluster_dir = Path::new(CLUSTER_DIR);
+        let started = fs::read_dir(cluster_dir).into_iter().flatten().any(|e| {
             let dir = e.unwrap().path();
             dir.join("admin.sock").exists() || dir.join("pid").exists()
         });

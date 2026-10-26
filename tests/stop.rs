@@ -1,6 +1,6 @@
 mod helpers;
 
-use helpers::{exec_pike, run_cluster, CmdArguments, PLUGIN_DIR, PLUGIN_NAME};
+use helpers::{exec_pike, run_cluster, CmdArguments, CLUSTER_DIR, PLUGIN_NAME};
 use std::{
     fs::{self},
     path::Path,
@@ -21,7 +21,7 @@ fn assert_cluster_stopped(timeout: Duration) {
     while Instant::now().duration_since(start) < timeout {
         // Search for PID's of picodata instances and check their liveness
         let mut cluster_stopped = true;
-        let cluster_dir = Path::new(PLUGIN_DIR).join("tmp/pike").join("cluster");
+        let cluster_dir = Path::new(CLUSTER_DIR);
 
         for instance_dir in fs::read_dir(cluster_dir).unwrap() {
             // Check if proccess of picodata is still running
@@ -117,8 +117,8 @@ fn test_pike_stop_of_specific_instance() {
         target_instance,
     ]);
 
-    let data_dir = Path::new(PLUGIN_DIR).join("tmp/pike").join("cluster");
-    let instance_dir = data_dir.join(target_instance);
+    let cluster_dir = Path::new(CLUSTER_DIR);
+    let instance_dir = cluster_dir.join(target_instance);
 
     // Wait while stopping instance is not killed.
     let start = Instant::now();
@@ -134,7 +134,7 @@ fn test_pike_stop_of_specific_instance() {
     }
 
     // Check that all other instances were not killed.
-    for entry in fs::read_dir(data_dir).unwrap() {
+    for entry in fs::read_dir(cluster_dir).unwrap() {
         let instance_dir = entry.unwrap().path();
 
         // Skip symlinks.
