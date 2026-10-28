@@ -220,7 +220,7 @@ enum Command {
         )]
         timeout: Timeout,
     },
-    /// Expel an instance from the cluster and stop it
+    /// Expel an instance from the cluster and wait until its process exits
     Expel {
         /// Name of the instance to expel
         instance_name: String,
