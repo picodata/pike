@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [6.0.0]
+
 ### Breaking changes
 
 - Default `--data-dir` of `pike run`, `stop`, `clean`, `enter` and `config apply` (and the default `data_dir` of the corresponding library parameter builders) is now `./tmp/pike` instead of `./tmp`.
