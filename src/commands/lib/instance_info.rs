@@ -4,6 +4,7 @@ use log::warn;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::{
+    fmt::{self, Display, Formatter},
     path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
@@ -76,15 +77,27 @@ impl InstanceState {
     }
 }
 
+/// Picodata reported a state of an instance this module does not know.
+#[derive(Debug)]
+pub struct UnknownInstanceState(String);
+
+impl Display for UnknownInstanceState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "unknown instance state variant: '{}'", self.0)
+    }
+}
+
+impl StdError for UnknownInstanceState {}
+
 impl FromStr for InstanceState {
-    type Err = anyhow::Error;
+    type Err = UnknownInstanceState;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let state = match s.to_ascii_lowercase().as_str() {
             "online" => Self::Online,
             "offline" => Self::Offline,
             "expelled" => Self::Expelled,
-            unknown => bail!("Unknown instance state variant: '{unknown}'"),
+            unknown => return Err(UnknownInstanceState(unknown.to_owned())),
         };
 
         Ok(state)
@@ -171,16 +184,14 @@ impl<'a> InstanceSocketClient<'a> {
 
     /// Fetches state of the instance with the given picodata name
     pub fn state_of(&self, instance_name: &str) -> Result<InstanceState> {
-        self.get_lua_single_line_output(&format!(
+        self.get_parsed_lua_output(&format!(
             "\\lua\nreturn box.space._pico_instance:get('{instance_name}').current_state[1]"
         ))
-        .and_then(|state| state.parse())
     }
 
     /// Fetches state of the instance from admin socket.
     pub fn current_state(&self) -> Result<InstanceState> {
-        self.get_lua_single_line_output(GET_INSTANCE_CURRENT_STATE)
-            .and_then(|state| state.parse())
+        self.get_parsed_lua_output(GET_INSTANCE_CURRENT_STATE)
     }
 
     // Fetches map of [replicaset_uuid, bucket_count] obtained from

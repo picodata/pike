@@ -169,7 +169,7 @@ fn stop_instance(
     Ok(())
 }
 
-fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
+pub(crate) fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
     let file = fs::File::open(pid_file_path)?;
 
     let mut lines = io::BufReader::new(file).lines();
@@ -198,7 +198,11 @@ fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
 /// fail to lock it. A kernel without pidfds (before 5.3) gets the polling
 /// below.
 #[cfg(target_os = "linux")]
-fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::Result<()> {
+pub(crate) fn send_signal_and_wait(
+    pid: Pid,
+    signal: Signal,
+    timeout: Timeout,
+) -> anyhow::Result<()> {
     use std::os::fd::{FromRawFd, OwnedFd};
 
     // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor.
@@ -228,7 +232,11 @@ fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::R
 }
 
 #[cfg(not(target_os = "linux"))]
-fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::Result<()> {
+pub(crate) fn send_signal_and_wait(
+    pid: Pid,
+    signal: Signal,
+    timeout: Duration,
+) -> anyhow::Result<()> {
     send_signal_and_poll(pid, signal, timeout)
 }
 
