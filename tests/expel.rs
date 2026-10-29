@@ -121,7 +121,7 @@ fn test_pike_expel_running_instance_with_force() {
 
     exec_pike([
         "expel",
-        target_instance,
+        &picodata_name,
         "--force",
         "--plugin-path",
         PLUGIN_NAME,
@@ -150,10 +150,12 @@ fn test_pike_expel_running_instance_without_force_fails() {
     )
     .unwrap();
 
+    let picodata_name = picodata_name(target_instance);
+
     // Running instance can only be expelled forcibly. Short timeout, since
     // picodata waits for the whole period before giving up.
     assert!(
-        !try_expel([target_instance, "--timeout", "5"]),
+        !try_expel([&picodata_name, "--timeout", "5"]),
         "expel of a running instance without --force must fail"
     );
 
@@ -178,34 +180,8 @@ fn test_pike_expel_stopped_instance() {
     let picodata_name = picodata_name(target_instance);
     wait_instance_offline(&picodata_name);
 
-    exec_pike(["expel", target_instance, "--plugin-path", PLUGIN_NAME]);
+    exec_pike(["expel", &picodata_name, "--plugin-path", PLUGIN_NAME]);
 
-    assert_instance_expelled(&picodata_name);
-}
-
-#[test]
-fn test_pike_expel_by_picodata_name() {
-    let target_instance = "i4";
-    let cluster_dir = Path::new(CLUSTER_DIR);
-
-    let _cluster_handle = run_cluster(
-        CLUSTER_START_TIMEOUT,
-        TOTAL_INSTANCES,
-        CmdArguments::default(),
-    )
-    .unwrap();
-
-    let picodata_name = picodata_name(target_instance);
-
-    exec_pike([
-        "expel",
-        &picodata_name,
-        "--force",
-        "--plugin-path",
-        PLUGIN_NAME,
-    ]);
-
-    wait_instance_stopped(&cluster_dir.join(target_instance));
     assert_instance_expelled(&picodata_name);
 }
 
