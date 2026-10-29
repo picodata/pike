@@ -1,9 +1,10 @@
-use crate::commands::lib::run_query_in_picodata_admin;
+use crate::commands::lib::{run_query_in_picodata_admin, timeout::Timeout};
 use anyhow::{bail, Context, Result};
 use log::warn;
 use std::collections::HashMap;
 use std::error::Error as StdError;
 use std::{
+    fmt::{self, Display, Formatter},
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -69,17 +70,33 @@ impl InstanceState {
     pub fn is_online(self) -> bool {
         matches!(self, InstanceState::Online)
     }
+
+    pub fn is_expelled(self) -> bool {
+        matches!(self, InstanceState::Expelled)
+    }
 }
 
+/// Picodata reported a state of an instance this module does not know.
+#[derive(Debug)]
+pub struct UnknownInstanceState(String);
+
+impl Display for UnknownInstanceState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "unknown instance state variant: '{}'", self.0)
+    }
+}
+
+impl StdError for UnknownInstanceState {}
+
 impl FromStr for InstanceState {
-    type Err = anyhow::Error;
+    type Err = UnknownInstanceState;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let state = match s.to_ascii_lowercase().as_str() {
             "online" => Self::Online,
             "offline" => Self::Offline,
             "expelled" => Self::Expelled,
-            unknown => bail!("Unknown instance state variant: '{unknown}'"),
+            unknown => return Err(UnknownInstanceState(unknown.to_owned())),
         };
 
         Ok(state)
@@ -97,6 +114,13 @@ impl<'a> InstanceSocketClient<'a> {
     pub fn new(instance_data_dir: &Path, picodata_path: &'a PathBuf) -> Self {
         Self {
             socket_path: instance_data_dir.join(ADMIN_SOCKET_FILENAME),
+            picodata_path,
+        }
+    }
+
+    pub fn with_socket_path(socket_path: PathBuf, picodata_path: &'a PathBuf) -> Self {
+        Self {
+            socket_path,
             picodata_path,
         }
     }
@@ -151,10 +175,29 @@ impl<'a> InstanceSocketClient<'a> {
         self.get_parsed_lua_output(GET_INSTANCE_NAME)
     }
 
+    /// Expels the instance with the given picodata name from the cluster.
+    pub fn expel(&self, instance_name: &str, force: bool, timeout: Timeout) -> Result<()> {
+        let expelled: bool = self.get_parsed_lua_output(&format!(
+            "\\lua\nreturn pico.expel('{instance_name}', {{ force = {force}, timeout = {} }})",
+            timeout.as_secs()
+        ))?;
+        if !expelled {
+            bail!("picodata refused to expel instance '{instance_name}'");
+        }
+
+        Ok(())
+    }
+
+    /// Fetches state of the instance with the given picodata name
+    pub fn state_of(&self, instance_name: &str) -> Result<InstanceState> {
+        self.get_parsed_lua_output(&format!(
+            "\\lua\nreturn box.space._pico_instance:get('{instance_name}').current_state[1]"
+        ))
+    }
+
     /// Fetches state of the instance from admin socket.
     pub fn current_state(&self) -> Result<InstanceState> {
-        self.get_lua_single_line_output(GET_INSTANCE_CURRENT_STATE)
-            .and_then(|state| state.parse())
+        self.get_parsed_lua_output(GET_INSTANCE_CURRENT_STATE)
     }
 
     // Fetches map of [replicaset_uuid, bucket_count] obtained from

@@ -1,4 +1,5 @@
 use crate::commands::{
+    expel::DEFAULT_EXPEL_TIMEOUT,
     lib::{timeout::Timeout, DEFAULT_DATA_DIR},
     ride,
     run::{
@@ -216,6 +217,32 @@ enum Command {
             value_name = "TIMEOUT_SECS",
             default_value_t = DEFAULT_STOP_TIMEOUT,
             help = "Graceful shutdown timeout in seconds"
+        )]
+        timeout: Timeout,
+    },
+    /// Expel an instance from the cluster
+    Expel {
+        /// Name of the instance to expel
+        instance_name: String,
+        /// Path to data directory of the cluster
+        #[arg(long, value_name = "DATA_DIR", default_value = DEFAULT_DATA_DIR)]
+        data_dir: PathBuf,
+        /// Path to the plugin's project directory
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
+        /// Specify path to picodata binary
+        #[arg(long, value_name = "BINARY_PATH", default_value = "picodata")]
+        picodata_path: PathBuf,
+        /// Expel the instance even if it is still running
+        #[arg(long)]
+        force: bool,
+        /// Maximum time to wait for the instance to become expelled
+        #[arg(
+            long,
+            short,
+            value_name = "TIMEOUT_SECS",
+            default_value_t = DEFAULT_EXPEL_TIMEOUT,
+            help = "Expel timeout in seconds"
         )]
         timeout: Timeout,
     },
@@ -527,6 +554,28 @@ fn main() -> Result<()> {
                 .build()
                 .unwrap();
             commands::stop::cmd(&params).context("failed to execute \"stop\" command")?;
+        }
+        Command::Expel {
+            instance_name,
+            data_dir,
+            plugin_path,
+            picodata_path,
+            force,
+            timeout,
+        } => {
+            is_required_path_exists(&plugin_path, &data_dir, CARING_PIKE, 1);
+
+            run_child_killer();
+            let params = commands::expel::ParamsBuilder::default()
+                .instance_name(instance_name)
+                .data_dir(data_dir)
+                .plugin_path(plugin_path)
+                .picodata_path(picodata_path)
+                .force(force)
+                .timeout(timeout)
+                .build()
+                .unwrap();
+            commands::expel::cmd(&params).context("failed to execute \"expel\" command")?;
         }
         Command::Clean {
             data_dir,

@@ -454,12 +454,15 @@ where
 }
 
 pub fn get_picodata_table(cluster_dir: &Path, table_name: &str) -> String {
+    get_picodata_query_output(cluster_dir, &format!(r"SELECT * FROM {table_name};"))
+}
+
+pub fn get_picodata_query_output(cluster_dir: &Path, query: &str) -> String {
     let mut picodata_admin = await_picodata_admin(Duration::from_secs(60), cluster_dir).unwrap();
 
     // New scope to avoid infinite cycle while reading picodata stdout
     {
         let picodata_stdin = picodata_admin.stdin.as_mut().unwrap();
-        let query = format!(r"SELECT * FROM {table_name};");
         picodata_stdin.write_all(query.as_bytes()).unwrap();
         picodata_admin.wait().unwrap();
     }

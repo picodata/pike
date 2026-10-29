@@ -23,6 +23,8 @@ pub const LIB_EXT: &str = "dylib";
 
 pub const DEFAULT_DATA_DIR: &str = "./tmp/pike";
 
+pub const INSTANCE_PID_FILENAME: &str = "pid";
+
 pub fn log_instance_skipped(name: impl Display) {
     info!("{name} - {}", "SKIPPED".yellow());
 }

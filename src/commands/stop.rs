@@ -1,6 +1,6 @@
 use crate::commands::lib::{
     timeout::Timeout,
-    {get_active_socket_path, get_cluster_dir, DEFAULT_DATA_DIR},
+    {get_active_socket_path, get_cluster_dir, DEFAULT_DATA_DIR, INSTANCE_PID_FILENAME},
 };
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
@@ -137,7 +137,7 @@ fn stop_instance(
         );
     };
 
-    let pid_file_path = instance_dir.join("pid");
+    let pid_file_path = instance_dir.join(INSTANCE_PID_FILENAME);
     if !pid_file_path.exists() {
         bail!(
             "PID file does not exist in folder: {}",
@@ -169,7 +169,7 @@ fn stop_instance(
     Ok(())
 }
 
-fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
+pub(crate) fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
     let file = fs::File::open(pid_file_path)?;
 
     let mut lines = io::BufReader::new(file).lines();
@@ -199,20 +199,13 @@ fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
 /// below.
 #[cfg(target_os = "linux")]
 fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::Result<()> {
-    use std::os::fd::{FromRawFd, OwnedFd};
-
-    // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor.
-    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid.as_raw(), 0) };
-    if fd < 0 {
-        return match Errno::last() {
-            Errno::ESRCH => Ok(()),
-            Errno::ENOSYS => send_signal_and_poll(pid, signal, timeout),
-            err => bail!(err),
-        };
-    }
-    let fd = libc::c_int::try_from(fd).context("pidfd_open returned no descriptor")?;
-    // SAFETY: the descriptor was just opened and nothing else owns it.
-    let pidfd = unsafe { OwnedFd::from_raw_fd(fd) };
+    let pidfd = match pidfd_open(pid) {
+        Ok(Some(pidfd)) => pidfd,
+        // The process has exited already.
+        Ok(None) => return Ok(()),
+        Err(Errno::ENOSYS) => return send_signal_and_poll(pid, signal, timeout),
+        Err(err) => bail!(err),
+    };
 
     pidfd_send_signal(&pidfd, signal)?;
     if pidfd_exited(&pidfd, timeout)? {
@@ -230,6 +223,69 @@ fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::R
 #[cfg(not(target_os = "linux"))]
 fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::Result<()> {
     send_signal_and_poll(pid, signal, timeout)
+}
+
+/// Wait until the process exits, without sending it any signal.
+#[cfg(target_os = "linux")]
+pub(crate) fn wait_process_exit(pid: Pid, timeout: Timeout) -> anyhow::Result<()> {
+    let pidfd = match pidfd_open(pid) {
+        Ok(Some(pidfd)) => pidfd,
+        // The process has exited already.
+        Ok(None) => return Ok(()),
+        Err(Errno::ENOSYS) => return poll_process_exit(pid, timeout),
+        Err(err) => bail!(err),
+    };
+
+    if !pidfd_exited(&pidfd, timeout)? {
+        bail!("process {pid} did not exit within {timeout:?}");
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn wait_process_exit(pid: Pid, timeout: Timeout) -> anyhow::Result<()> {
+    poll_process_exit(pid, timeout)
+}
+
+fn poll_process_exit(pid: Pid, timeout: Timeout) -> anyhow::Result<()> {
+    let start = Instant::now();
+    let delay = Duration::from_millis(100);
+
+    loop {
+        match kill(pid, None) {
+            Err(Errno::ESRCH) => return Ok(()),
+            Err(err) => bail!(err),
+            Ok(()) => {}
+        }
+
+        #[cfg(target_os = "linux")]
+        if is_zombie(pid) {
+            return Ok(());
+        }
+
+        if start.elapsed() >= timeout {
+            bail!("process {pid} did not exit within {timeout:?}");
+        }
+        sleep(delay);
+    }
+}
+
+/// Opens a pidfd of the process, `None` if there is no such process.
+#[cfg(target_os = "linux")]
+fn pidfd_open(pid: Pid) -> Result<Option<std::os::fd::OwnedFd>, Errno> {
+    use std::os::fd::{FromRawFd, OwnedFd};
+
+    // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor.
+    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid.as_raw(), 0) };
+    if fd < 0 {
+        return match Errno::last() {
+            Errno::ESRCH => Ok(None),
+            err => Err(err),
+        };
+    }
+    let fd = libc::c_int::try_from(fd).map_err(|_| Errno::EOVERFLOW)?;
+    // SAFETY: the descriptor was just opened and nothing else owns it.
+    Ok(Some(unsafe { OwnedFd::from_raw_fd(fd) }))
 }
 
 /// Signal the process the pidfd names, and no later one with its pid.
