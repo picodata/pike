@@ -220,7 +220,7 @@ enum Command {
         )]
         timeout: Timeout,
     },
-    /// Expel an instance from the cluster and wait until its process exits
+    /// Expel an instance from the cluster
     Expel {
         /// Name of the instance to expel
         instance_name: String,
@@ -241,10 +241,10 @@ enum Command {
             long,
             short,
             value_name = "TIMEOUT_SECS",
-            default_value_t = DEFAULT_EXPEL_TIMEOUT.as_secs(),
+            default_value_t = DEFAULT_EXPEL_TIMEOUT,
             help = "Expel timeout in seconds"
         )]
-        timeout: u64,
+        timeout: Timeout,
     },
     /// Remove all data files of previous cluster run
     Clean {
@@ -572,7 +572,7 @@ fn main() -> Result<()> {
                 .plugin_path(plugin_path)
                 .picodata_path(picodata_path)
                 .force(force)
-                .timeout(Duration::from_secs(timeout))
+                .timeout(timeout)
                 .build()
                 .unwrap();
             commands::expel::cmd(&params).context("failed to execute \"expel\" command")?;

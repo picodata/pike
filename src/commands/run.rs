@@ -33,7 +33,9 @@ use crate::commands::lib::{
     log_instance_skipped, log_instance_started, run_query_in_picodata_admin, spawn_picodata_admin,
     unpack_shipping_archive,
 };
-use crate::commands::lib::{get_active_socket_path, BuildType, DEFAULT_DATA_DIR};
+use crate::commands::lib::{
+    get_active_socket_path, BuildType, DEFAULT_DATA_DIR, INSTANCE_PID_FILENAME,
+};
 use crate::commands::lib::{is_plugin_archive, is_plugin_dir, is_plugin_shipping_dir};
 
 use crate::helpers::cargo_manifest::{
@@ -823,7 +825,7 @@ impl PicodataInstance {
 
     fn make_pid_file(&self) -> Result<()> {
         let pid = self.child.id();
-        let pid_location = self.data_dir.join("pid");
+        let pid_location = self.data_dir.join(INSTANCE_PID_FILENAME);
         let mut file = File::create(pid_location)?;
         writeln!(file, "{pid}")?;
         Ok(())

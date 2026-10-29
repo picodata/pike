@@ -1,4 +1,4 @@
-use crate::commands::lib::run_query_in_picodata_admin;
+use crate::commands::lib::{run_query_in_picodata_admin, timeout::Timeout};
 use anyhow::{bail, Context, Result};
 use log::warn;
 use std::collections::HashMap;
@@ -7,7 +7,6 @@ use std::{
     fmt::{self, Display, Formatter},
     path::{Path, PathBuf},
     str::FromStr,
-    time::Duration,
 };
 
 const ADMIN_SOCKET_FILENAME: &str = "admin.sock";
@@ -119,6 +118,13 @@ impl<'a> InstanceSocketClient<'a> {
         }
     }
 
+    pub fn with_socket_path(socket_path: PathBuf, picodata_path: &'a PathBuf) -> Self {
+        Self {
+            socket_path,
+            picodata_path,
+        }
+    }
+
     /// Runs input query in picodata admin.
     ///
     /// Only single line is extracted from returned STDOUT.
@@ -170,7 +176,7 @@ impl<'a> InstanceSocketClient<'a> {
     }
 
     /// Expels the instance with the given picodata name from the cluster.
-    pub fn expel(&self, instance_name: &str, force: bool, timeout: Duration) -> Result<()> {
+    pub fn expel(&self, instance_name: &str, force: bool, timeout: Timeout) -> Result<()> {
         let expelled: bool = self.get_parsed_lua_output(&format!(
             "\\lua\nreturn pico.expel('{instance_name}', {{ force = {force}, timeout = {} }})",
             timeout.as_secs()

@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ### Added
 
-- Add `pike expel` command and `cluster::expel` API to expel an instance from the cluster and wait until its process exits
+- Add `pike expel` command and `cluster::expel` API to expel an instance from the cluster
 
 ## [6.0.0]
 
