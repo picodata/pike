@@ -1,8 +1,11 @@
-use crate::commands::lib::run_query_in_picodata_admin;
+use crate::commands::lib::run_query_in_picodata_admin_with_timeout;
 use anyhow::{bail, Context, Result};
 use log::warn;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::error::Error as StdError;
+use std::time::Duration;
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
@@ -39,13 +42,23 @@ for _, router in pairs(vshard.router.internal.routers) do \
 end; \
 return require('json').encode(out)";
 
+// One JSON line; `json.array_mt` makes an empty list encode as `[]`, not `{}`.
+const GET_CLUSTER_INSTANCES: &str = "\\lua\n\
+local json = require('json'); \
+local rows = setmetatable({}, json.array_mt); \
+for _, i in box.space._pico_instance:pairs() do \
+    table.insert(rows, {name = i.name, tier = i.tier, replicaset_name = i.replicaset_name, \
+                        current_state = i.current_state[1], raft_id = i.raft_id}); \
+end; \
+return json.encode({raft_leader_id = pico.raft_status().leader_id, instances = rows})";
+
 const REBALANCER_WAKEUP: &str = "\\lua\nvshard.storage.rebalancer_wakeup()";
 const ROUTER_DISCOVERY_WAKEUP: &str = "\\lua\n\
 for _, router in pairs(vshard.router.internal.routers) do \
     router:discovery_wakeup(); \
 end";
 
-fn parse_lua_json(lua_output: &str) -> Result<HashMap<String, u32>> {
+fn parse_lua_json<T: DeserializeOwned>(lua_output: &str) -> Result<T> {
     let trimmed = lua_output.trim();
 
     // remove wrapping single quotes if present
@@ -86,11 +99,29 @@ impl FromStr for InstanceState {
     }
 }
 
+/// `_pico_instance` rows and the raft leader, as seen by one instance.
+#[derive(Debug, Deserialize)]
+pub struct ClusterInstances {
+    pub raft_leader_id: u64,
+    pub instances: Vec<PicoInstanceRow>,
+}
+
+/// Only the fields `status instances` shows.
+#[derive(Debug, Deserialize)]
+pub struct PicoInstanceRow {
+    pub name: String,
+    pub tier: String,
+    pub replicaset_name: String,
+    pub current_state: String,
+    pub raft_id: u64,
+}
+
 /// Client for interacting with a Picodata
 /// instance over its admin socket.
 pub struct InstanceSocketClient<'a> {
     socket_path: PathBuf,
     picodata_path: &'a PathBuf,
+    query_timeout: Option<Duration>,
 }
 
 impl<'a> InstanceSocketClient<'a> {
@@ -98,14 +129,31 @@ impl<'a> InstanceSocketClient<'a> {
         Self {
             socket_path: instance_data_dir.join(ADMIN_SOCKET_FILENAME),
             picodata_path,
+            query_timeout: None,
         }
+    }
+
+    /// `picodata admin` that does not respond within `timeout` is killed and the query fails.
+    #[must_use]
+    pub fn with_query_timeout(mut self, timeout: Duration) -> Self {
+        self.query_timeout = Some(timeout);
+        self
+    }
+
+    fn run_lua_query_in_picodata_admin(&self, lua_query: &str) -> Result<String> {
+        run_query_in_picodata_admin_with_timeout(
+            self.picodata_path,
+            &self.socket_path,
+            lua_query,
+            self.query_timeout,
+        )
     }
 
     /// Runs input query in picodata admin.
     ///
     /// Only single line is extracted from returned STDOUT.
     fn get_lua_single_line_output(&self, lua_query: &str) -> Result<String> {
-        let stdout = run_query_in_picodata_admin(self.picodata_path, &self.socket_path, lua_query)?;
+        let stdout = self.run_lua_query_in_picodata_admin(lua_query)?;
 
         let Some(output) = stdout.lines().find_map(|line| line.strip_prefix("- ")) else {
             bail!("unable to extract single line from Lua query output '{stdout}'");
@@ -116,7 +164,7 @@ impl<'a> InstanceSocketClient<'a> {
 
     /// Runs input query in picodata admin and expects empty output.
     fn get_lua_empty_output(&self, lua_query: &str) -> Result<()> {
-        let stdout = run_query_in_picodata_admin(self.picodata_path, &self.socket_path, lua_query)?;
+        let stdout = self.run_lua_query_in_picodata_admin(lua_query)?;
 
         let mut lines = stdout.lines();
         let Some(first) = lines.find_map(|line| line.strip_prefix("- error:")) else {
@@ -162,6 +210,13 @@ impl<'a> InstanceSocketClient<'a> {
     pub fn vshard_replicaset_map(&self) -> Result<HashMap<String, u32>> {
         self.get_lua_single_line_output(GET_VSHARD_REPLICASET_MAP)
             .and_then(|o| parse_lua_json(&o))
+    }
+
+    /// Fetches `_pico_instance` rows and the raft leader id in one query.
+    pub fn cluster_instances(&self) -> Result<ClusterInstances> {
+        let lua_output_line = self.get_lua_single_line_output(GET_CLUSTER_INSTANCES)?;
+        parse_lua_json(&lua_output_line)
+            .with_context(|| format!("unexpected Lua output: {lua_output_line}"))
     }
 
     pub fn rebalancer_wakeup(&self) -> Result<()> {
@@ -213,5 +268,49 @@ impl<'a> InstanceSocketClient<'a> {
         }
 
         Ok(instance_name == target_master_name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cluster_instances_parse_console_line() {
+        let cluster_instances = parse_lua_json::<ClusterInstances>(
+            "'{\"instances\":[{\"raft_id\":1,\"tier\":\"default\",\"current_state\":\"Online\",\"name\":\"default_1_1\",\"replicaset_name\":\"default_1\"}],\"raft_leader_id\":1}'",
+        )
+        .unwrap();
+
+        assert_eq!(cluster_instances.raft_leader_id, 1);
+        let [pico_instance_row] = cluster_instances.instances.as_slice() else {
+            panic!("expected one instance: {cluster_instances:?}");
+        };
+        assert_eq!(pico_instance_row.name, "default_1_1");
+        assert_eq!(pico_instance_row.tier, "default");
+        assert_eq!(pico_instance_row.replicaset_name, "default_1");
+        assert_eq!(pico_instance_row.current_state, "Online");
+        assert_eq!(pico_instance_row.raft_id, 1);
+    }
+
+    #[test]
+    fn cluster_instances_parse_empty_list() {
+        let cluster_instances =
+            parse_lua_json::<ClusterInstances>("'{\"instances\":[],\"raft_leader_id\":0}'")
+                .unwrap();
+
+        assert_eq!(cluster_instances.raft_leader_id, 0);
+        assert!(cluster_instances.instances.is_empty());
+    }
+
+    #[test]
+    fn vshard_replicaset_map_parse_still_works() {
+        let bucket_count_by_replicaset_uuid =
+            parse_lua_json::<HashMap<String, u32>>("'{\"uuid-1\":15000}'").unwrap();
+
+        assert_eq!(
+            bucket_count_by_replicaset_uuid,
+            HashMap::from([("uuid-1".to_string(), 15000)])
+        );
     }
 }
