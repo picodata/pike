@@ -1,6 +1,8 @@
+#[cfg(target_os = "linux")]
+use crate::commands::lib::{is_zombie, open_pidfd, pidfd_send_signal};
 use crate::commands::lib::{
     timeout::Timeout,
-    {get_active_socket_path, get_cluster_dir, DEFAULT_DATA_DIR},
+    {get_active_socket_path, get_cluster_dir, read_pid_file, DEFAULT_DATA_DIR},
 };
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
@@ -10,7 +12,6 @@ use nix::errno::Errno;
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
 use std::fs::{self};
-use std::io::{self, BufRead};
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -145,7 +146,8 @@ fn stop_instance(
         );
     }
 
-    let pid = read_pid_from_file(&pid_file_path).context("failed to read the PID file")?;
+    let pid = read_pid_file(&pid_file_path).context("failed to read the PID file")?;
+    assert!(pid.as_raw() > 0);
 
     if get_active_socket_path(cluster_dir, link_name.to_str().unwrap()).is_none() {
         info!(
@@ -169,22 +171,6 @@ fn stop_instance(
     Ok(())
 }
 
-fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
-    let file = fs::File::open(pid_file_path)?;
-
-    let mut lines = io::BufReader::new(file).lines();
-    let pid_line = lines.next().context("PID file is empty")??;
-
-    let pid = pid_line.trim().parse::<i32>().context(format!(
-        "failed to parse PID from file {}",
-        pid_file_path.display()
-    ))?;
-
-    assert!(pid > 0);
-
-    Ok(Pid::from_raw(pid))
-}
-
 /// Send signal to process and wait until it exits.
 ///
 /// If the process does not terminate within the specified timeout,
@@ -199,20 +185,12 @@ fn read_pid_from_file(pid_file_path: &Path) -> Result<Pid> {
 /// below.
 #[cfg(target_os = "linux")]
 fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::Result<()> {
-    use std::os::fd::{FromRawFd, OwnedFd};
-
-    // SAFETY: pidfd_open takes a pid and flags and returns a new descriptor.
-    let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid.as_raw(), 0) };
-    if fd < 0 {
-        return match Errno::last() {
-            Errno::ESRCH => Ok(()),
-            Errno::ENOSYS => send_signal_and_poll(pid, signal, timeout),
-            err => bail!(err),
-        };
-    }
-    let fd = libc::c_int::try_from(fd).context("pidfd_open returned no descriptor")?;
-    // SAFETY: the descriptor was just opened and nothing else owns it.
-    let pidfd = unsafe { OwnedFd::from_raw_fd(fd) };
+    let pidfd = match open_pidfd(pid) {
+        Ok(pidfd) => pidfd,
+        Err(Errno::ESRCH) => return Ok(()),
+        Err(Errno::ENOSYS) => return send_signal_and_poll(pid, signal, timeout),
+        Err(err) => bail!(err),
+    };
 
     pidfd_send_signal(&pidfd, signal)?;
     if pidfd_exited(&pidfd, timeout)? {
@@ -230,28 +208,6 @@ fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::R
 #[cfg(not(target_os = "linux"))]
 fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::Result<()> {
     send_signal_and_poll(pid, signal, timeout)
-}
-
-/// Signal the process the pidfd names, and no later one with its pid.
-#[cfg(target_os = "linux")]
-fn pidfd_send_signal(pidfd: &std::os::fd::OwnedFd, signal: Signal) -> anyhow::Result<()> {
-    use std::os::fd::AsRawFd;
-
-    // SAFETY: a valid pidfd, a signal number, no siginfo and no flags.
-    let rc = unsafe {
-        libc::syscall(
-            libc::SYS_pidfd_send_signal,
-            pidfd.as_raw_fd(),
-            signal as libc::c_int,
-            std::ptr::null::<libc::siginfo_t>(),
-            0,
-        )
-    };
-    // ESRCH: the process has exited already, which is what the caller waits for.
-    if rc < 0 && Errno::last() != Errno::ESRCH {
-        bail!(Errno::last());
-    }
-    Ok(())
 }
 
 /// Whether the process behind the pidfd exits, all its threads, within `timeout`.
@@ -311,16 +267,4 @@ fn send_signal_and_poll(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::R
     warn!("Process {pid} did not terminate within {timeout:?}. Sending SIGKILL...");
     kill(pid, Signal::SIGKILL)?;
     Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn is_zombie(pid: Pid) -> bool {
-    use procfs::process::{ProcState, Process};
-    // Returns true if the process doesn't exist or we can't read /proc.
-    Process::new(pid.into())
-        .and_then(|p| p.stat())
-        .and_then(|s| s.state())
-        // Process is terminated, but not reaped by parent.
-        // Or we can't check process state or there is not such process in /proc.
-        .map_or(true, |state| state == ProcState::Zombie)
 }

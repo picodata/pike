@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Added
+
+- Add `pike status instances` command [#429](https://github.com/picodata/pike/issues/429)
+
 ## [6.0.0]
 
 ### Breaking changes

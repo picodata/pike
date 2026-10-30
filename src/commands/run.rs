@@ -16,6 +16,7 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};
+use std::ops::Range;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -33,7 +34,9 @@ use crate::commands::lib::{
     log_instance_skipped, log_instance_started, run_query_in_picodata_admin, spawn_picodata_admin,
     unpack_shipping_archive,
 };
-use crate::commands::lib::{get_active_socket_path, BuildType, DEFAULT_DATA_DIR};
+use crate::commands::lib::{
+    get_active_socket_path, BuildType, DEFAULT_DATA_DIR, PICODATA_INSTANCE_DIR_OPTION,
+};
 use crate::commands::lib::{is_plugin_archive, is_plugin_dir, is_plugin_shipping_dir};
 
 use crate::helpers::cargo_manifest::{
@@ -197,6 +200,17 @@ impl Topology {
 
     fn has_external_plugins(&self) -> bool {
         self.plugins.values().any(Plugin::is_external)
+    }
+
+    /// Instance ids (`N` of `i<N>`) of every tier, in the order `run` assigns them.
+    pub(crate) fn instance_id_ranges_by_tier(
+        &self,
+    ) -> impl Iterator<Item = (&str, Range<u16>)> + '_ {
+        self.tiers.iter().scan(1u16, |next_id, (tier_name, tier)| {
+            let first_id = *next_id;
+            *next_id += u16::from(tier.replicasets) * u16::from(tier.replication_factor);
+            Some((tier_name.as_str(), first_id..*next_id))
+        })
     }
 }
 
@@ -555,7 +569,7 @@ impl PicodataInstance {
 
         child.args([
             "run",
-            "--instance-dir",
+            PICODATA_INSTANCE_DIR_OPTION,
             instance_data_dir.to_str().expect("unreachable"),
             "--iproto-listen",
             &bin_ipv4.to_string(),
@@ -833,8 +847,15 @@ impl PicodataInstance {
         &self.instance_name
     }
 
-    fn make_name(id: u16) -> String {
+    /// Name of the data dir of instance `N`: `i<N>`.
+    pub(crate) fn make_name(id: u16) -> String {
         format!("i{id}")
+    }
+
+    /// Inverse of `make_name`. Only canonical names: `pike run` makes no `i01` or `i+1`.
+    pub(crate) fn parse_id_from_dir_name(dir_name: &str) -> Option<u16> {
+        let id = dir_name.strip_prefix('i')?.parse().ok()?;
+        (Self::make_name(id) == dir_name).then_some(id)
     }
 
     fn kill(&mut self) -> Result<()> {
@@ -1285,15 +1306,11 @@ fn run_single_instance(
         .expect("unreachable: instance path should be convertible to str")[1..]
         .parse::<u16>()?;
 
-    let mut instance_id_counter = 0;
-    let mut instance_tier_name = &String::new();
-    for (tier_name, tier) in &params.topology.tiers {
-        instance_id_counter += u16::from(tier.replicasets * tier.replication_factor);
-        if instance_id <= instance_id_counter {
-            instance_tier_name = tier_name;
-            break;
-        }
-    }
+    let instance_tier_name = params
+        .topology
+        .instance_id_ranges_by_tier()
+        .find(|(_, instance_ids)| instance_ids.contains(&instance_id))
+        .map_or("", |(tier_name, _)| tier_name);
 
     let pico_instance = PicodataInstance::spawn_and_wait_online(
         instance_id,
@@ -1388,12 +1405,10 @@ fn start_instances_in_tiers(
 ) -> anyhow::Result<Vec<PicodataInstance>> {
     let cluster_dir = params.get_cluster_dir();
     let mut picodata_processes = vec![];
-    let mut instance_id = 0;
 
-    for (tier_name, tier) in &params.topology.tiers {
+    for (tier_name, instance_ids) in params.topology.instance_id_ranges_by_tier() {
         info!("Starting instances in tier '{tier_name}' ...");
-        for _ in 0..(tier.replicasets * tier.replication_factor) {
-            instance_id += 1;
+        for instance_id in instance_ids {
             let instance_name = PicodataInstance::make_name(instance_id);
 
             if get_active_socket_path(&cluster_dir, &instance_name).is_some() {
@@ -1531,6 +1546,7 @@ pub fn cmd(params: Params) -> Result<()> {
 mod tests {
     use super::*;
     use crate::commands::lib::LIB_EXT;
+    use crate::commands::test_helpers::make_topology_with_tier_sizes;
     use flate2::write::GzEncoder;
     use flate2::Compression;
     use std::cell::RefCell;
@@ -2243,5 +2259,48 @@ mod tests {
             topology.post_install_sql[2].trim(),
             "INSERT INTO \"t\" VALUES (3);"
         );
+    }
+
+    #[test]
+    fn instance_id_ranges_by_tier_follows_tier_name_order() {
+        let topology = make_topology_with_tier_sizes(&[("b", 1, 2), ("a", 2, 1)]);
+        assert_eq!(
+            topology.instance_id_ranges_by_tier().collect::<Vec<_>>(),
+            vec![("a", 1..3), ("b", 3..5)]
+        );
+    }
+
+    #[test]
+    fn instance_id_ranges_by_tier_keeps_numbering_after_empty_tier() {
+        let topology = make_topology_with_tier_sizes(&[("a", 0, 2), ("b", 1, 1)]);
+        assert_eq!(
+            topology.instance_id_ranges_by_tier().collect::<Vec<_>>(),
+            vec![("a", 1..1), ("b", 1..2)]
+        );
+    }
+
+    #[test]
+    fn instance_id_ranges_by_tier_does_not_overflow_u8() {
+        let topology = make_topology_with_tier_sizes(&[("default", 16, 16)]);
+        assert_eq!(
+            topology.instance_id_ranges_by_tier().collect::<Vec<_>>(),
+            vec![("default", 1..257)]
+        );
+    }
+
+    #[test]
+    fn parse_id_from_dir_name_accepts_only_canonical_names() {
+        assert_eq!(PicodataInstance::parse_id_from_dir_name("i1"), Some(1));
+        assert_eq!(
+            PicodataInstance::parse_id_from_dir_name("i65535"),
+            Some(65535)
+        );
+        for dir_name in ["i01", "i+1", "i", "i65536", "x1", "1", "i1a", "I1"] {
+            assert_eq!(
+                PicodataInstance::parse_id_from_dir_name(dir_name),
+                None,
+                "{dir_name}"
+            );
+        }
     }
 }

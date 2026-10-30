@@ -17,6 +17,7 @@
     - [Подключение внешних плагинов](#подключение-внешних-плагинов)
     - [Пример запуска внешнего плагина](#пример-запуска-внешнего-плагина)
   - [`stop`](#stop)
+  - [`status instances`](#status-instances)
   - [`enter`](#enter)
   - [`plugin clean`](#plugin-clean)
   - [`plugin new`](#plugin-new)
@@ -474,6 +475,157 @@ cargo pike stop --data-dir ./tmp --signal SIGTERM --timeout 10
 - `--instance-name <INSTANCE_NAME>` - Название инстанса Пикодаты. По умолчанию игнорируется.
 - `--signal <SIGNAL>` - Unix-сигнал, который будет отправлен процессам. По умолчанию: `SIGKILL`.
 - `--timeout <TIMEOUT_SECS>` - timeout ожидания завершения кластера. По умолчанию: `30 секунд`.
+
+### `status instances`
+
+Список инстансов кластера, запущенного командой `run`, со сверкой с `topology.toml`: 
+какие инстансы работают, какие остановлены, какие еще не запускались и какие запущены, хотя не описаны в топологии.
+
+```bash
+cargo pike status instances
+```
+
+Pike читает `topology.toml`, директории инстансов `i<N>` в `<data-dir>/cluster` и, если хотя бы один инстанс работает, 
+запрашивает у кластера через `picodata admin` таблицу `_pico_instance` и raft-лидера (`pico.raft_status()`). 
+Команда ничего не создает и не меняет.
+
+Вывод для работающего кластера, в котором один инстанс остановлен, один еще не запускался, а один не описан в `topology.toml`:
+
+```text
+TIER     REPLICASET  INSTANCE       DIR   PROCESS      STATE
+default  default_1   ★ default_1_1  i1   running      Online
+default  default_1      default_1_2  i2   running      Online
+default  default_2      default_2_1  i3   stopped      Offline
+default  default_3      default_3_1  i5   running      Online
+default  -              -            i4   not_started  -
+
+3/5 instances running, 1 not started, 1 not described in topology.toml: i5
+★ - raft leader
+```
+
+Вывод для полностью остановленного кластера:
+
+```text
+TIER     REPLICASET  INSTANCE       DIR  PROCESS  STATE
+default  -             default_1_1  i1   stopped  -
+default  -             default_1_2  i2   stopped  -
+default  -             default_2_1  i3   stopped  -
+default  -             default_2_2  i4   stopped  -
+
+0/4 instances running, 0 not started, raft leader unknown
+★ - raft leader
+```
+
+Колонки: `TIER`, `REPLICASET` и `INSTANCE` - тир, репликасет и имя инстанса в Пикодате, 
+`DIR` - директория инстанса в `<data-dir>/cluster`, `PROCESS` - состояние процесса, 
+`STATE` - текущее состояние инстанса в кластере (`current_state` из `_pico_instance`). 
+Отсутствующее значение обозначается `-`. Строки отсортированы по тиру, репликасету и номеру инстанса; 
+инстансы без репликасета идут последними в своем тире.
+
+Значения `PROCESS`:
+
+| Значение      | Описание                                                       |
+|---------------|----------------------------------------------------------------|
+| `running`     | процесс инстанса работает                                      |
+| `stopped`     | директория инстанса есть, но его процесс не работает           |
+| `not_started` | инстанс описан в `topology.toml`, но его директории еще нет    |
+
+Raft-лидер отмечен символом `★` перед именем инстанса. Под таблицей выводится итоговая строка 
+`{running}/{total} instances running, {not_started} not started`, где `total` - число всех строк, 
+включая инстансы не из топологии. В конец итоговой строки добавляется:
+
+- `raft leader unknown` - если лидер неизвестен: кластер остановлен, в нем сейчас нет лидера или данные кластера недоступны;
+- `{k} not described in topology.toml: i5, i6` - если в директории кластера есть инстансы, не описанные в `topology.toml`.
+
+Последней всегда выводится легенда `★ - raft leader`.
+
+Вывод в JSON включается опцией `--format json`. Для первого примера:
+
+```json
+{
+  "instances": [
+    {
+      "tier": "default",
+      "replicaset": "default_1",
+      "name": "default_1_1",
+      "raft_leader": true,
+      "dir": "i1",
+      "process": "running",
+      "current_state": "Online"
+    },
+    {
+      "tier": "default",
+      "replicaset": "default_1",
+      "name": "default_1_2",
+      "raft_leader": false,
+      "dir": "i2",
+      "process": "running",
+      "current_state": "Online"
+    },
+    {
+      "tier": "default",
+      "replicaset": "default_2",
+      "name": "default_2_1",
+      "raft_leader": false,
+      "dir": "i3",
+      "process": "stopped",
+      "current_state": "Offline"
+    },
+    {
+      "tier": "default",
+      "replicaset": "default_3",
+      "name": "default_3_1",
+      "raft_leader": false,
+      "dir": "i5",
+      "process": "running",
+      "current_state": "Online"
+    },
+    {
+      "tier": "default",
+      "replicaset": null,
+      "name": null,
+      "raft_leader": false,
+      "dir": "i4",
+      "process": "not_started",
+      "current_state": null
+    }
+  ],
+  "unexpected": [
+    "i5"
+  ]
+}
+```
+
+Отсутствующее значение в JSON - `null`, `raft_leader` равен `null`, если лидер неизвестен, 
+`unexpected` - директории инстансов, не описанных в `topology.toml` (`[]`, если таких нет).
+
+Если часть инстансов работает, но данные кластера получить не удалось (ни один работающий инстанс не принимает подключения 
+на `admin.sock` или запрос к кластеру через `picodata admin` завершился ошибкой, например нет ответа за 10 секунд), 
+Pike пишет в stderr предупреждение и выводит список только по `topology.toml` и директориям инстансов:
+
+```text
+[W] cluster data is unavailable, showing data from topology.toml and instance dirs only: no running instance accepts connections on admin.sock
+```
+
+Команда завершается с кодом 0 независимо от состояния инстансов. Без файла топологии она завершается с кодом 1, как `run`.
+
+#### Разница поведений под разными OS
+
+На Linux инстанс считается работающим (`running`), если жив процесс из файла `pid` в директории инстанса, 
+этот процесс не зомби и запущен с `--instance-dir`, указывающим на эту директорию (путь из командной строки процесса 
+разрешается относительно его рабочей директории). Так команда не принимает за инстанс чужой процесс, получивший PID 
+остановленного инстанса, в том числе инстанс другого кластера.
+
+На других ОС (macOS в частности) проверяется только то, что процесс с этим PID существует, и защиты от переиспользования PID нет.
+
+#### Доступные опции
+
+- `-t, --topology <TOPOLOGY>` - Путь к файлу топологии. Значение по умолчанию: `topology.toml`
+- `--data-dir <DATA_DIR>` - Путь к директории хранения файлов кластера. Значение по умолчанию: `./tmp/pike`
+- `--plugin-path` - Путь до директории проекта плагина. Значение по умолчанию: `./`
+- `--picodata-path <BINARY_PATH>` - Путь до исполняемого файла Пикодаты, через который выполняется `picodata admin`. 
+  Значение по умолчанию: `picodata`
+- `--format <FORMAT>` - Формат вывода: `text` или `json`. Значение по умолчанию: `text`
 
 ### `enter`
 
