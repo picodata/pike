@@ -1,6 +1,8 @@
 mod helpers;
 
-use helpers::{exec_pike, run_cluster, CmdArguments, CLUSTER_DIR, PLUGIN_NAME};
+use helpers::{
+    exec_pike, run_cluster, wait_instance_stopped, CmdArguments, CLUSTER_DIR, PLUGIN_NAME,
+};
 use std::{
     fs::{self},
     path::Path,
@@ -120,18 +122,7 @@ fn test_pike_stop_of_specific_instance() {
     let cluster_dir = Path::new(CLUSTER_DIR);
     let instance_dir = cluster_dir.join(target_instance);
 
-    // Wait while stopping instance is not killed.
-    let start = Instant::now();
-    let timeout = Duration::from_secs(60);
-
-    while is_instance_running(&instance_dir) {
-        thread::sleep(Duration::from_secs(1));
-
-        assert!(
-            Instant::now().duration_since(start) < timeout,
-            "Timeout has reached. Instance was not stopped."
-        );
-    }
+    wait_instance_stopped(&instance_dir);
 
     // Check that all other instances were not killed.
     for entry in fs::read_dir(cluster_dir).unwrap() {

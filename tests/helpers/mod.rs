@@ -749,6 +749,19 @@ pub fn unpack_archive(path: &Path, unpack_to: &Path) {
     archive.unpack(unpack_to).unwrap();
 }
 
+pub fn wait_instance_stopped(instance_dir: &Path) {
+    const INSTANCE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
+
+    let start = Instant::now();
+    while is_instance_running(instance_dir) {
+        assert!(
+            start.elapsed() < INSTANCE_STOP_TIMEOUT,
+            "Timeout has reached. Instance was not stopped."
+        );
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
 pub fn is_instance_running(instance_dir: &Path) -> bool {
     let socket_path = instance_dir.join("admin.sock");
     socket_path.exists() && UnixStream::connect(&socket_path).is_ok()

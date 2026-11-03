@@ -1,8 +1,8 @@
 mod helpers;
 
 use helpers::{
-    exec_pike, get_picodata_query_output, is_instance_running, run_cluster, CmdArguments,
-    CLUSTER_DIR, PLUGIN_NAME, TESTS_DIR,
+    exec_pike, get_picodata_query_output, is_instance_running, run_cluster, wait_instance_stopped,
+    CmdArguments, CLUSTER_DIR, PLUGIN_NAME, TESTS_DIR,
 };
 use std::{
     fs,
@@ -16,17 +16,6 @@ use std::{
 const TOTAL_INSTANCES: i32 = 4;
 const CLUSTER_START_TIMEOUT: Duration = Duration::from_secs(120);
 const INSTANCE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
-
-fn wait_instance_stopped(instance_dir: &Path) {
-    let start = Instant::now();
-    while is_instance_running(instance_dir) {
-        assert!(
-            start.elapsed() < INSTANCE_STOP_TIMEOUT,
-            "Timeout has reached. Instance was not stopped."
-        );
-        thread::sleep(Duration::from_millis(200));
-    }
-}
 
 fn try_expel<const N: usize>(args: [&str; N]) -> bool {
     let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -59,7 +48,7 @@ fn try_expel<const N: usize>(args: [&str; N]) -> bool {
     status.success()
 }
 
-fn picodata_name(dir_name: &str) -> String {
+fn instance_name(dir_name: &str) -> String {
     let cluster_dir = Path::new(CLUSTER_DIR);
 
     fs::read_dir(cluster_dir)
@@ -74,34 +63,34 @@ fn picodata_name(dir_name: &str) -> String {
         .to_owned()
 }
 
-fn current_state(picodata_name: &str) -> String {
+fn current_state(instance_name: &str) -> String {
     get_picodata_query_output(
         Path::new(CLUSTER_DIR),
-        &format!("SELECT current_state FROM _pico_instance WHERE name = '{picodata_name}';"),
+        &format!("SELECT current_state FROM _pico_instance WHERE name = '{instance_name}';"),
     )
 }
 
-fn wait_instance_offline(picodata_name: &str) {
+fn wait_instance_offline(instance_name: &str) {
     let start = Instant::now();
     loop {
-        let state = current_state(picodata_name);
+        let state = current_state(instance_name);
         if state.contains("Offline") {
             return;
         }
 
         assert!(
             start.elapsed() < INSTANCE_STOP_TIMEOUT,
-            "Timeout has reached. Instance '{picodata_name}' did not become offline: {state}"
+            "Timeout has reached. Instance '{instance_name}' did not become offline: {state}"
         );
         thread::sleep(Duration::from_millis(500));
     }
 }
 
-fn assert_instance_expelled(picodata_name: &str) {
-    let state = current_state(picodata_name);
+fn assert_instance_expelled(instance_name: &str) {
+    let state = current_state(instance_name);
     assert!(
         state.contains("Expelled"),
-        "instance '{picodata_name}' is not expelled: {state}"
+        "instance '{instance_name}' is not expelled: {state}"
     );
 }
 
@@ -117,18 +106,15 @@ fn test_pike_expel_running_instance_with_force() {
     )
     .unwrap();
 
-    let picodata_name = picodata_name(target_instance);
+    let instance_name = instance_name(target_instance);
 
     exec_pike([
         "expel",
-        &picodata_name,
+        &instance_name,
         "--force",
         "--plugin-path",
         PLUGIN_NAME,
     ]);
-
-    wait_instance_stopped(&cluster_dir.join(target_instance));
-    assert_instance_expelled(&picodata_name);
 
     for instance_name in ["i1", "i3", "i4"] {
         assert!(
@@ -136,6 +122,8 @@ fn test_pike_expel_running_instance_with_force() {
             "instance '{instance_name}' was stopped by expel of '{target_instance}'"
         );
     }
+
+    assert_instance_expelled(&instance_name);
 }
 
 #[test]
@@ -150,12 +138,12 @@ fn test_pike_expel_running_instance_without_force_fails() {
     )
     .unwrap();
 
-    let picodata_name = picodata_name(target_instance);
+    let instance_name = instance_name(target_instance);
 
     // Running instance can only be expelled forcibly. Short timeout, since
     // picodata waits for the whole period before giving up.
     assert!(
-        !try_expel([&picodata_name, "--timeout", "5"]),
+        !try_expel([&instance_name, "--timeout", "5"]),
         "expel of a running instance without --force must fail"
     );
 
@@ -177,12 +165,12 @@ fn test_pike_expel_stopped_instance() {
     exec_pike(["stop", "-i", target_instance, "--plugin-path", PLUGIN_NAME]);
     wait_instance_stopped(&cluster_dir.join(target_instance));
 
-    let picodata_name = picodata_name(target_instance);
-    wait_instance_offline(&picodata_name);
+    let instance_name = instance_name(target_instance);
+    wait_instance_offline(&instance_name);
 
-    exec_pike(["expel", &picodata_name, "--plugin-path", PLUGIN_NAME]);
+    exec_pike(["expel", &instance_name, "--plugin-path", PLUGIN_NAME]);
 
-    assert_instance_expelled(&picodata_name);
+    assert_instance_expelled(&instance_name);
 }
 
 #[test]

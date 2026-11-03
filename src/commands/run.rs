@@ -34,14 +34,14 @@ use crate::commands::lib::{
     log_instance_skipped, log_instance_started, run_query_in_picodata_admin, spawn_picodata_admin,
     unpack_shipping_archive,
 };
-use crate::commands::lib::{
-    get_active_socket_path, BuildType, DEFAULT_DATA_DIR, INSTANCE_PID_FILENAME,
-};
+use crate::commands::lib::{get_active_socket_path, BuildType, DEFAULT_DATA_DIR};
 use crate::commands::lib::{is_plugin_archive, is_plugin_dir, is_plugin_shipping_dir};
 
 use crate::helpers::cargo_manifest::{
     read_package_info, read_toml_document, MANIFEST_TEMPLATE_NAME,
 };
+
+pub const INSTANCE_PID_FILENAME: &str = "pid";
 
 const BAFFLED_WHALE: &str = r"
   __________________________________________________________
