@@ -189,9 +189,7 @@ fn is_resharding_complete(
 ) -> bool {
     instances.iter().all(|instance| {
         let expected = expected_bucket_counts.get(&instance.tier).unwrap();
-        let bucket_count = bucket_count_per_instance
-            .get(&instance.instance_name)
-            .unwrap();
+        let bucket_count = bucket_count_per_instance.get(instance.name()).unwrap();
         expected.contains(bucket_count)
     })
 }
@@ -203,7 +201,7 @@ fn collect_master_bucket_counts(
 ) -> Result<HashMap<String, u32>> {
     let mut result = HashMap::new();
     for instance in instances {
-        let name = &instance.instance_name;
+        let name = instance.name();
         let client = instance.socket_client(picodata_path);
         let replicaset_uuid = client
             .replicaset_uuid()
@@ -271,7 +269,7 @@ fn wakeup_rebalancer(instances: &[PicodataInstance], picodata_path: &PathBuf) {
         if let Err(err) = instance.socket_client(picodata_path).rebalancer_wakeup() {
             debug!(
                 "instance '{}': rebalancer wakeup failed: {err:#}",
-                instance.instance_name
+                instance.name()
             );
         }
     }
@@ -285,7 +283,7 @@ fn wakeup_discovery(instances: &[PicodataInstance], picodata_path: &PathBuf) {
         {
             debug!(
                 "instance '{}': router discovery wakeup failed: {err:#}",
-                instance.instance_name
+                instance.name()
             );
         }
     }
@@ -300,10 +298,10 @@ fn read_all<'a, V>(
     instances
         .iter()
         .map(|instance| {
-            let name = &instance.instance_name;
+            let name = instance.name();
             let value = read(&instance.socket_client(picodata_path))
                 .with_context(|| format!("instance '{name}'"))?;
-            Ok((name.clone(), value))
+            Ok((name.to_string(), value))
         })
         .collect()
 }

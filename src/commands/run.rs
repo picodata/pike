@@ -12,6 +12,7 @@ use rand::RngExt;
 use serde::Deserialize;
 use serde_norway::{Mapping, Value};
 use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsStr;
 use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
@@ -20,7 +21,7 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::str::{self};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -459,7 +460,7 @@ pub struct PicodataInstanceProperties<'a> {
 
 #[derive(Debug)]
 pub struct PicodataInstance {
-    instance_name: String,
+    instance_name: Arc<OnceLock<String>>,
     instance_id: u16,
     tier: String,
     log_threads: Option<Vec<JoinHandle<()>>>,
@@ -499,7 +500,7 @@ impl PicodataInstance {
         run_params: &Params,
     ) -> Result<Self> {
         // Properties
-        let instance_name = Self::make_name(instance_id);
+        let data_dir_name = Self::make_data_dir_name(instance_id);
         let tiers_config = get_merged_cluster_tier_config(
             &run_params.plugin_path,
             &run_params.config_path,
@@ -508,7 +509,7 @@ impl PicodataInstance {
 
         // Paths
         let cluster_dir = get_cluster_dir(&run_params.plugin_path, &run_params.data_dir);
-        let instance_data_dir = cluster_dir.join(&instance_name);
+        let instance_data_dir = cluster_dir.join(&data_dir_name);
         let log_file_path = instance_data_dir.join("picodata.log");
         let audit_file_path = instance_data_dir.join("audit.log");
 
@@ -609,8 +610,8 @@ impl PicodataInstance {
             .spawn()
             .context(format!("failed to start picodata instance: {instance_id}"))?;
 
-        let pico_instance = PicodataInstance {
-            instance_name,
+        let mut pico_instance = PicodataInstance {
+            instance_name: Arc::new(OnceLock::new()),
             tier: tier.to_string(),
             log_threads: None,
             child,
@@ -628,11 +629,14 @@ impl PicodataInstance {
         // Save pid of picodata process to kill it after
         pico_instance.make_pid_file()?;
 
+        if !pico_instance.daemon {
+            pico_instance.capture_logs()?;
+        }
+
         Ok(pico_instance)
     }
 
-    /// Wait for a started instance to become Online, learn its name, and start capturing
-    /// its output.
+    /// Wait for a started instance to become Online and learn its name.
     fn wait_online(&mut self, picodata_path: &PathBuf, timeout: Timeout) -> Result<()> {
         let cluster_dir = self
             .data_dir
@@ -678,15 +682,11 @@ impl PicodataInstance {
             // create symlink to real instance data dir
             let symlink_name = cluster_dir.join(&new_instance_name);
             let _ = fs::remove_file(&symlink_name);
-            symlink(Self::make_name(self.instance_id), symlink_name)
+            symlink(self.data_dir_name(), symlink_name)
                 .context("failed create symlink to instance dir")?;
 
-            self.instance_name = new_instance_name;
+            self.instance_name.set(new_instance_name).unwrap();
             break;
-        }
-
-        if !self.daemon {
-            self.capture_logs()?;
         }
 
         Ok(())
@@ -714,7 +714,7 @@ impl PicodataInstance {
             pg_port: &self.pg_port,
             http_port: &self.http_port,
             data_dir: &self.data_dir,
-            instance_name: &self.instance_name,
+            instance_name: self.name(),
             tier: &self.tier,
             instance_id: &self.instance_id,
         }
@@ -773,11 +773,21 @@ impl PicodataInstance {
 
     fn capture_logs(&mut self) -> Result<()> {
         let mut rnd = rand::rng();
-        let instance_name_color = colored::CustomColor::new(
-            rnd.random_range(30..220),
-            rnd.random_range(30..220),
-            rnd.random_range(30..220),
-        );
+        let instance_name_color = (!self.disable_colors).then(|| {
+            colored::CustomColor::new(
+                rnd.random_range(30..220),
+                rnd.random_range(30..220),
+                rnd.random_range(30..220),
+            )
+        });
+
+        let make_log_prefix = move |name: &str| {
+            let log_prefix = format!("{name}: ");
+
+            instance_name_color
+                .map(|c| log_prefix.custom_color(c).to_string())
+                .unwrap_or(log_prefix)
+        };
 
         let file = OpenOptions::new()
             .create(true)
@@ -793,16 +803,25 @@ impl PicodataInstance {
         let stderr = self.child.stderr.take().expect("Failed to capture stderr");
         let outputs: [Box<dyn Read + Send>; 2] = [Box::new(stdout), Box::new(stderr)];
         for child_output in outputs {
-            let mut log_prefix = format!("{}: ", self.instance_name);
-            if !self.disable_colors {
-                log_prefix = log_prefix.custom_color(instance_name_color).to_string();
-            }
+            let instance_name = Arc::clone(&self.instance_name);
+            let mut log_prefix = make_log_prefix(self.name());
+            let mut is_name_resolved = instance_name.get().is_some();
             let file = file.clone();
 
             let wrapper = move || {
                 let stdout_lines = BufReader::new(child_output).lines();
                 for line in stdout_lines {
                     let line = line.unwrap();
+
+                    // Instance name becomes resolved after the instance
+                    // becomes Online, so we can update the log prefix.
+                    if !is_name_resolved {
+                        if let Some(name) = instance_name.get() {
+                            log_prefix = make_log_prefix(name);
+                            is_name_resolved = true;
+                        }
+                    }
+
                     println!("{log_prefix}{line}");
                     writeln!(file.lock().unwrap(), "{line}")
                         .expect("Failed to write line to log file");
@@ -810,7 +829,7 @@ impl PicodataInstance {
             };
 
             let t = thread::Builder::new()
-                .name(format!("log_catcher::{}", self.instance_name))
+                .name(format!("log_catcher::{}", self.name()))
                 .spawn(wrapper)?;
 
             log_threads.push(t);
@@ -829,12 +848,21 @@ impl PicodataInstance {
         Ok(())
     }
 
-    fn name(&self) -> &str {
-        &self.instance_name
+    fn make_data_dir_name(id: u16) -> String {
+        format!("i{id}")
     }
 
-    fn make_name(id: u16) -> String {
-        format!("i{id}")
+    /// If name is already resolved, return it.
+    /// Otherwise, return name of the instance data dir (e.g., 'i1').
+    fn name(&self) -> &str {
+        self.instance_name
+            .get()
+            .map_or_else(|| self.data_dir_name(), |name| name.as_str())
+    }
+
+    /// Return name of the instance data dir (e.g., 'i1').
+    fn data_dir_name(&self) -> &str {
+        self.data_dir.file_name().and_then(OsStr::to_str).unwrap()
     }
 
     fn kill(&mut self) -> Result<()> {
@@ -1394,10 +1422,10 @@ fn start_instances_in_tiers(
         info!("Starting instances in tier '{tier_name}' ...");
         for _ in 0..(tier.replicasets * tier.replication_factor) {
             instance_id += 1;
-            let instance_name = PicodataInstance::make_name(instance_id);
+            let data_dir_name = PicodataInstance::make_data_dir_name(instance_id);
 
-            if get_active_socket_path(&cluster_dir, &instance_name).is_some() {
-                log_instance_skipped(instance_name);
+            if get_active_socket_path(&cluster_dir, &data_dir_name).is_some() {
+                log_instance_skipped(data_dir_name);
                 continue;
             }
 
