@@ -1,7 +1,8 @@
 use crate::commands::lib::{
     timeout::Timeout,
-    {get_active_socket_path, get_cluster_dir, DEFAULT_DATA_DIR, INSTANCE_PID_FILENAME},
+    {get_active_socket_path, get_cluster_dir, DEFAULT_DATA_DIR},
 };
+use crate::commands::run::INSTANCE_PID_FILENAME;
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 use derive_builder::Builder;
@@ -343,25 +344,8 @@ fn pidfd_exited(pidfd: &std::os::fd::OwnedFd, timeout: Timeout) -> anyhow::Resul
 fn send_signal_and_poll(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::Result<()> {
     kill(pid, signal)?;
 
-    let start = Instant::now();
-    let delay = Duration::from_millis(100);
-
-    while start.elapsed() < timeout {
-        sleep(delay);
-
-        match kill(pid, None) {
-            Err(Errno::ESRCH) => {
-                // Process no longer exists.
-                return Ok(());
-            }
-            Err(err) => bail!(err),
-            Ok(()) => {}
-        }
-
-        #[cfg(target_os = "linux")]
-        if is_zombie(pid) {
-            return Ok(());
-        }
+    if poll_process_exit(pid, timeout).is_ok() {
+        return Ok(());
     }
 
     warn!("Process {pid} did not terminate within {timeout:?}. Sending SIGKILL...");

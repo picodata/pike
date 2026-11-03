@@ -3,6 +3,7 @@ use anyhow::{bail, Context, Result};
 use log::warn;
 use std::collections::HashMap;
 use std::error::Error as StdError;
+use std::os::unix::net::UnixStream;
 use std::{
     fmt::{self, Display, Formatter},
     path::{Path, PathBuf},
@@ -125,6 +126,10 @@ impl<'a> InstanceSocketClient<'a> {
         }
     }
 
+    pub fn is_running(&self) -> bool {
+        self.socket_path.exists() && UnixStream::connect(&self.socket_path).is_ok()
+    }
+
     /// Runs input query in picodata admin.
     ///
     /// Only single line is extracted from returned STDOUT.
@@ -160,13 +165,14 @@ impl<'a> InstanceSocketClient<'a> {
     fn get_parsed_lua_output<T>(&self, lua_query: &str) -> anyhow::Result<T>
     where
         T: FromStr,
-        T::Err: StdError + Send + Sync + 'static,
+        T::Err: Into<anyhow::Error>,
     {
         let raw = self
             .get_lua_single_line_output(lua_query)
             .context("failed to execute Lua query")?;
 
         raw.parse::<T>()
+            .map_err(Into::<anyhow::Error>::into)
             .with_context(|| format!("failed to parse Lua output: {raw:?}"))
     }
 
