@@ -900,29 +900,61 @@ fn run_with_external_plugin_directory() {
     assert!(cluster_started);
 }
 
+fn init_and_build_external_plugin(
+    plugin_name: &str,
+    plugin_version: &str,
+    working_directory: &Path,
+    shared_target_directory: &Path,
+) -> PathBuf {
+    let external_plugin_project_directory = working_directory.join(plugin_name);
+    init_plugin_with_args(TestPluginInitParams::<String> {
+        name: plugin_name.to_string(),
+        plugin_path: external_plugin_project_directory.clone(),
+        shared_target_path: shared_target_directory.to_path_buf(),
+        working_dir: working_directory.to_path_buf(),
+        ..Default::default()
+    });
+    build_plugin(
+        &helpers::BuildType::Release,
+        plugin_version,
+        &external_plugin_project_directory,
+    );
+    external_plugin_project_directory
+}
+
+fn pack_external_plugin_and_find_release_archive(
+    plugin_name: &str,
+    plugin_version: &str,
+    external_plugin_project_directory: &Path,
+) -> PathBuf {
+    exec_pike_in(["plugin", "pack"], external_plugin_project_directory);
+
+    let external_plugin_release_directory =
+        external_plugin_project_directory.join("target/release");
+    find_os_suffixed_archive(
+        &external_plugin_release_directory,
+        plugin_name,
+        plugin_version,
+    )
+}
+
 #[test]
 fn run_with_external_plugin_archive() {
     let plugin_path = Path::new(PLUGIN_DIR);
     init_plugin(PLUGIN_NAME);
     build_plugin(&helpers::BuildType::Debug, "0.1.0", plugin_path);
 
-    // setup and pack external plugin
-    let ext_plugin_root = PathBuf::from("./tests/tmp_ext/external-plugin-1");
-    init_plugin_with_args(TestPluginInitParams::<String> {
-        name: "external-plugin-1".to_string(),
-        plugin_path: ext_plugin_root.join(""),
-        shared_target_path: "./tests/tmp_ext/ext_shared_target".into(),
-        working_dir: "./tests/tmp_ext".into(),
-        ..Default::default()
-    });
-    build_plugin(&helpers::BuildType::Release, "0.1.0", &ext_plugin_root);
-    let pack_args = ["plugin", "pack", "--plugin-path", "./external-plugin-1"];
-    exec_pike_in(pack_args, "./tests/tmp_ext");
-
-    // Find new-format archive
-    let ext_release_dir = Path::new("./tests/tmp_ext/external-plugin-1/target/release");
-    let ext_plugin_archive =
-        find_os_suffixed_archive(ext_release_dir, "external-plugin-1", "0.1.0");
+    let ext_plugin_root = init_and_build_external_plugin(
+        "external-plugin-1",
+        "0.1.0",
+        Path::new("./tests/tmp_ext"),
+        Path::new("./tests/tmp_ext/ext_shared_target"),
+    );
+    let ext_plugin_archive = pack_external_plugin_and_find_release_archive(
+        "external-plugin-1",
+        "0.1.0",
+        &ext_plugin_root,
+    );
 
     let plugins = BTreeMap::from([
         (PLUGIN_NAME.to_string(), Plugin::default()),
@@ -953,27 +985,81 @@ fn run_with_external_plugin_archive() {
 }
 
 #[test]
+fn run_only_external_plugin_archive_without_plugin_project_then_stop() {
+    let cluster_launch_directory_name = "external-archive-without-plugin-project";
+    let cluster_launch_directory = Path::new(TESTS_DIR).join(cluster_launch_directory_name);
+    let data_dir = cluster_launch_directory.join(DATA_DIR);
+    let cluster_dir = data_dir.join("cluster");
+    cleanup_dir(&cluster_launch_directory);
+
+    let external_plugin_project_directory = init_and_build_external_plugin(
+        "external-plugin-1",
+        "0.1.0",
+        Path::new("./tests/tmp_ext"),
+        Path::new("./tests/tmp_ext/ext_shared_target"),
+    );
+    let external_plugin_archive = pack_external_plugin_and_find_release_archive(
+        "external-plugin-1",
+        "0.1.0",
+        &external_plugin_project_directory,
+    );
+    let plugins = BTreeMap::from([(
+        "external-plugin-1".to_string(),
+        Plugin {
+            path: Some(external_plugin_archive),
+            ..Default::default()
+        },
+    )]);
+
+    run(make_ext_run_params(&cluster_launch_directory, plugins)
+        .build()
+        .unwrap())
+    .unwrap();
+    let cluster_started = wait_cluster_start_completed(&cluster_launch_directory, |state| {
+        assert_eq!(state.pico_instance.matches("Online").count(), 8);
+        assert_eq!(state.pico_plugin.matches("true").count(), 1);
+        true
+    });
+    let plugin_manifest_in_data_dir_exists = data_dir
+        .join("plugins/external-plugin-1/0.1.0/manifest.yaml")
+        .exists();
+
+    let cluster_plugins_directory_exists = cluster_dir.join("plugins").exists();
+
+    // exec_pike panics on a non-zero exit code: this is the failure from issue #427.
+    exec_pike(["stop", "--plugin-path", cluster_launch_directory_name]);
+
+    let running_instance_dirs: Vec<PathBuf> = (1..=TOTAL_INSTANCES)
+        .map(|instance_number| cluster_dir.join(format!("i{instance_number}")))
+        .filter(|instance_dir| is_instance_running(instance_dir))
+        .collect();
+
+    assert!(cluster_started);
+    assert!(plugin_manifest_in_data_dir_exists);
+    assert!(!cluster_plugins_directory_exists);
+    assert_eq!(running_instance_dirs, Vec::<PathBuf>::new());
+    cleanup_dir(&cluster_launch_directory);
+}
+
+#[test]
 fn run_with_external_plugin_archive_with_build_info() {
     let plugin_path = Path::new(PLUGIN_DIR);
     init_plugin(PLUGIN_NAME);
     build_plugin(&helpers::BuildType::Debug, "0.1.0", plugin_path);
 
-    // setup external plugin, commit it and pack
-    let ext_plugin_root = PathBuf::from("./tests/tmp_ext/external-plugin-1");
-    init_plugin_with_args(TestPluginInitParams::<String> {
-        name: "external-plugin-1".to_string(),
-        plugin_path: ext_plugin_root.join(""),
-        shared_target_path: "./tests/tmp_ext/ext_shared_target".into(),
-        working_dir: "./tests/tmp_ext".into(),
-        ..Default::default()
-    });
-    build_plugin(&helpers::BuildType::Release, "0.1.0", &ext_plugin_root);
+    let ext_plugin_root = init_and_build_external_plugin(
+        "external-plugin-1",
+        "0.1.0",
+        Path::new("./tests/tmp_ext"),
+        Path::new("./tests/tmp_ext/ext_shared_target"),
+    );
     git_commit_all(&ext_plugin_root);
-    exec_pike_in(["plugin", "pack"], &ext_plugin_root);
-
-    let ext_release_dir = ext_plugin_root.join("target").join("release");
-    let ext_plugin_archive =
-        find_os_suffixed_archive(&ext_release_dir, "external-plugin-1", "0.1.0");
+    let ext_plugin_archive = pack_external_plugin_and_find_release_archive(
+        "external-plugin-1",
+        "0.1.0",
+        &ext_plugin_root,
+    );
+    let ext_release_dir = ext_plugin_root.join("target/release");
     assert_eq!(
         unpack_build_info(
             &ext_plugin_archive,
