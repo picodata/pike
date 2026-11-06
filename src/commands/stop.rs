@@ -229,15 +229,15 @@ fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::
 /// Wait until the process exits, without sending it any signal.
 #[cfg(target_os = "linux")]
 pub(crate) fn wait_process_exit(pid: Pid, timeout: Timeout) -> anyhow::Result<()> {
-    let pidfd = match pidfd_open(pid) {
-        Ok(Some(pidfd)) => pidfd,
+    let exited = match pidfd_open(pid) {
+        Ok(Some(pidfd)) => pidfd_exited(&pidfd, timeout)?,
         // The process has exited already.
         Ok(None) => return Ok(()),
-        Err(Errno::ENOSYS) => return poll_process_exit(pid, timeout),
+        Err(Errno::ENOSYS) => poll_process_exit(pid, timeout)?,
         Err(err) => bail!(err),
     };
 
-    if !pidfd_exited(&pidfd, timeout)? {
+    if !exited {
         bail!("process {pid} did not exit within {timeout:?}");
     }
     Ok(())
@@ -245,27 +245,31 @@ pub(crate) fn wait_process_exit(pid: Pid, timeout: Timeout) -> anyhow::Result<()
 
 #[cfg(not(target_os = "linux"))]
 pub(crate) fn wait_process_exit(pid: Pid, timeout: Timeout) -> anyhow::Result<()> {
-    poll_process_exit(pid, timeout)
+    if !poll_process_exit(pid, timeout)? {
+        bail!("process {pid} did not exit within {timeout:?}");
+    }
+    Ok(())
 }
 
-fn poll_process_exit(pid: Pid, timeout: Timeout) -> anyhow::Result<()> {
+/// Returns false on timeout; errors checking the process are propagated.
+fn poll_process_exit(pid: Pid, timeout: Timeout) -> anyhow::Result<bool> {
     let start = Instant::now();
     let delay = Duration::from_millis(100);
 
     loop {
         match kill(pid, None) {
-            Err(Errno::ESRCH) => return Ok(()),
+            Err(Errno::ESRCH) => return Ok(true),
             Err(err) => bail!(err),
             Ok(()) => {}
         }
 
         #[cfg(target_os = "linux")]
         if is_zombie(pid) {
-            return Ok(());
+            return Ok(true);
         }
 
         if start.elapsed() >= timeout {
-            bail!("process {pid} did not exit within {timeout:?}");
+            return Ok(false);
         }
         sleep(delay);
     }
@@ -344,7 +348,7 @@ fn pidfd_exited(pidfd: &std::os::fd::OwnedFd, timeout: Timeout) -> anyhow::Resul
 fn send_signal_and_poll(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::Result<()> {
     kill(pid, signal)?;
 
-    if poll_process_exit(pid, timeout).is_ok() {
+    if poll_process_exit(pid, timeout)? {
         return Ok(());
     }
 

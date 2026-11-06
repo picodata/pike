@@ -484,6 +484,12 @@ cargo pike stop --data-dir ./tmp --signal SIGTERM --timeout 10
 cargo pike expel default_2_1
 ```
 
+Можно указать как имя инстанса Picodata (`default_2_1`), так и имя каталога Pike (`i2`):
+
+```bash
+cargo pike expel i2 --force
+```
+
 Работающий инстанс можно исключить только с флагом `--force`, иначе Пикодата вернёт ошибку. Остановленный инстанс исключается без него.
 
 ```bash
