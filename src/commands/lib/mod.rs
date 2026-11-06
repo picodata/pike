@@ -170,6 +170,31 @@ pub fn get_cluster_dir(plugin_path: &Path, data_dir: &Path) -> PathBuf {
     plugin_path.join(data_dir).join("cluster")
 }
 
+/// Resolve a Pike directory name (e.g. `i2`) to its Picodata name.
+/// Picodata names and unknown names are returned unchanged.
+pub fn resolve_instance_name(cluster_dir: &Path, instance_name: &str) -> Result<String> {
+    let instance_dir = cluster_dir.join(instance_name);
+    if !instance_dir.is_dir() || fs::symlink_metadata(&instance_dir)?.is_symlink() {
+        return Ok(instance_name.to_owned());
+    }
+
+    for entry in fs::read_dir(cluster_dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_symlink()
+            && fs::read_link(entry.path())? == Path::new(instance_name)
+        {
+            return entry.file_name().into_string().map_err(|name| {
+                anyhow::anyhow!("instance name is not valid UTF-8: {}", name.display())
+            });
+        }
+    }
+
+    bail!(
+        "instance '{instance_name}' has no Picodata name symlink in {}",
+        cluster_dir.display()
+    )
+}
+
 // Return socket path to the active instance
 pub fn get_active_socket_path(cluster_dir: &Path, instance_name: &str) -> Option<PathBuf> {
     let socket_path = cluster_dir.join(instance_name).join("admin.sock");

@@ -2,10 +2,8 @@ use crate::commands::lib::{run_query_in_picodata_admin, timeout::Timeout};
 use anyhow::{bail, Context, Result};
 use log::warn;
 use std::collections::HashMap;
-use std::error::Error as StdError;
 use std::os::unix::net::UnixStream;
 use std::{
-    fmt::{self, Display, Formatter},
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -77,27 +75,15 @@ impl InstanceState {
     }
 }
 
-/// Picodata reported a state of an instance this module does not know.
-#[derive(Debug)]
-pub struct UnknownInstanceState(String);
-
-impl Display for UnknownInstanceState {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "unknown instance state variant: '{}'", self.0)
-    }
-}
-
-impl StdError for UnknownInstanceState {}
-
 impl FromStr for InstanceState {
-    type Err = UnknownInstanceState;
+    type Err = anyhow::Error;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         let state = match s.to_ascii_lowercase().as_str() {
             "online" => Self::Online,
             "offline" => Self::Offline,
             "expelled" => Self::Expelled,
-            unknown => return Err(UnknownInstanceState(unknown.to_owned())),
+            unknown => bail!("Unknown instance state variant: '{unknown}'"),
         };
 
         Ok(state)
@@ -126,8 +112,24 @@ impl<'a> InstanceSocketClient<'a> {
         }
     }
 
-    pub fn is_running(&self) -> bool {
-        self.socket_path.exists() && UnixStream::connect(&self.socket_path).is_ok()
+    pub fn is_running(&self) -> Result<bool> {
+        match UnixStream::connect(&self.socket_path) {
+            Ok(_) => Ok(true),
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                Ok(false)
+            }
+            Err(err) => Err(err).with_context(|| {
+                format!(
+                    "failed to connect to admin socket {}",
+                    self.socket_path.display()
+                )
+            }),
+        }
     }
 
     /// Runs input query in picodata admin.
