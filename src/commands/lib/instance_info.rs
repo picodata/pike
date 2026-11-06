@@ -112,24 +112,8 @@ impl<'a> InstanceSocketClient<'a> {
         }
     }
 
-    pub fn is_running(&self) -> Result<bool> {
-        match UnixStream::connect(&self.socket_path) {
-            Ok(_) => Ok(true),
-            Err(err)
-                if matches!(
-                    err.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
-                ) =>
-            {
-                Ok(false)
-            }
-            Err(err) => Err(err).with_context(|| {
-                format!(
-                    "failed to connect to admin socket {}",
-                    self.socket_path.display()
-                )
-            }),
-        }
+    pub fn is_running(&self) -> bool {
+        self.socket_path.exists() && UnixStream::connect(&self.socket_path).is_ok()
     }
 
     /// Runs input query in picodata admin.

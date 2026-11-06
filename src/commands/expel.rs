@@ -52,8 +52,7 @@ pub fn cmd(params: &Params) -> Result<()> {
         .context("no running instance found to perform expel")?;
 
     let wait_for_process = *force
-        && InstanceSocketClient::new(&cluster_dir.join(&instance_name), picodata_path)
-            .is_running()?;
+        && InstanceSocketClient::new(&cluster_dir.join(&instance_name), picodata_path).is_running();
 
     info!("expelling picodata cluster instance '{instance_name}'");
 
@@ -64,7 +63,7 @@ pub fn cmd(params: &Params) -> Result<()> {
         match client.state_of(&instance_name) {
             Ok(state) if state.is_expelled() => break,
             Ok(_) => {}
-            Err(err) if !client.is_running()? => {
+            Err(err) if !client.is_running() => {
                 info!("admin socket is unavailable, stop waiting for '{instance_name}' to become expelled: {err:#}");
                 break;
             }
