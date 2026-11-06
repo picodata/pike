@@ -454,12 +454,15 @@ where
 }
 
 pub fn get_picodata_table(cluster_dir: &Path, table_name: &str) -> String {
+    get_picodata_query_output(cluster_dir, &format!(r"SELECT * FROM {table_name};"))
+}
+
+pub fn get_picodata_query_output(cluster_dir: &Path, query: &str) -> String {
     let mut picodata_admin = await_picodata_admin(Duration::from_secs(60), cluster_dir).unwrap();
 
     // New scope to avoid infinite cycle while reading picodata stdout
     {
         let picodata_stdin = picodata_admin.stdin.as_mut().unwrap();
-        let query = format!(r"SELECT * FROM {table_name};");
         picodata_stdin.write_all(query.as_bytes()).unwrap();
         picodata_admin.wait().unwrap();
     }
@@ -744,6 +747,19 @@ pub fn unpack_archive(path: &Path, unpack_to: &Path) {
     let mut archive = Archive::new(decompressor);
 
     archive.unpack(unpack_to).unwrap();
+}
+
+pub fn wait_instance_stopped(instance_dir: &Path) {
+    const INSTANCE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
+
+    let start = Instant::now();
+    while is_instance_running(instance_dir) {
+        assert!(
+            start.elapsed() < INSTANCE_STOP_TIMEOUT,
+            "Timeout has reached. Instance was not stopped."
+        );
+        thread::sleep(Duration::from_millis(200));
+    }
 }
 
 pub fn is_instance_running(instance_dir: &Path) -> bool {
