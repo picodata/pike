@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [6.0.1]
+
 ### Fixed
 
 - Fix instances blocking on a full STDOUT/STDERR pipe during `pike run` startup [#435](https://github.com/picodata/pike/issues/435).
