@@ -28,6 +28,7 @@ pub const DATA_DIR: &str = "./tmp/pike";
 pub const CLUSTER_DIR: &str = concat!(PLUGIN_DIR, "/", DATA_DIR, "/cluster");
 pub const SHARED_TARGET_NAME: &str = "shared_target";
 pub const SHARED_TARGET_PATH: &str = concat!(TESTS_DIR, SHARED_TARGET_NAME);
+const INSTANCE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub const LIB_EXT: &str = "so";
@@ -454,12 +455,15 @@ where
 }
 
 pub fn get_picodata_table(cluster_dir: &Path, table_name: &str) -> String {
+    get_picodata_query_output(cluster_dir, &format!(r"SELECT * FROM {table_name};"))
+}
+
+pub fn get_picodata_query_output(cluster_dir: &Path, query: &str) -> String {
     let mut picodata_admin = await_picodata_admin(Duration::from_secs(60), cluster_dir).unwrap();
 
     // New scope to avoid infinite cycle while reading picodata stdout
     {
         let picodata_stdin = picodata_admin.stdin.as_mut().unwrap();
-        let query = format!(r"SELECT * FROM {table_name};");
         picodata_stdin.write_all(query.as_bytes()).unwrap();
         picodata_admin.wait().unwrap();
     }
@@ -744,6 +748,36 @@ pub fn unpack_archive(path: &Path, unpack_to: &Path) {
     let mut archive = Archive::new(decompressor);
 
     archive.unpack(unpack_to).unwrap();
+}
+
+pub fn wait_instance_offline(instance_name: &str) {
+    let start = Instant::now();
+    loop {
+        let state = get_picodata_query_output(
+            Path::new(CLUSTER_DIR),
+            &format!("SELECT current_state FROM _pico_instance WHERE name = '{instance_name}';"),
+        );
+        if state.contains("Offline") {
+            return;
+        }
+
+        assert!(
+            start.elapsed() < INSTANCE_STOP_TIMEOUT,
+            "Timeout has reached. Instance '{instance_name}' did not become offline: {state}"
+        );
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
+pub fn wait_instance_stopped(instance_dir: &Path) {
+    let start = Instant::now();
+    while is_instance_running(instance_dir) {
+        assert!(
+            start.elapsed() < INSTANCE_STOP_TIMEOUT,
+            "Timeout has reached. Instance was not stopped."
+        );
+        thread::sleep(Duration::from_millis(200));
+    }
 }
 
 pub fn is_instance_running(instance_dir: &Path) -> bool {

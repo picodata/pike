@@ -41,6 +41,8 @@ use crate::helpers::cargo_manifest::{
     read_package_info, read_toml_document, MANIFEST_TEMPLATE_NAME,
 };
 
+pub const INSTANCE_PID_FILENAME: &str = "pid";
+
 const BAFFLED_WHALE: &str = r"
   __________________________________________________________
 / Iiiiiiiiit seeeeeems Piiiiicooooodaaaaataaaaaa iiiiiiiiis \
@@ -842,7 +844,7 @@ impl PicodataInstance {
 
     fn make_pid_file(&self) -> Result<()> {
         let pid = self.child.id();
-        let pid_location = self.data_dir.join("pid");
+        let pid_location = self.data_dir.join(INSTANCE_PID_FILENAME);
         let mut file = File::create(pid_location)?;
         writeln!(file, "{pid}")?;
         Ok(())

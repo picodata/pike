@@ -1,8 +1,8 @@
-use crate::commands::lib::run_query_in_picodata_admin;
+use crate::commands::lib::{run_query_in_picodata_admin, timeout::Timeout};
 use anyhow::{bail, Context, Result};
 use log::warn;
 use std::collections::HashMap;
-use std::error::Error as StdError;
+use std::os::unix::net::UnixStream;
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
@@ -69,6 +69,10 @@ impl InstanceState {
     pub fn is_online(self) -> bool {
         matches!(self, InstanceState::Online)
     }
+
+    pub fn is_expelled(self) -> bool {
+        matches!(self, InstanceState::Expelled)
+    }
 }
 
 impl FromStr for InstanceState {
@@ -99,6 +103,17 @@ impl<'a> InstanceSocketClient<'a> {
             socket_path: instance_data_dir.join(ADMIN_SOCKET_FILENAME),
             picodata_path,
         }
+    }
+
+    pub fn with_socket_path(socket_path: PathBuf, picodata_path: &'a PathBuf) -> Self {
+        Self {
+            socket_path,
+            picodata_path,
+        }
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.socket_path.exists() && UnixStream::connect(&self.socket_path).is_ok()
     }
 
     /// Runs input query in picodata admin.
@@ -136,13 +151,14 @@ impl<'a> InstanceSocketClient<'a> {
     fn get_parsed_lua_output<T>(&self, lua_query: &str) -> anyhow::Result<T>
     where
         T: FromStr,
-        T::Err: StdError + Send + Sync + 'static,
+        T::Err: Into<anyhow::Error>,
     {
         let raw = self
             .get_lua_single_line_output(lua_query)
             .context("failed to execute Lua query")?;
 
         raw.parse::<T>()
+            .map_err(Into::<anyhow::Error>::into)
             .with_context(|| format!("failed to parse Lua output: {raw:?}"))
     }
 
@@ -151,10 +167,29 @@ impl<'a> InstanceSocketClient<'a> {
         self.get_parsed_lua_output(GET_INSTANCE_NAME)
     }
 
+    /// Expels the instance with the given picodata name from the cluster.
+    pub fn expel(&self, instance_name: &str, force: bool, timeout: Timeout) -> Result<()> {
+        let expelled: bool = self.get_parsed_lua_output(&format!(
+            "\\lua\nreturn pico.expel('{instance_name}', {{ force = {force}, timeout = {} }})",
+            timeout.as_secs()
+        ))?;
+        if !expelled {
+            bail!("picodata refused to expel instance '{instance_name}'");
+        }
+
+        Ok(())
+    }
+
+    /// Fetches state of the instance with the given picodata name
+    pub fn state_of(&self, instance_name: &str) -> Result<InstanceState> {
+        self.get_parsed_lua_output(&format!(
+            "\\lua\nreturn box.space._pico_instance:get('{instance_name}').current_state[1]"
+        ))
+    }
+
     /// Fetches state of the instance from admin socket.
     pub fn current_state(&self) -> Result<InstanceState> {
-        self.get_lua_single_line_output(GET_INSTANCE_CURRENT_STATE)
-            .and_then(|state| state.parse())
+        self.get_parsed_lua_output(GET_INSTANCE_CURRENT_STATE)
     }
 
     // Fetches map of [replicaset_uuid, bucket_count] obtained from

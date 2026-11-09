@@ -4,6 +4,7 @@ use helpers::{
     await_picodata_admin, build_plugin, cleanup_dir, exec_pike, exec_pike_in, get_picodata_table,
     git_commit_all, git_head, init_plugin, init_plugin_with_args, init_plugin_workspace,
     run_cluster, set_default_tier_bucket_count, unpack_build_info, wait_cluster_start_completed,
+    wait_instance_stopped,
 };
 use helpers::{
     ArchivedBuildInfo, CmdArguments, TestPluginInitParams, CLUSTER_DIR, DATA_DIR, LIB_EXT,
@@ -1131,18 +1132,7 @@ fn run_specific_instance() {
     let cluster_dir = Path::new(CLUSTER_DIR);
     let instance_dir = cluster_dir.join(target_instance);
 
-    // Wait while stopping instance is not killed.
-    let start = Instant::now();
-    let timeout = Duration::from_secs(60);
-
-    while is_instance_running(&instance_dir) {
-        thread::sleep(Duration::from_secs(1));
-
-        assert!(
-            Instant::now().duration_since(start) < timeout,
-            "Timeout has reached. Instance was not stopped."
-        );
-    }
+    wait_instance_stopped(&instance_dir);
 
     // Check that all other instances were not killed.
     for entry in fs::read_dir(cluster_dir).unwrap() {
@@ -1221,18 +1211,8 @@ fn revive_terminated_instances() {
     for i in &terminated_instances {
         exec_pike(["stop", "--plugin-path", PLUGIN_NAME, "--instance-name", i]);
 
-        let start = Instant::now();
-        let timeout = Duration::from_secs(60);
         let instance_dir = cluster_dir.join(i);
-
-        while is_instance_running(&instance_dir) {
-            thread::sleep(Duration::from_secs(1));
-
-            assert!(
-                Instant::now().duration_since(start) < timeout,
-                "Timeout has reached. Instance '{i}' was not stopped."
-            );
-        }
+        wait_instance_stopped(&instance_dir);
     }
 
     // Execute "pike run" once again.
