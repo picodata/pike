@@ -45,14 +45,15 @@ pub fn cmd(params: &Params) -> Result<()> {
     } = params;
 
     let cluster_dir = get_cluster_dir(plugin_path, data_dir);
+    let instance_dir = cluster_dir.join(instance_name);
     let instance_name = resolve_instance_name(&cluster_dir, instance_name)?;
     // Expel can be requested through any running instance, including the expelled one.
     let client = find_active_socket_path(&cluster_dir)?
         .map(|socket_path| InstanceSocketClient::with_socket_path(socket_path, picodata_path))
         .context("no running instance found to perform expel")?;
 
-    let wait_for_process = *force
-        && InstanceSocketClient::new(&cluster_dir.join(&instance_name), picodata_path).is_running();
+    let wait_for_process =
+        *force && InstanceSocketClient::new(&instance_dir, picodata_path).is_running();
 
     info!("expelling picodata cluster instance '{instance_name}'");
 
@@ -77,7 +78,7 @@ pub fn cmd(params: &Params) -> Result<()> {
     }
 
     if wait_for_process {
-        let pid_file = cluster_dir.join(&instance_name).join(INSTANCE_PID_FILENAME);
+        let pid_file = instance_dir.join(INSTANCE_PID_FILENAME);
         let pid = read_pid_from_file(&pid_file).context("failed to read the PID file")?;
         wait_process_exit(pid, PROCESS_EXIT_TIMEOUT)?;
     }

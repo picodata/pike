@@ -28,6 +28,7 @@ pub const DATA_DIR: &str = "./tmp/pike";
 pub const CLUSTER_DIR: &str = concat!(PLUGIN_DIR, "/", DATA_DIR, "/cluster");
 pub const SHARED_TARGET_NAME: &str = "shared_target";
 pub const SHARED_TARGET_PATH: &str = concat!(TESTS_DIR, SHARED_TARGET_NAME);
+const INSTANCE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub const LIB_EXT: &str = "so";
@@ -749,9 +750,26 @@ pub fn unpack_archive(path: &Path, unpack_to: &Path) {
     archive.unpack(unpack_to).unwrap();
 }
 
-pub fn wait_instance_stopped(instance_dir: &Path) {
-    const INSTANCE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
+pub fn wait_instance_offline(instance_name: &str) {
+    let start = Instant::now();
+    loop {
+        let state = get_picodata_query_output(
+            Path::new(CLUSTER_DIR),
+            &format!("SELECT current_state FROM _pico_instance WHERE name = '{instance_name}';"),
+        );
+        if state.contains("Offline") {
+            return;
+        }
 
+        assert!(
+            start.elapsed() < INSTANCE_STOP_TIMEOUT,
+            "Timeout has reached. Instance '{instance_name}' did not become offline: {state}"
+        );
+        thread::sleep(Duration::from_millis(500));
+    }
+}
+
+pub fn wait_instance_stopped(instance_dir: &Path) {
     let start = Instant::now();
     while is_instance_running(instance_dir) {
         assert!(

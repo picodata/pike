@@ -171,10 +171,9 @@ pub fn get_cluster_dir(plugin_path: &Path, data_dir: &Path) -> PathBuf {
 }
 
 /// Resolve a Pike directory name (e.g. `i2`) to its Picodata name.
-/// Picodata names and unknown names are returned unchanged.
 pub fn resolve_instance_name(cluster_dir: &Path, instance_name: &str) -> Result<String> {
     let instance_dir = cluster_dir.join(instance_name);
-    if !instance_dir.is_dir() || fs::symlink_metadata(&instance_dir)?.is_symlink() {
+    if fs::symlink_metadata(&instance_dir)?.is_symlink() {
         return Ok(instance_name.to_owned());
     }
 

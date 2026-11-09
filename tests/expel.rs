@@ -1,21 +1,19 @@
 mod helpers;
 
 use helpers::{
-    exec_pike, get_picodata_query_output, is_instance_running, run_cluster, CmdArguments,
-    CLUSTER_DIR, PLUGIN_NAME, TESTS_DIR,
+    exec_pike, get_picodata_query_output, is_instance_running, run_cluster, wait_instance_offline,
+    CmdArguments, CLUSTER_DIR, PLUGIN_NAME, TESTS_DIR,
 };
 use std::{
     fs,
     io::{BufRead, BufReader, Read},
     path::Path,
     process::{Command, Stdio},
-    thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 const TOTAL_INSTANCES: i32 = 4;
 const CLUSTER_START_TIMEOUT: Duration = Duration::from_secs(120);
-const INSTANCE_STOP_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn try_expel<const N: usize>(args: [&str; N]) -> bool {
     let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -61,25 +59,6 @@ fn instance_name(dir_name: &str) -> String {
         .to_str()
         .unwrap()
         .to_owned()
-}
-
-fn wait_instance_offline(instance_name: &str) {
-    let start = Instant::now();
-    loop {
-        let state = get_picodata_query_output(
-            Path::new(CLUSTER_DIR),
-            &format!("SELECT current_state FROM _pico_instance WHERE name = '{instance_name}';"),
-        );
-        if state.contains("Offline") {
-            return;
-        }
-
-        assert!(
-            start.elapsed() < INSTANCE_STOP_TIMEOUT,
-            "Timeout has reached. Instance '{instance_name}' did not become offline: {state}"
-        );
-        thread::sleep(Duration::from_millis(500));
-    }
 }
 
 fn assert_instance_expelled(instance_name: &str) {
