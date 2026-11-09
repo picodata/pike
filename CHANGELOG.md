@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Breaking changes
+
+- External plugins of a cluster started outside a plugin project are now stored in `<data_dir>/plugins` instead of `<data_dir>/cluster/plugins`. 
+  With a data directory created by a previous version `pike stop` keeps failing until `<data_dir>/cluster/plugins` is removed.
+
+### Fixed
+
+- `pike stop` no longer fails on a cluster started outside a plugin project with external plugins [#427](https://github.com/picodata/pike/issues/427)
+
 ## [6.0.1]
 
 ### Fixed

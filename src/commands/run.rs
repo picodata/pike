@@ -1460,8 +1460,9 @@ fn prepare_directory_with_plugins(params: &mut Params) -> anyhow::Result<Option<
 
     if params.topology.has_external_plugins() {
         // Нет родительского плагина, но есть внешние плагины.
-        // Готовим их в служебной директории кластера и используем её как --share-dir
-        let plugins_dir = params.get_cluster_dir().join("plugins");
+        // Готовим их рядом с директорией кластера и используем как --share-dir:
+        // `stop` считает инстансом каждую запись в `cluster/`.
+        let plugins_dir = params.plugin_path.join(&params.data_dir).join("plugins");
 
         fs::create_dir_all(&plugins_dir).with_context(|| {
             format!(
@@ -1561,6 +1562,7 @@ mod tests {
     use crate::commands::lib::LIB_EXT;
     use flate2::write::GzEncoder;
     use flate2::Compression;
+    use rstest::rstest;
     use std::cell::RefCell;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tar::Builder;
@@ -1573,6 +1575,78 @@ mod tests {
         let mut dir = std::env::temp_dir();
         dir.push(format!("pike-run-ut-{prefix}-{ts}"));
         dir
+    }
+
+    // The external plugin fixture uses shipping layout: my_plugin/0.1.0/manifest.yaml.
+    fn make_params_with_only_external_shipping_directory_plugin(
+        base: &Path,
+        data_dir: PathBuf,
+    ) -> Params {
+        let external_shipping_directory = base.join("my_plugin");
+        let external_plugin_version_directory = external_shipping_directory.join("0.1.0");
+        fs::create_dir_all(&external_plugin_version_directory).unwrap();
+        fs::write(
+            external_plugin_version_directory.join("manifest.yaml"),
+            "name: my_plugin\nversion: 0.1.0\n",
+        )
+        .unwrap();
+        let run_directory_without_plugin_project = base.join("run");
+        fs::create_dir_all(&run_directory_without_plugin_project).unwrap();
+
+        ParamsBuilder::default()
+            .plugin_path(run_directory_without_plugin_project)
+            .data_dir(data_dir)
+            .topology(Topology {
+                plugins: BTreeMap::from([(
+                    "my_plugin".to_string(),
+                    Plugin {
+                        path: Some(external_shipping_directory),
+                        ..Default::default()
+                    },
+                )]),
+                ..Default::default()
+            })
+            .build()
+            .unwrap()
+    }
+
+    // Relative data_dir is resolved from plugin_path; absolute data_dir is used directly.
+    // Both cases place external plugins beside cluster/.
+    #[rstest]
+    #[case::relative_data_dir(false, "custom/data", "run/custom/data")]
+    #[case::absolute_data_dir(true, "absolute_data", "absolute_data")]
+    fn prepare_directory_with_plugins_places_external_plugins_in_relative_and_absolute_data_dirs(
+        #[case] data_dir_is_absolute: bool,
+        #[case] configured_data_dir_path: &str,
+        #[case] expected_data_dir_relative_to_base: &str,
+    ) {
+        let base = tmp_dir("plugins_data_dirs");
+        let configured_data_dir = if data_dir_is_absolute {
+            base.join(configured_data_dir_path)
+        } else {
+            PathBuf::from(configured_data_dir_path)
+        };
+        assert_eq!(configured_data_dir.is_absolute(), data_dir_is_absolute);
+        let expected_data_dir = base.join(expected_data_dir_relative_to_base);
+        let mut params =
+            make_params_with_only_external_shipping_directory_plugin(&base, configured_data_dir);
+
+        let prepared_plugins_dir = prepare_directory_with_plugins(&mut params).unwrap();
+
+        assert_eq!(
+            prepared_plugins_dir,
+            Some(expected_data_dir.join("plugins"))
+        );
+        assert!(expected_data_dir
+            .join("plugins/my_plugin/0.1.0/manifest.yaml")
+            .exists());
+        assert!(!expected_data_dir.join("cluster/plugins").exists());
+        assert_eq!(
+            params.topology.plugins["my_plugin"].version.as_deref(),
+            Some("0.1.0")
+        );
+
+        fs::remove_dir_all(&base).unwrap();
     }
 
     fn capture_runner(
