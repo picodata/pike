@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [6.1.0]
+
 ### Added
 
 - Add `pike expel` command and `cluster::expel` API to expel an instance from the cluster
