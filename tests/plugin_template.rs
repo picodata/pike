@@ -1,6 +1,8 @@
 mod helpers;
 
-use helpers::{exec_pike, init_plugin};
+use helpers::{
+    assert_pike_build_dependency_resolves_to_local_pike_project, exec_pike, init_plugin,
+};
 use std::{fs, path::Path, process::Command};
 
 #[test]
@@ -45,6 +47,8 @@ fn test_plugin_run_tests() {
     let plugin_path = tmp_test_dir.join("plugin-template-tests");
 
     exec_pike(["plugin", "new", plugin_path.to_str().unwrap()]);
+
+    assert_pike_build_dependency_resolves_to_local_pike_project(&plugin_path);
 
     let output = Command::new("cargo")
         .arg("test")

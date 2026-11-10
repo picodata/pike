@@ -1,13 +1,11 @@
 mod helpers;
 
 use helpers::{
-    cleanup_dir, exec_pike, exec_pike_in, exec_pike_with_env_in, git_commit_all, git_head,
-    init_plugin, init_plugin_with_args, init_plugin_workspace, set_current_version_of_pike,
-    unpack_build_info, ArchivedBuildInfo, BuildType, PikeLogObserver, TestPluginInitParams,
-    LIB_EXT, TESTS_DIR,
+    cleanup_dir, exec_pike, exec_pike_with_env_in, git_commit_all, git_head, init_plugin,
+    init_plugin_with_args, init_plugin_workspace, unpack_build_info, ArchivedBuildInfo, BuildType,
+    PikeLogObserver, TestPluginInitParams, LIB_EXT, TESTS_DIR,
 };
 use std::{
-    ffi::OsStr,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -496,7 +494,6 @@ impl PikeLogObserver for ExpectedLogSubstrings {
 
 /// Creates the test plugin, points it to the local pike, builds it with `build_type`
 /// (so that `Cargo.lock` gets into the commit) and commits everything.
-/// After this, pike must be run from the plugin directory without `--plugin-path`.
 fn init_committed_pack_plugin(build_type: &BuildType) -> PathBuf {
     init_plugin(PACK_PLUGIN_NAME);
     let mut build_args = vec!["plugin", "build", "--plugin-path", PACK_PLUGIN_NAME];
@@ -513,7 +510,7 @@ fn init_committed_pack_plugin(build_type: &BuildType) -> PathBuf {
 fn test_pack_build_info_clean() {
     let plugin_dir = init_committed_pack_plugin(&BuildType::Release);
 
-    exec_pike_in(["plugin", "pack"], &plugin_dir);
+    exec_pike(["plugin", "pack", "--plugin-path", PACK_PLUGIN_NAME]);
 
     let release_dir = plugin_dir.join("target").join("release");
     let archive = find_archive(&release_dir, PACK_PLUGIN_NAME, VERSION);
@@ -549,7 +546,7 @@ fn test_pack_build_info_dirty() {
         .unwrap();
     writeln!(topology, "# build info test").unwrap();
 
-    exec_pike_in(["plugin", "pack"], &plugin_dir);
+    exec_pike(["plugin", "pack", "--plugin-path", PACK_PLUGIN_NAME]);
 
     let release_dir = plugin_dir.join("target").join("release");
     let archive = find_archive(&release_dir, PACK_PLUGIN_NAME, VERSION);
@@ -572,11 +569,10 @@ fn test_pack_build_info_dirty() {
 fn test_pack_build_info_uncommitted_cargo_lock() {
     // Committed before the first build: `Cargo.lock` is created by the build and is not in the commit.
     init_plugin(PACK_PLUGIN_NAME);
-    set_current_version_of_pike(OsStr::new(PACK_PLUGIN_NAME));
     let plugin_dir = Path::new(TESTS_DIR).join(PACK_PLUGIN_NAME);
     git_commit_all(&plugin_dir);
 
-    exec_pike_in(["plugin", "pack"], &plugin_dir);
+    exec_pike(["plugin", "pack", "--plugin-path", PACK_PLUGIN_NAME]);
 
     let release_dir = plugin_dir.join("target").join("release");
     let archive = find_archive(&release_dir, PACK_PLUGIN_NAME, VERSION);
@@ -599,7 +595,13 @@ fn test_pack_build_info_uncommitted_cargo_lock() {
 fn test_pack_build_info_debug() {
     let plugin_dir = init_committed_pack_plugin(&BuildType::Debug);
 
-    exec_pike_in(["plugin", "pack", "--debug"], &plugin_dir);
+    exec_pike([
+        "plugin",
+        "pack",
+        "--debug",
+        "--plugin-path",
+        PACK_PLUGIN_NAME,
+    ]);
 
     let debug_dir = plugin_dir.join("target").join("debug");
     let archive = find_archive(&debug_dir, PACK_PLUGIN_NAME, VERSION);
@@ -622,10 +624,15 @@ fn test_pack_build_info_debug() {
 fn test_pack_build_info_no_build_archive_name() {
     let plugin_dir = init_committed_pack_plugin(&BuildType::Release);
 
-    exec_pike_in(
-        ["plugin", "pack", "--no-build", "--archive-name", "custom"],
-        &plugin_dir,
-    );
+    exec_pike([
+        "plugin",
+        "pack",
+        "--no-build",
+        "--archive-name",
+        "custom",
+        "--plugin-path",
+        PACK_PLUGIN_NAME,
+    ]);
 
     let release_dir = plugin_dir.join("target").join("release");
     let build_info = unpack_build_info(
@@ -655,7 +662,7 @@ fn test_pack_build_info_workspace() {
     let ws_dir = Path::new(TESTS_DIR).join(WS_NAME);
     git_commit_all(&ws_dir);
 
-    exec_pike_in(["plugin", "pack"], &ws_dir);
+    exec_pike(["plugin", "pack", "--plugin-path", WS_NAME]);
 
     let release_dir = ws_dir.join("target").join("release");
     let expected = Some(ArchivedBuildInfo {
@@ -741,7 +748,7 @@ fn test_pack_git_not_found() {
 
     // With git available the archive gets build_info.yaml, so its absence below
     // is caused only by the missing git.
-    exec_pike_in(["plugin", "pack"], &plugin_dir);
+    exec_pike(["plugin", "pack", "--plugin-path", PACK_PLUGIN_NAME]);
     let release_dir = plugin_dir.join("target").join("release");
     let archive = find_archive(&release_dir, PACK_PLUGIN_NAME, VERSION);
     let build_info = unpack_build_info(
@@ -761,8 +768,14 @@ fn test_pack_git_not_found() {
     let path_without_git = path_without_git.canonicalize().unwrap();
 
     exec_pike_with_env_in(
-        ["plugin", "pack", "--no-build"],
-        &plugin_dir,
+        [
+            "plugin",
+            "pack",
+            "--no-build",
+            "--plugin-path",
+            PACK_PLUGIN_NAME,
+        ],
+        TESTS_DIR,
         &[("PATH", path_without_git.as_os_str())],
         None,
     );
