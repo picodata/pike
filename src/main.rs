@@ -6,6 +6,7 @@ use crate::commands::{
         DEFAULT_INSTANCE_ONLINE_TIMEOUT, DEFAULT_VSHARD_DISCOVERY_ENABLED,
         DEFAULT_VSHARD_DISCOVERY_TIMEOUT, DEFAULT_VSHARD_IDLE_TIMEOUT,
     },
+    status::OutputFormat,
     stop::{DEFAULT_STOP_SIGNAL, DEFAULT_STOP_TIMEOUT},
 };
 use anyhow::{bail, Context, Result};
@@ -204,7 +205,7 @@ enum Command {
         /// Signal used to stop the cluster instances.
         #[arg(
             long,
-            value_name = "SIGNAL", 
+            value_name = "SIGNAL",
             default_value_t = DEFAULT_STOP_SIGNAL,
             help = "Unix signal (e.g. SIGTERM, SIGKILL, SIGINT)"
         )]
@@ -245,6 +246,11 @@ enum Command {
             help = "Expel timeout in seconds"
         )]
         timeout: Timeout,
+    },
+    /// Cluster status information
+    Status {
+        #[command(subcommand)]
+        command: Status,
     },
     /// Remove all data files of previous cluster run
     Clean {
@@ -369,6 +375,28 @@ enum Config {
         plugin_name: Option<String>,
         #[arg(long, value_name = "BINARY_PATH", default_value = "picodata")]
         picodata_path: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum Status {
+    /// List cluster instances with status based on comparison with topology.toml
+    Instances {
+        /// Path to topology file, relative to --plugin-path
+        #[arg(short, long, value_name = "TOPOLOGY", default_value = "topology.toml")]
+        topology: PathBuf,
+        /// Path to data directory of the cluster
+        #[arg(long, value_name = "DATA_DIR", default_value = DEFAULT_DATA_DIR)]
+        data_dir: PathBuf,
+        /// Path to the plugin's project directory
+        #[arg(long, value_name = "PLUGIN_PATH", default_value = "./")]
+        plugin_path: PathBuf,
+        /// Specify path to picodata binary
+        #[arg(long, value_name = "BINARY_PATH", default_value = "picodata")]
+        picodata_path: PathBuf,
+        /// Output format
+        #[arg(long, value_name = "FORMAT", default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
     },
 }
 
@@ -577,6 +605,32 @@ fn main() -> Result<()> {
                 .unwrap();
             commands::expel::cmd(&params).context("failed to execute \"expel\" command")?;
         }
+        Command::Status { command } => match command {
+            Status::Instances {
+                topology,
+                data_dir,
+                plugin_path,
+                picodata_path,
+                format,
+            } => {
+                is_required_path_exists(&plugin_path, &topology, CARING_PIKE, 1);
+
+                run_child_killer();
+
+                let topology = commands::run::Topology::parse_toml(&plugin_path.join(topology))?;
+
+                let params = commands::status::ParamsBuilder::default()
+                    .topology(topology)
+                    .data_dir(data_dir)
+                    .plugin_path(plugin_path)
+                    .picodata_path(picodata_path)
+                    .format(format)
+                    .build()
+                    .unwrap();
+                commands::status::cmd(&params)
+                    .context("failed to execute \"status instances\" command")?;
+            }
+        },
         Command::Clean {
             data_dir,
             plugin_path,

@@ -1,12 +1,26 @@
 use crate::commands::lib::{run_query_in_picodata_admin, timeout::Timeout};
 use anyhow::{bail, Context, Result};
 use log::warn;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::{self, Display, Formatter};
 use std::os::unix::net::UnixStream;
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
 };
+
+/// Information from the `_pico_instance` system table for the `pike status` command
+/// See <https://docs.picodata.io/picodata/26.2/architecture/system_tables/#_pico_instance>
+#[derive(Debug, Deserialize)]
+pub struct ClusterInstance {
+    pub name: String,
+    pub tier: String,
+    pub replicaset_name: String,
+    pub current_state: InstanceState,
+    /// Computed by the Lua query (comparison of `raft_leader_id` with the `raft_id` column)
+    pub is_leader: bool,
+}
 
 const ADMIN_SOCKET_FILENAME: &str = "admin.sock";
 
@@ -45,7 +59,21 @@ for _, router in pairs(vshard.router.internal.routers) do \
     router:discovery_wakeup(); \
 end";
 
-fn parse_lua_json(lua_output: &str) -> Result<HashMap<String, u32>> {
+// Get picodata instance rows with the raft leader marked.
+// raft_leader_id = 0 means no leader
+const GET_CLUSTER_INSTANCES: &str = "\\lua\n\
+local json = require('json'); \
+local raft_leader_id = pico.raft_status().leader_id or 0; \
+local rows = setmetatable({}, json.array_mt); \
+for _, instance in box.space._pico_instance:pairs() do \
+    table.insert(rows, {name = instance.name, tier = instance.tier, \
+                        replicaset_name = instance.replicaset_name, \
+                        current_state = instance.current_state[1], \
+                        is_leader = raft_leader_id == instance.raft_id}); \
+end; \
+return json.encode(rows)";
+
+fn parse_lua_json<T: serde::de::DeserializeOwned>(lua_output: &str) -> Result<T> {
     let trimmed = lua_output.trim();
 
     // remove wrapping single quotes if present
@@ -58,18 +86,31 @@ fn parse_lua_json(lua_output: &str) -> Result<HashMap<String, u32>> {
     Ok(serde_json::from_str(json)?)
 }
 
-#[derive(Clone, Copy, Debug)]
+/// Instance state as reported by `_pico_instance`
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InstanceState {
     Online,
     Offline,
     Expelled,
 }
 
+impl Display for InstanceState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Online => "Online",
+            Self::Offline => "Offline",
+            Self::Expelled => "Expelled",
+        })
+    }
+}
+
 impl InstanceState {
+    #[must_use]
     pub fn is_online(self) -> bool {
         matches!(self, InstanceState::Online)
     }
 
+    #[must_use]
     pub fn is_expelled(self) -> bool {
         matches!(self, InstanceState::Expelled)
     }
@@ -190,6 +231,12 @@ impl<'a> InstanceSocketClient<'a> {
     /// Fetches state of the instance from admin socket.
     pub fn current_state(&self) -> Result<InstanceState> {
         self.get_parsed_lua_output(GET_INSTANCE_CURRENT_STATE)
+    }
+
+    /// Fetches all picodata instance rows with the raft leader marked
+    pub fn cluster_instances(&self) -> Result<Vec<ClusterInstance>> {
+        self.get_lua_single_line_output(GET_CLUSTER_INSTANCES)
+            .and_then(|output| parse_lua_json(&output))
     }
 
     // Fetches map of [replicaset_uuid, bucket_count] obtained from

@@ -895,7 +895,7 @@ impl PicodataInstance {
         Ok(())
     }
 
-    fn make_data_dir_name(id: u16) -> String {
+    pub(crate) fn make_data_dir_name(id: u16) -> String {
         format!("i{id}")
     }
 

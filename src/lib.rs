@@ -27,4 +27,15 @@ pub mod config {
     pub use crate::commands::config::apply::ParamsBuilder as ApplyParamsBuilder;
 }
 
+pub mod status {
+    pub use crate::commands::lib::instance_info::InstanceState;
+    pub use crate::commands::status::cmd as instances;
+    pub use crate::commands::status::collect;
+    pub use crate::commands::status::model::InstanceStatus;
+    pub use crate::commands::status::model::InstancesStatus;
+    pub use crate::commands::status::model::ProcessState;
+    pub use crate::commands::status::OutputFormat;
+    pub use crate::commands::status::ParamsBuilder as InstancesParamsBuilder;
+}
+
 pub mod helpers;
