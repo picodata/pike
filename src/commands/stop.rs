@@ -358,7 +358,7 @@ fn send_signal_and_poll(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::R
 }
 
 #[cfg(target_os = "linux")]
-fn is_zombie(pid: Pid) -> bool {
+pub(crate) fn is_zombie(pid: Pid) -> bool {
     use procfs::process::{ProcState, Process};
     // Returns true if the process doesn't exist or we can't read /proc.
     Process::new(pid.into())
