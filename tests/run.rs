@@ -902,58 +902,6 @@ fn run_with_external_plugin_directory() {
 }
 
 #[test]
-fn run_with_external_plugin_archive() {
-    let plugin_path = Path::new(PLUGIN_DIR);
-    init_plugin(PLUGIN_NAME);
-    build_plugin(&helpers::BuildType::Debug, "0.1.0", plugin_path);
-
-    // setup and pack external plugin
-    let ext_plugin_root = PathBuf::from("./tests/tmp_ext/external-plugin-1");
-    init_plugin_with_args(TestPluginInitParams::<String> {
-        name: "external-plugin-1".to_string(),
-        plugin_path: ext_plugin_root.join(""),
-        shared_target_path: "./tests/tmp_ext/ext_shared_target".into(),
-        working_dir: "./tests/tmp_ext".into(),
-        ..Default::default()
-    });
-    build_plugin(&helpers::BuildType::Release, "0.1.0", &ext_plugin_root);
-    let pack_args = ["plugin", "pack", "--plugin-path", "./external-plugin-1"];
-    exec_pike_in(pack_args, "./tests/tmp_ext");
-
-    // Find new-format archive
-    let ext_release_dir = Path::new("./tests/tmp_ext/external-plugin-1/target/release");
-    let ext_plugin_archive =
-        find_os_suffixed_archive(ext_release_dir, "external-plugin-1", "0.1.0");
-
-    let plugins = BTreeMap::from([
-        (PLUGIN_NAME.to_string(), Plugin::default()),
-        (
-            "external-plugin-1".to_string(),
-            Plugin {
-                path: Some(ext_plugin_archive),
-                ..Default::default()
-            },
-        ),
-    ]);
-    let params = make_ext_run_params(Path::new("./tests/tmp/test-plugin"), plugins)
-        .build()
-        .unwrap();
-
-    run(params).unwrap();
-
-    let cluster_started =
-        wait_cluster_start_completed(Path::new("./tests/tmp/test-plugin"), |state| {
-            assert_eq!(state.pico_instance.matches("Online").count(), 8);
-            assert_eq!(state.pico_plugin.matches("true").count(), 2);
-            true
-        });
-
-    exec_pike(["stop", "--plugin-path", PLUGIN_NAME]);
-
-    assert!(cluster_started);
-}
-
-#[test]
 fn run_with_external_plugin_archive_with_build_info() {
     let plugin_path = Path::new(PLUGIN_DIR);
     init_plugin(PLUGIN_NAME);
@@ -970,7 +918,10 @@ fn run_with_external_plugin_archive_with_build_info() {
     });
     build_plugin(&helpers::BuildType::Release, "0.1.0", &ext_plugin_root);
     git_commit_all(&ext_plugin_root);
-    exec_pike_in(["plugin", "pack"], &ext_plugin_root);
+    exec_pike_in(
+        ["plugin", "pack", "--plugin-path", "./external-plugin-1"],
+        "./tests/tmp_ext",
+    );
 
     let ext_release_dir = ext_plugin_root.join("target").join("release");
     let ext_plugin_archive =
