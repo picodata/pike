@@ -17,6 +17,7 @@ use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4};
+use std::ops::RangeInclusive;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -200,6 +201,50 @@ impl Topology {
 
     fn has_external_plugins(&self) -> bool {
         self.plugins.values().any(Plugin::is_external)
+    }
+
+    /// Numbers of the instance directories (`i<N>`) of every tier, in the
+    /// order `run` starts the instances: tiers in map order, `replicasets *
+    /// replication_factor` instances per tier, one shared counter from 1.
+    ///
+    /// For example, a topology of
+    ///
+    /// ```toml
+    /// [tier.storage]
+    /// replicasets = 1
+    /// replication_factor = 2
+    ///
+    /// [tier.router]
+    /// replicasets = 2
+    /// replication_factor = 1
+    /// ```
+    ///
+    /// numbers the `router` instances `i1`, `i2` and the `storage`
+    /// instances `i3`, `i4` (tiers are ordered alphabetically).
+    #[must_use]
+    pub fn tier_instance_ids(&self) -> Vec<(&str, RangeInclusive<u16>)> {
+        // an instance can belong to only one tier
+        let mut tiers = Vec::with_capacity(self.tiers.len());
+        let mut id = 0_u16;
+
+        for (tier_name, tier) in &self.tiers {
+            let count = u16::from(tier.replicasets * tier.replication_factor);
+            let instance_ids = (id + 1)..=(id + count);
+            id += count;
+            tiers.push((tier_name.as_str(), instance_ids));
+        }
+
+        tiers
+    }
+
+    /// The tier of the instance directory `i<id>`. Returns None if id lies
+    /// beyond the last instance of the topology.
+    #[must_use]
+    pub fn tier_of_instance(&self, id: u16) -> Option<&str> {
+        self.tier_instance_ids()
+            .into_iter()
+            .find(|(_, instance_ids)| instance_ids.contains(&id))
+            .map(|(tier_name, _)| tier_name)
     }
 }
 
@@ -1315,15 +1360,10 @@ fn run_single_instance(
         .expect("unreachable: instance path should be convertible to str")[1..]
         .parse::<u16>()?;
 
-    let mut instance_id_counter = 0;
-    let mut instance_tier_name = &String::new();
-    for (tier_name, tier) in &params.topology.tiers {
-        instance_id_counter += u16::from(tier.replicasets * tier.replication_factor);
-        if instance_id <= instance_id_counter {
-            instance_tier_name = tier_name;
-            break;
-        }
-    }
+    let instance_tier_name = params
+        .topology
+        .tier_of_instance(instance_id)
+        .unwrap_or_default();
 
     let pico_instance = PicodataInstance::spawn_and_wait_online(
         instance_id,
@@ -1418,12 +1458,10 @@ fn start_instances_in_tiers(
 ) -> anyhow::Result<Vec<PicodataInstance>> {
     let cluster_dir = params.get_cluster_dir();
     let mut picodata_processes = vec![];
-    let mut instance_id = 0;
 
-    for (tier_name, tier) in &params.topology.tiers {
+    for (tier_name, instance_ids) in params.topology.tier_instance_ids() {
         info!("Starting instances in tier '{tier_name}' ...");
-        for _ in 0..(tier.replicasets * tier.replication_factor) {
-            instance_id += 1;
+        for instance_id in instance_ids {
             let data_dir_name = PicodataInstance::make_data_dir_name(instance_id);
 
             if get_active_socket_path(&cluster_dir, &data_dir_name).is_some() {
@@ -1566,6 +1604,50 @@ mod tests {
     use std::cell::RefCell;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tar::Builder;
+
+    // router is declared after storage, but the tiers are ordered by name;
+    // every tier gets replicasets * replication_factor numbers and the
+    // counter is shared: router -> i1, i2; storage -> i3, i4
+    fn two_tier_topology() -> Topology {
+        Topology {
+            tiers: BTreeMap::from([
+                (
+                    "storage".to_string(),
+                    Tier {
+                        replicasets: 1,
+                        replication_factor: 2,
+                    },
+                ),
+                (
+                    "router".to_string(),
+                    Tier {
+                        replicasets: 2,
+                        replication_factor: 1,
+                    },
+                ),
+            ]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn tier_instance_ids_number_tiers_alphabetically_with_shared_counter() {
+        assert_eq!(
+            two_tier_topology().tier_instance_ids(),
+            vec![("router", 1..=2), ("storage", 3..=4)]
+        );
+    }
+
+    #[test]
+    fn tier_of_instance_maps_ids_to_tiers() {
+        let topology = two_tier_topology();
+
+        assert_eq!(topology.tier_of_instance(1), Some("router"));
+        assert_eq!(topology.tier_of_instance(4), Some("storage"));
+        // ids beyond the instances of the topology have no tier
+        assert_eq!(topology.tier_of_instance(0), None);
+        assert_eq!(topology.tier_of_instance(5), None);
+    }
 
     fn tmp_dir(prefix: &str) -> PathBuf {
         let ts = SystemTime::now()
