@@ -15,10 +15,18 @@ pub const LIB_EXT: &str = "dylib";
 
 // Get output path from env variable to get path up until debug/ or release/ folder
 fn get_output_path() -> PathBuf {
-    Path::new(&env::var("OUT_DIR").unwrap())
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    profile_dir_from_out_dir(&out_dir).unwrap().to_path_buf()
+}
+
+// cargo 1.100 moved the build dir one level deeper (`build/<pkg>/<hash>` instead of
+// `build/<pkg>-<hash>`), so resolve the profile dir via the `build` entry instead of
+// counting a fixed depth - this works for both layouts
+fn profile_dir_from_out_dir(out_dir: &Path) -> Option<&Path> {
+    out_dir
         .ancestors()
-        .take(4)
-        .collect()
+        .find(|path| path.ends_with("build"))
+        .and_then(Path::parent)
 }
 
 #[derive(Debug, Builder)]
@@ -259,4 +267,33 @@ pub fn main(params: &Params) {
     // version is changed
     println!("cargo::rerun-if-changed=Cargo.toml");
     println!("cargo::rerun-if-changed={MANIFEST_TEMPLATE_NAME}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profile_dir_flat_layout() {
+        let out_dir = Path::new("/repo/target/debug/build/my_plugin-abc123/out");
+        assert_eq!(
+            profile_dir_from_out_dir(out_dir),
+            Some(Path::new("/repo/target/debug"))
+        );
+    }
+
+    #[test]
+    fn profile_dir_nested_layout() {
+        let out_dir = Path::new("/repo/target/debug/build/my_plugin/abc123/out");
+        assert_eq!(
+            profile_dir_from_out_dir(out_dir),
+            Some(Path::new("/repo/target/debug"))
+        );
+    }
+
+    #[test]
+    fn profile_dir_no_build_ancestor() {
+        let out_dir = Path::new("/repo/target/debug/my_plugin/abc123/out");
+        assert_eq!(profile_dir_from_out_dir(out_dir), None);
+    }
 }
