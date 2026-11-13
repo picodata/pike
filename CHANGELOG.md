@@ -6,9 +6,11 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+## [6.1.1]
+
 ### Fixed
 
-- Fix plugin assembly for cargo >= 1.100, which moved the build dir one level deeper (`build/<pkg>/<hash>` instead of `build/<pkg>-<hash>`); the plugin ended up inside `build/` and `cargo pike run` failed with "plugin directory ./target/debug/<name> does not exist"
+- Fix plugin assembly for cargo >= 1.100, which moved the build dir one level deeper (`build/<pkg>/<hash>` instead of `build/<pkg>-<hash>`)
 
 ## [6.1.0]
 
