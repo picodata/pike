@@ -222,7 +222,7 @@ fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::R
 }
 
 #[cfg(not(target_os = "linux"))]
-fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Duration) -> anyhow::Result<()> {
+fn send_signal_and_wait(pid: Pid, signal: Signal, timeout: Timeout) -> anyhow::Result<()> {
     send_signal_and_poll(pid, signal, timeout)
 }
 
