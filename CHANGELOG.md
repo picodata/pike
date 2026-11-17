@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Fixed
+
+- Stop pulling the unmaintained `chrono` crate into the dependency tree by disabling procfs default features
+
 ## [6.2.0]
 
 ### Added

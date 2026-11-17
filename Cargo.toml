@@ -43,7 +43,7 @@ ureq = { version = "3.3.0", features = ["json", "gzip"], default-features = fals
 minijinja = "3.0.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = "0.18.0"
+procfs = { version = "0.18.0", default-features = false }
 
 [lib]
 name = "pike"
