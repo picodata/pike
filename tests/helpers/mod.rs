@@ -1,9 +1,16 @@
 #![allow(unused)]
 
+mod pike_dependency;
+
+pub use pike_dependency::{
+    assert_pike_build_dependency_resolves_to_local_pike_project,
+    rewrite_project_and_workspace_member_pike_build_dependencies_to_local_pike_project,
+};
+
+use anyhow::{Context, Result};
 use constcat::concat;
 use flate2::bufread::GzDecoder;
 use log::info;
-use regex::Regex;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Read, Write};
@@ -198,8 +205,9 @@ where
         .join("target");
 
     // Compute relative path for shared target directory
-    let target_rel_symlink = compute_relative_symlink(&shared_target_path, &plugin_target_dir);
-    dbg!(target_rel_symlink);
+    let relative_path_from_plugin_target_to_shared_target =
+        compute_relative_path_from_base_to_target(&plugin_target_dir, &shared_target_path);
+    dbg!(relative_path_from_plugin_target_to_shared_target);
 
     symlink(shared_target_path, init_params.plugin_path.join("target")).unwrap();
 }
@@ -247,27 +255,25 @@ pub fn validate_symlink(symlink_path: &PathBuf) -> bool {
     false
 }
 
-/// Computes relative symlink to path `src_path`. `dst_path` is future symlink placement.
-/// Both paths must be absolute.
-pub fn compute_relative_symlink<SrcP, DstP>(src_path: SrcP, dst_path: DstP) -> PathBuf
-where
-    SrcP: AsRef<Path>,
-    DstP: AsRef<Path>,
-{
-    let (src_path, dst_path) = (src_path.as_ref(), dst_path.as_ref());
-    let common_prefix = src_path
+/// Computes the relative path from `base_path` to `target_path`.
+/// Both paths must be absolute, and `base_path` is treated as a directory.
+pub fn compute_relative_path_from_base_to_target(base_path: &Path, target_path: &Path) -> PathBuf {
+    let common_prefix = target_path
         .components()
-        .zip(dst_path.components())
+        .zip(base_path.components())
         .map_while(|(a, b)| Option::from(a).filter(|a| a == &b))
         .collect::<PathBuf>();
-    let shared_target_part = src_path.strip_prefix(&common_prefix).unwrap().components();
-    dst_path
+    let target_path_suffix = target_path
+        .strip_prefix(&common_prefix)
+        .unwrap()
+        .components();
+    base_path
         .strip_prefix(&common_prefix)
         .unwrap()
         .components()
-        .map(|_| PathBuf::from(".."))
-        .collect::<PathBuf>()
-        .join(shared_target_part)
+        .map(|_| Component::ParentDir)
+        .chain(target_path_suffix)
+        .collect()
 }
 
 pub fn assert_path_existance(path: &Path, must_be_symlink: bool) {
@@ -511,22 +517,6 @@ pub fn set_default_tier_bucket_count(plugin_path: &Path, bucket_count: u32) {
     .unwrap();
 }
 
-pub fn set_current_version_of_pike(plugin_path: &OsStr) {
-    let cargo_path = Path::new(TESTS_DIR).join(plugin_path).join("Cargo.toml");
-    let Ok(cargo_content) = fs::read_to_string(&cargo_path) else {
-        return;
-    };
-    let re = Regex::new(r"picodata-pike =.*").unwrap();
-    let cargo_with_fixed_pike =
-        re.replace_all(&cargo_content, r#"picodata-pike = { path = "../../.." }"#);
-    let file = fs::OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .open(cargo_path)
-        .unwrap();
-    writeln!(&file, "{cargo_with_fixed_pike}").unwrap();
-}
-
 pub fn exec_pike<I, S>(args: I)
 where
     I: IntoIterator<Item = S>,
@@ -565,16 +555,26 @@ pub fn exec_pike_with_env_in<I, S, WD>(
 {
     let root_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let args: Vec<S> = args.into_iter().collect();
+    let work_dir = work_dir.as_ref();
+    let should_prepare_project = !args.iter().any(|argument| {
+        matches!(
+            argument.as_ref().to_str(),
+            Some("--help" | "-h" | "--version" | "-V")
+        )
+    });
 
     dbg!(&work_dir, &args);
 
-    if let Some(plugin_path_pos) = args.iter().position(|a| a.as_ref() == "--plugin-path") {
-        set_current_version_of_pike(args[plugin_path_pos + 1].as_ref());
+    if should_prepare_project {
+        prepare_existing_pike_build_dependencies_before_pike_command(&args, work_dir)
+            .unwrap_or_else(|error| {
+                panic!("failed to prepare project before pike command: {error:#}")
+            });
     }
 
     let mut pike_child = Command::new(format!("{root_dir}/target/debug/cargo-pike"))
         .arg("pike")
-        .args(args)
+        .args(&args)
         .envs(envs.iter().copied())
         .current_dir(work_dir)
         .stdout(Stdio::piped())
@@ -600,13 +600,104 @@ pub fn exec_pike_with_env_in<I, S, WD>(
     }
 
     assert!(status.success(), "pike run failed");
+    if should_prepare_project {
+        prepare_pike_build_dependencies_after_plugin_creation(&args, work_dir).unwrap_or_else(
+            |error| panic!("failed to prepare project after pike command: {error:#}"),
+        );
+    }
+}
+
+fn resolve_plugin_project_directory_from_pike_arguments(
+    pike_arguments: &[impl AsRef<OsStr>],
+    working_directory: &Path,
+) -> Result<PathBuf> {
+    for (argument_index, argument) in pike_arguments.iter().map(AsRef::as_ref).enumerate() {
+        if argument == "--plugin-path" {
+            let plugin_path = pike_arguments
+                .get(argument_index + 1)
+                .map(AsRef::as_ref)
+                .filter(|value| !value.is_empty() && !value.as_encoded_bytes().starts_with(b"-"))
+                .context("--plugin-path requires a path value")?;
+            return Ok(working_directory.join(plugin_path));
+        }
+        if let Some(plugin_path) = argument
+            .to_str()
+            .and_then(|argument| argument.strip_prefix("--plugin-path="))
+        {
+            anyhow::ensure!(
+                !plugin_path.is_empty(),
+                "--plugin-path requires a path value"
+            );
+            return Ok(working_directory.join(plugin_path));
+        }
+    }
+    Ok(working_directory.to_path_buf())
+}
+
+fn prepare_existing_pike_build_dependencies_before_pike_command(
+    pike_arguments: &[impl AsRef<OsStr>],
+    working_directory: &Path,
+) -> Result<()> {
+    let plugin_subcommand = match pike_arguments {
+        [pike_subcommand, plugin_subcommand, ..] if pike_subcommand.as_ref() == "plugin" => {
+            plugin_subcommand.as_ref().to_str()
+        }
+        _ => None,
+    };
+    if matches!(plugin_subcommand, Some("new" | "init" | "add")) {
+        return Ok(());
+    }
+    let plugin_directory =
+        resolve_plugin_project_directory_from_pike_arguments(pike_arguments, working_directory)?;
+    let cargo_path = plugin_directory.join("Cargo.toml");
+    let requires_cargo_project = matches!(plugin_subcommand, Some("build" | "pack"));
+    if requires_cargo_project
+        || cargo_path
+            .try_exists()
+            .with_context(|| format!("failed to check {}", cargo_path.display()))?
+    {
+        rewrite_project_and_workspace_member_pike_build_dependencies_to_local_pike_project(
+            plugin_directory.as_os_str(),
+        );
+    }
+    Ok(())
+}
+
+fn prepare_pike_build_dependencies_after_plugin_creation(
+    pike_arguments: &[impl AsRef<OsStr>],
+    working_directory: &Path,
+) -> Result<()> {
+    let plugin_directory = match pike_arguments {
+        [pike_subcommand, plugin_subcommand, plugin_subcommand_arguments @ ..]
+            if pike_subcommand.as_ref() == "plugin" =>
+        {
+            match plugin_subcommand.as_ref().to_str() {
+                Some("new") => {
+                    let plugin_path = plugin_subcommand_arguments
+                        .iter()
+                        .map(AsRef::as_ref)
+                        .find(|argument| !argument.as_encoded_bytes().starts_with(b"-"))
+                        .context("plugin new requires a project path")?;
+                    working_directory.join(plugin_path)
+                }
+                Some("init") => working_directory.to_path_buf(),
+                Some("add") => resolve_plugin_project_directory_from_pike_arguments(
+                    pike_arguments,
+                    working_directory,
+                )?,
+                _ => return Ok(()),
+            }
+        }
+        _ => return Ok(()),
+    };
+    rewrite_project_and_workspace_member_pike_build_dependencies_to_local_pike_project(
+        plugin_directory.as_os_str(),
+    );
+    Ok(())
 }
 
 /// Stages and commits every file of the git repository at `dir`,
 /// independent of the global git config.
-///
-/// After the commit run pike without `--plugin-path`: otherwise
-/// [`set_current_version_of_pike`] rewrites `Cargo.toml` and the tree becomes dirty.
 pub fn git_commit_all(dir: &Path) {
     run_git_successfully(dir, &["add", "-A"]);
     run_git_successfully(
