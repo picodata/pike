@@ -11,6 +11,7 @@ use nix::unistd::Pid;
 use rand::RngExt;
 use serde::Deserialize;
 use serde_norway::{Mapping, Value};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsStr;
 use std::fs;
@@ -130,6 +131,45 @@ impl Plugin {
     }
 }
 
+// Compares plugin version directory names: numeric dot-separated components
+// are compared as numbers, so "1.0.10" is newer than "1.0.9" (in
+// lexicographic order it is the other way around). A bare component
+// outranks the same number with a suffix: "1.0.10" > "1.0.10-rc.1".
+// Names without numeric components keep the lexicographic order.
+fn version_component(s: &str) -> Option<(u64, &str)> {
+    let digits = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    if digits == 0 {
+        return None;
+    }
+    let number = s[..digits].parse().ok()?;
+    Some((number, &s[digits..]))
+}
+
+fn version_cmp(a: &str, b: &str) -> Ordering {
+    let mut ia = a.split('.');
+    let mut ib = b.split('.');
+    loop {
+        let ordering = match (
+            ia.next().and_then(version_component),
+            ib.next().and_then(version_component),
+        ) {
+            (Some((x, xs)), Some((y, ys))) => match (x.cmp(&y), xs.is_empty(), ys.is_empty()) {
+                (Ordering::Equal, true, true) => Ordering::Equal,
+                (Ordering::Equal, true, false) => Ordering::Greater,
+                (Ordering::Equal, false, true) => Ordering::Less,
+                (Ordering::Equal, false, false) => xs.cmp(ys),
+                (other, _, _) => other,
+            },
+            // a component is not numeric or one name ended earlier:
+            // the names are not plain dotted versions, compare as strings
+            _ => return a.cmp(b),
+        };
+        if ordering != Ordering::Equal {
+            return ordering;
+        }
+    }
+}
+
 #[derive(Default, Debug, Deserialize, Clone)]
 pub struct Topology {
     #[serde(rename = "tier")]
@@ -186,7 +226,12 @@ impl Topology {
             let mut versions: Vec<_> = fs::read_dir(current_plugin_dir)?
                 .map(|r| r.unwrap())
                 .collect();
-            versions.sort_by_key(fs::DirEntry::path);
+            versions.sort_by(
+                |a, b| match (a.file_name().to_str(), b.file_name().to_str()) {
+                    (Some(a), Some(b)) => version_cmp(a, b),
+                    _ => a.path().cmp(&b.path()),
+                },
+            );
             let newest_version = versions
                 .last()
                 .unwrap()
@@ -1647,6 +1692,40 @@ mod tests {
         // ids beyond the instances of the topology have no tier
         assert_eq!(topology.tier_of_instance(0), None);
         assert_eq!(topology.tier_of_instance(5), None);
+    }
+
+    #[test]
+    fn find_plugin_versions_picks_newest_version() {
+        let plugins_dir = tmp_dir("plugin-versions");
+        for version in ["1.0.0", "1.0.9", "1.0.10-rc.1", "1.0.10"] {
+            fs::create_dir_all(plugins_dir.join("radix").join(version)).unwrap();
+        }
+
+        let mut topology = Topology::default();
+        topology
+            .plugins
+            .insert("radix".to_string(), Plugin::default());
+
+        topology.find_plugin_versions(&plugins_dir).unwrap();
+
+        assert_eq!(
+            topology.plugins["radix"].version,
+            Some("1.0.10".to_string())
+        );
+
+        fs::remove_dir_all(&plugins_dir).unwrap();
+    }
+
+    #[test]
+    fn version_cmp_orders_dotted_numbers() {
+        assert_eq!(version_cmp("1.0.9", "1.0.10"), Ordering::Less);
+        assert_eq!(version_cmp("1.0.10", "1.0.9"), Ordering::Greater);
+        assert_eq!(version_cmp("1.0.10", "1.0.10"), Ordering::Equal);
+        // a bare number outranks the same number with a suffix
+        assert_eq!(version_cmp("1.0.10", "1.0.10-rc.1"), Ordering::Greater);
+        assert_eq!(version_cmp("1.0.10-rc.1", "1.0.9"), Ordering::Greater);
+        // names without numeric components keep the lexicographic order
+        assert_eq!(version_cmp("nightly", "1.0.10"), Ordering::Greater);
     }
 
     fn tmp_dir(prefix: &str) -> PathBuf {
