@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](http://keepachangelog.com/) and this p
 
 ## [UNRELEASED]
 
+### Fixed
+
+- Changed plugin version selection to compare version numbers numerically: in lexicographic order `1.0.9` was newer than `1.0.10`
+
 ## [6.2.1]
 
 ### Fixed
